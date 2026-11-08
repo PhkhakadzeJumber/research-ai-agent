@@ -1,0 +1,24 @@
+# Secrets: never commit real keys (commit .env.example with names only)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Node / frontend
+node_modules/
+dist/
+
+# Local data and caches
+*.sqlite3
+.cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
