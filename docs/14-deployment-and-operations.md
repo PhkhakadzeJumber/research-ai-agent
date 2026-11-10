@@ -74,7 +74,7 @@ Rollback = route traffic to the previous revision.
 
 | Signal | Alert when |
 |---|---|
-| Daily LLM spend (from call tables) | Above the daily cap (e.g. $X/day, set by the team) |
+| Daily LLM spend (from call tables) | Above the daily cap (e.g. $X/day, set by you) |
 | Investigation failure rate | >20% in an hour |
 | Source error rate (per source) | Sustained errors (a source is down; the coverage report will show it) |
 | Verifier failure rate | Sudden rise (prompt regression) |

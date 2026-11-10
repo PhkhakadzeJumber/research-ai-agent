@@ -21,7 +21,7 @@ Small and carefully built: about 25–35 cases in total, in the demo domain (AI/
 
 | Set | How it's built | Ground truth |
 |---|---|---|
-| **Known prior work (~12)** | Take recent real papers. A teammate rewrites each paper's core idea as a "user idea" from a summary, with different terminology | The source paper + 2–5 human-labelled related papers. The expected verdict is "previously investigated" |
+| **Known prior work (~12)** | Take recent real papers. Rewrite each paper's core idea as a "user idea" with different terminology. Working solo, avoid copying the paper's wording: write the rewrite from a short summary a few days after reading the paper, without looking at the abstract, and check that the key terms differ. A classmate or supervisor can write some of them, if available | The source paper + 2–5 human-labelled related papers. The expected verdict is "previously investigated" |
 | **Date-cutoff twin (same ~12)** | Run the same cases with search restricted to before the source paper's date | Should *not* be "previously investigated" unless real earlier work exists. Tests both directions |
 | **Vague ideas (~4)** | Deliberately underspecified ideas | Expected vagueness flags and sensible questions |
 | **Infeasible for profile (~4)** | E.g. "pretrain a large model from scratch" + undergraduate + T0 | Expected "not feasible" + useful simplifications |
@@ -55,7 +55,7 @@ Small and carefully built: about 25–35 cases in total, in the demo domain (AI/
 | Grounding rate | Share of candidates whose inspiration quotes verify **and** actually state the limitation/gap claimed | Partly (verification automatic; "actually states" by sampled human check) |
 | Planted rejection rate | Share of planted known ideas rejected as previously investigated or incremental | Yes |
 | Constraint compliance | Share of finalists whose requirements respect hard constraints | Yes (from feasibility fields) + spot check |
-| Finalist quality | Blinded human rubric (1–5): specificity, grounding, significance, feasibility, novelty plausibility. 2 raters; report agreement | Human |
+| Finalist quality | Blinded human rubric (1–5): specificity, grounding, significance, feasibility, novelty plausibility. Rated **blind**: all systems' outputs shuffled and anonymized before scoring. You are the main rater; ask a supervisor or classmate to rate a subset if possible and report the agreement. Otherwise report the single-rater limitation | Human |
 | Diversity | Number of distinct origin strategies and subtopics among finalists | Yes |
 | Comparison vs B1/B2 | The same rubric applied blind to B1/B2 suggestions | Human |
 | Time-travel hit rate (stretch) | Share of finalists matching later-published work | Human-assisted |

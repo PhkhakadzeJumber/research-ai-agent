@@ -35,7 +35,7 @@ In both modes the output isn't prose. It's a **structured research workspace**: 
 
 ## 5. Existing tools and research agents
 
-> These entries are from the team's background knowledge. Verify each one before citing it in our final report, which is Eureka's own rule applied to us.
+> These entries are from background knowledge, not a fresh search. Verify each one before citing it in our final report, which is Eureka's own rule applied to us.
 
 | Tool / system | Strength | Gap Eureka addresses |
 |---|---|---|
@@ -79,4 +79,4 @@ In both modes the output isn't prose. It's a **structured research workspace**: 
 2. Measured improvement over two baselines (plain Claude; Claude + basic RAG) on our evaluation set. Where a baseline ties or wins, we say so.
 3. Zero fabricated references in evaluation runs (checked automatically).
 4. A Mode 2 run for an undergraduate profile produces at least 2 candidates that a human reviewer rates as grounded and feasible.
-5. Clean architecture that the team can explain: every agent's existence is justified.
+5. Clean architecture that can be explained in a presentation: every agent's existence is justified.

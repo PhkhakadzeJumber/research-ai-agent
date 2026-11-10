@@ -12,7 +12,7 @@
 
 React + TypeScript + Vite, Tailwind CSS + a component library (e.g. shadcn/ui), TanStack Query for data fetching, the native EventSource API for SSE, Cytoscape.js for the evidence graph, and a simple chart library for funnels and trends.
 
-Alternatives: Next.js (server rendering isn't needed); Streamlit (fastest to build, but looks like a demo and handles a multi-view workspace poorly). **Fallback:** if no one on the team is comfortable with React, use Streamlit for the MVP and accept the UX limits.
+Alternatives: Next.js (server rendering isn't needed); Streamlit (fastest to build, but looks like a demo and handles a multi-view workspace poorly). **Solo decision:** React gives the best workspace, but costs the most time. If you're not already fluent in React, start with Streamlit for the MVP (it's also cut line 4 in doc 15) and move to React later. The backend API is the same either way, so the switch doesn't touch the agents.
 
 ## 3. Screens
 
@@ -126,7 +126,7 @@ Exports include the coverage report and the "not a guarantee of originality" not
 
 ## 5. MVP vs later
 
-| MVP (weeks 2–3) | Week 4 if time allows | Later |
+| MVP (week 4 in the solo roadmap) | If time allows after the MVP | Later |
 |---|---|---|
 | Home with two entry points; both forms; complexity + constraints | Comparison view | Ask panel |
 | Clarification | Proposal view + Markdown export | Landscape view |

@@ -110,9 +110,9 @@ Paper reading dominates the cost. One paper read ≈ 3k input + 0.8k output toke
 
 The paper-analysis cache makes repeated runs in the same field much cheaper.
 
-### 7.2 Decision for the team
+### 7.2 Decision to make
 
-**Whether to use a cheaper model** (e.g. Haiku 5.5) for the Paper Reader and relevance screening is a team decision. Make it after measuring extraction quality on the 10 hand-labelled papers (doc 13). If the quality drop is small, the savings are large; if not, keep Opus.
+**Whether to use a cheaper model** (e.g. Haiku 5.5) for the Paper Reader and relevance screening is a decision to make after measuring extraction quality on the 10 hand-labelled papers (doc 13). If the quality drop is small, the savings are large; if not, keep Opus.
 
 ### 7.3 Controls
 

@@ -16,20 +16,20 @@
 | 10 | Signals misused as evidence | Scientific reliability | Low (with controls) | Separate storage; verifier rejects tier-3 items in evidence; UI labels |
 | 11 | Complexity "Beginner" yields trivial ideas | Usefulness | Medium | Meaningful-minimum standard; same evaluation as other levels; rubric check |
 | 12 | Small evaluation set | Unconvincing results | High | Clever construction (known paper, date cutoff, planted candidates), ablations, honest framing |
-| 13 | Scope creep (two modes in 4 weeks) | Nothing finished | High | Strict MVP; feature freeze on day 24; extensions in order; Workflow A first, then B reuses it |
+| 13 | Scope creep (two modes, one person, 4 weeks) | Nothing finished | High | Strict MVP; weekly cut lines (doc 15 §2.5); feature freeze in week 4; Workflow A first, then B reuses it; Claude Code for boilerplate |
 | 14 | Prompt injection via paper text | Manipulated outputs | Low | Delimiters, preamble rule, schema-only outputs, no dangerous tools, verifier |
 | 15 | Cloud Run throttles background runs | Stuck investigations | Medium | CPU always allocated + min instances in demos; resumable stages; Cloud Tasks later |
 | 16 | Key/account setup problems (e.g. key not workspace-scoped, Semantic Scholar key delay) | Blocked development | Medium | Day-1 checklist: workspace-scoped Anthropic key, Semantic Scholar key request, GCP project with billing |
 
-## 2. Open questions for the team
+## 2. Open questions
 
-These are decisions we should make together. Recommendations are included.
+Decisions still to make. Recommendations are included.
 
 | # | Question | Options | Recommendation |
 |---|---|---|---|
-| 1 | Demo domain for the MVP and evaluation | AI/ML/NLP · Robotics · Biomedical | **AI/ML/NLP**: arXiv full text, matches the course, the team knows it |
+| 1 | Demo domain for the MVP and evaluation | AI/ML/NLP · Robotics · Biomedical | **AI/ML/NLP**: arXiv full text, matches the course, familiar ground |
 | 2 | Model for the high-volume roles (Paper Reader, relevance screening) | Opus 5.5 for everything · cheaper model (Haiku 5.5) | Decide after measuring extraction quality on 10 labelled papers (week 2) |
-| 3 | Frontend stack | React · Streamlit | React if anyone on the team knows it; otherwise Streamlit for the MVP |
+| 3 | Frontend stack | React · Streamlit | React only if already fluent; otherwise **Streamlit** for the MVP (recommended solo; see doc 15 cut lines) |
 | 4 | Embeddings in production | Local SPECTER2 · Vertex AI embeddings | Vertex AI in the cloud (syllabus + no model in the container); local for development/tests |
 | 5 | LLM billing | Anthropic API key · Claude on Vertex AI (Google Cloud credits) | Anthropic key by default; Vertex if you have education credits |
 | 6 | Should Mode 2 auto-generate a proposal for the top finalist? | Auto · on request | On request (saves cost; the user picks) |
@@ -39,12 +39,12 @@ These are decisions we should make together. Recommendations are included.
 | 10 | Authentication for the demo | None · Firebase Auth · IAP | IAP or Firebase Auth; never fully public without per-user caps |
 | 11 | Budget defaults (doc 05) | — | Start with the table in doc 05; tune after the first 10 real runs |
 | 12 | Coverage thresholds for "Supported opportunity" | — | ≥150 screened, ≥25 read, ≥3 sources, saturation; revisit after the evaluation |
-| 13 | Team roles and ownership | — | Assign R/A/F/E owners (doc 15) in the first meeting |
+| 13 | Second rater for the human evaluation | Supervisor · classmate · none | Ask a supervisor or classmate to rate a subset blind; otherwise report the single-rater limitation (doc 13) |
 | 14 | Language support | English only · multilingual | English only for the MVP; listed as a blind spot |
 
 ## 3. Assumptions we're making
 
-- The team has ~4 weeks and 3–4 people.
+- One person builds Eureka, in ~4 weeks, with Claude Code as a development aid.
 - A Google Cloud project with billing (or credits) is available.
 - The Anthropic budget is enough for development + evaluation (estimate it after week 1 measurements).
 - Academic APIs stay accessible under their current free terms.

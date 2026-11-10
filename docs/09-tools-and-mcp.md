@@ -51,7 +51,7 @@ Build a small **"eureka-mcp" server** that exposes Eureka's capabilities to any 
 
 Why it's worthwhile:
 
-1. **Team productivity.** While developing, the team can use Eureka's search from Claude Code.
+1. **Developer productivity.** While developing, you can use Eureka's search from Claude Code.
 2. **Interoperability.** Other agents (or other student projects) can reuse Eureka.
 3. **A clean course demonstration** of MCP, with a real purpose.
 

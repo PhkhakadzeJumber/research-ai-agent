@@ -63,60 +63,66 @@
 - Time-travel discovery evaluation; Message Batches for evaluation runs.
 - Collaboration, project tracking, dataset evaluation, experiment automation, reproducibility analysis.
 
-## 2. Four-week plan
+## 2. Four-week plan (solo)
 
-**Team split** (adjust to your team size):
+Eureka is built by **one person**. So the plan is a sequence of focused blocks rather than parallel workstreams, and every week ends with something that runs. Claude Code is part of the toolset: it handles boilerplate (adapters, migrations, tests, UI components), so the solo time goes into design, prompts, rules and evaluation.
 
-- **R:** retrieval and data
-- **A:** agents and orchestration
-- **F:** frontend
-- **E:** evaluation and infrastructure
+**Honest assessment:** the full MVP in section 1.1 is ambitious for one person in 4 weeks. The plan therefore has **cut lines** (section 2.5). Check them at the end of each week and apply them without hesitation; a smaller system that works and is evaluated honestly beats a bigger one that doesn't.
 
-### Week 1: Foundations + shared infrastructure + baselines
+### 2.1 Week 1: Foundations + baselines
 
-| Who | Tasks |
+| Days | Tasks |
 |---|---|
-| R | Repo skeleton; Postgres + pgvector in Docker; migrations for the core entities (doc 10); Semantic Scholar/OpenAlex/arXiv adapters with cache, rate limiter, retry and recorded fixtures; dedup; embedder interface (local model) |
-| A | **ADK + Claude spike:** one structured-output agent and one tool-using agent running on Claude through the Anthropic model class. Confirm the adaptive-thinking requirement for structured outputs (doc 08), callbacks for cost logging, and a workspace-scoped key |
-| A | Data shapes for all agent outputs; shared prompt preamble; prompt file versioning |
-| E | Choose the demo domain; request the Semantic Scholar API key (day 1, approval can take time); build the first 10 Mode 1 evaluation cases; implement baselines B1/B2 |
-| F | UI skeleton: home with two entry points, both forms, complexity selector, constraints panel (static) |
+| 1 | **Accounts and keys:** workspace-scoped Anthropic key; request the Semantic Scholar API key (approval can take time); GCP project with billing. **ADK + Claude spike:** one structured-output agent + one tool-using agent on Claude; confirm the adaptive-thinking requirement for structured outputs (doc 08) and callback-based cost logging |
+| 2–3 | Repo skeleton; Postgres + pgvector in Docker; migrations for the core entities (doc 10); Semantic Scholar / OpenAlex / arXiv adapters with cache, rate limiter, retry and recorded fixtures; dedup (including preprint/published merging) |
+| 4 | Embedder interface (local model); ranking; data shapes for all agent outputs; shared prompt preamble; prompt file versioning |
+| 5 | Choose the demo domain; write the first 10 Mode 1 evaluation cases; implement baselines B1/B2 |
 
-**Exit criterion:** a command-line run turns an idea into a ranked, deduplicated paper list, with costs logged. The baselines run on 10 cases. The ADK spike is confirmed.
+**Exit criterion:** a command-line run turns an idea into a ranked, deduplicated paper list, with costs logged. The baselines run on 10 cases. The spike is confirmed.
 
-### Week 2: Workflow A end to end (the reasoning core)
+### 2.2 Week 2: Workflow A end to end (the reasoning core)
 
-| Who | Tasks |
+| Days | Tasks |
 |---|---|
-| R | Full-text fetch + chunking; hybrid passage retrieval; snowballing; relevance screening |
-| A | A1, A3 (with the global cache), A4, A5 (tools + loop + saturation), A6; the candidate abstraction; triage rules; Workflow A state machine with persistence and budgets |
-| A/E | Evidence verifier + verdict engine + coverage report; unit tests for rules |
-| F | Progress view against a mocked event stream; workspace tabs against mocked data |
-| E | Finish the Mode 1 evaluation set (~25 cases); first evaluation run |
+| 1 | Full-text fetch + chunking; hybrid passage retrieval; relevance screening |
+| 2 | A1 Idea Analyst; A3 Paper Reader with the global cache; quote verifier |
+| 3 | A4 Novelty Investigator; verdict engine + coverage snapshot; table-driven unit tests for the rules |
+| 4 | A5 Skeptic (tools + loop + measured saturation); A6 Value & Feasibility; triage rules |
+| 5 | Workflow A state machine with persistence and budgets; command-line report; first evaluation run on 10 cases |
 
-**Exit criterion:** a command-line run of Workflow A produces a full report with verdicts, evidence, coverage, Skeptic log and alternatives. Tests are green. First evaluation numbers exist.
+**Exit criterion:** a command-line run of Workflow A produces a full report with verdicts, evidence, coverage and Skeptic log. Tests are green. First evaluation numbers exist.
 
-### Week 3: Workflow B + product + cloud
+### 2.3 Week 3: Workflow B + API
 
-| Who | Tasks |
+| Days | Tasks |
 |---|---|
-| R | Landscape retrieval; opportunity miners (limitation clusters, contradiction pairs, method × problem matrix, landscape map); Hugging Face + GitHub signal adapters; dataset lookup |
-| A | A2 Scout (Discover/Alternatives/Refine/Replenish); pre-screen; light vs full evaluation; Workflow B state machine; A7 basic package |
-| F | Connect the UI to the real API + server-sent events; candidate board; rejection reasons; proposal view |
-| E | Deploy to Cloud Run + Cloud SQL + Secret Manager; Vertex embeddings; Mode 2 evaluation cases (field × profile, planted candidates); human rubric guide |
+| 1 | Landscape retrieval; opportunity miners (limitation clusters, contradictions, method × problem matrix); Hugging Face dataset lookup + signals |
+| 2–3 | A2 Scout (Discover / Alternatives / Refine); CandidateInspiration grounding check; pre-screen; light vs full evaluation; Workflow B state machine |
+| 4 | FastAPI endpoints + server-sent events for both modes; A7 Proposal Designer (basic package) |
+| 5 | Mode 2 evaluation cases (field × profile, planted candidates); complete the Mode 1 set to ~25 cases |
 
-**Exit criterion:** both modes run end to end from the browser on the deployed instance.
+**Exit criterion:** both modes run end to end through the API.
 
-### Week 4: Extensions, evaluation, polish
+### 2.4 Week 4: UI, deployment, evaluation, polish
 
-| Who | Tasks |
+| Days | Tasks |
 |---|---|
-| All | Extensions in priority order (section 1.2) as time allows |
-| E | Full evaluation: B1, B2, Eureka, ablations, 3× consistency; human rubric scoring; results write-up |
-| A | Prompt/rule fixes driven by evaluation failures (with re-runs); failure-injection tests |
-| F | UX polish, exports, empty/error states |
+| 1–2 | UI: two entry points, forms, clarification, progress, candidate board with rejection reasons, workspace tabs, proposal view + Markdown export |
+| 3 | Deploy: Cloud Run + Cloud SQL + Secret Manager; smoke tests; pre-warm the demo cache |
+| 4 | **Feature freeze.** Full evaluation: B1, B2, Eureka (+ the no-Skeptic ablation if time allows); human rubric scoring |
+| 5 | Results write-up, demo script, buffer |
 
-**Feature freeze on day 24.** The last days are for the demo script, the report, a pre-warmed cache and buffer.
+### 2.5 Cut lines (apply in this order if behind)
+
+| If behind at… | Cut | What remains true |
+|---|---|---|
+| End of week 1 | GitHub signals; full-text parsing beyond arXiv | Retrieval works on abstracts + arXiv full text |
+| End of week 2 | Snowballing; Skeptic limited to 2 rounds | The Skeptic still runs and saturation is still measured |
+| End of week 3 | Mode 2 Refine/Replenish loops (keep reject + advance); full evaluation of finalists → light only, labelled as such | Mode 2 still discovers, grounds, screens and evaluates; verdicts stay honest (light can't say "Supported") |
+| Start of week 4 | React UI → **Streamlit** UI; Vertex embeddings → local embeddings in the container | Both modes are usable in a browser and deployed |
+| Day 4 of week 4 | Ablations; time-travel test | The main comparison (B1, B2, Eureka) is done |
+
+**Never cut:** the quote verifier, code-computed verdicts, the coverage snapshot, and the "rejections are shown with reasons" rule. They are what makes Eureka different.
 
 ## 3. Definition of done (per feature)
 
@@ -130,8 +136,8 @@
 
 Do the riskiest things first:
 
-1. The ADK + Claude integration (week 1 spike).
+1. The ADK + Claude integration (day 1 spike).
 2. Retrieval quality and rate limits (week 1).
 3. Verdict rules + verifier (week 2).
 4. Scout grounding quality (week 3, early).
-5. Cloud deployment of background runs (week 3).
+5. Cloud deployment of background runs (week 4, day 3: deploy a skeleton earlier if time allows).
