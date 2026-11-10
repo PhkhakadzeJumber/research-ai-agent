@@ -16,7 +16,7 @@ What makes Eureka more than "an LLM with a research theme":
 - **Honest uncertainty.** Verdicts are categories decided by written rules, and every verdict comes with a coverage report (what was searched, what wasn't). Eureka never claims an idea is guaranteed to be original.
 - **Personalized feasibility.** Complexity level and user constraints shape both idea generation and evaluation.
 
-> **Status:** design phase. These documents are the plan, written for the team to read, discuss and refine. No implementation code exists yet.
+> **Status:** design phase. These documents are the plan, written to read, discuss and refine before building. Eureka is a one-person project. No implementation code exists yet.
 
 ---
 
@@ -36,11 +36,12 @@ Read them in order the first time. Each document is self-contained enough to rev
 | 08 | [LLM engineering](docs/08-llm-engineering.md) | How we call Claude: models, thinking/effort, structured outputs, prompts, context building, caching, cost, errors, conversation, ADK specifics |
 | 09 | [Tools and MCP](docs/09-tools-and-mcp.md) | The tools agents can call, how they're designed, and where MCP fits (and where it doesn't) |
 | 10 | [Data model](docs/10-data-model.md) | Entities, fields, relationships and statuses |
+| 10+ | [ER model](docs/er-model.md) | The pipeline told through its data: six regions with ER diagrams, dependencies, invariants, an end-to-end trace, and an audit of the data model |
 | 11 | [Backend and API](docs/11-backend-and-api.md) | Service layout, endpoints for both modes, progress streaming, jobs, configuration, security |
 | 12 | [Frontend and UX](docs/12-frontend-and-ux.md) | Screens, the two entry points, candidate cards, comparison, evidence explorer, exports, MVP vs later |
 | 13 | [Evaluation and testing](docs/13-evaluation-and-testing.md) | How we prove Eureka is better than baselines (both modes), metrics, test strategy |
 | 14 | [Deployment and operations](docs/14-deployment-and-operations.md) | Google Cloud setup, secrets, logging, monitoring, cost controls, environments, CI |
-| 15 | [Roadmap](docs/15-roadmap.md) | MVP vs optional features, the 4-week plan, team split, exit criteria |
+| 15 | [Roadmap](docs/15-roadmap.md) | MVP vs optional features, the solo 4-week plan, cut lines, exit criteria |
 | 16 | [Risks and open questions](docs/16-risks-and-open-questions.md) | What could go wrong, and the decisions we still need to make together |
 | 17 | [Course references](docs/17-course-references.md) | Which course examples to learn from (read-only; we never change the course repo) |
 
