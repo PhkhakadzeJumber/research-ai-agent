@@ -11,7 +11,8 @@ Commands marked *(planned)* don't exist yet. When you add one, update this secti
 ```bash
 # Python environment (Git Bash on Windows; PowerShell: .venv\Scripts\Activate.ps1)
 python -m venv .venv && source .venv/Scripts/activate
-pip install -e ".[dev]"                      # (planned) installs app + dev tools from pyproject.toml
+pip install -r requirements.txt && pip install -e ".[dev]"   # exact pinned versions, then the app + dev tools
+pip freeze --exclude-editable > requirements.txt             # after changing dependencies in pyproject.toml (keep the header)
 
 # Database: Postgres + pgvector in Docker
 docker compose up -d db                      # (planned)
@@ -21,8 +22,8 @@ alembic upgrade head                         # (planned) apply migrations
 uvicorn src.api.main:app --reload            # (planned) API on http://127.0.0.1:8000
 
 # Verify your work
-pytest                                       # (planned) default run: no network, no paid API calls
-pytest -m live                               # (planned) calls Claude/real APIs — costs money, ask first
+pytest                                       # default run: no network, no paid API calls ("live" tests excluded)
+pytest -m live                               # calls Claude/real APIs: costs money, ask first
 ruff check . && ruff format --check .        # (planned)
 
 # Frontend

@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eureka"
+version = "0.1.0"
+description = "AI research discovery & validation agent"
+requires-python = ">=3.11"
+# Direct dependencies only, with compatible ranges.
+# Exact versions of everything (incl. sub-dependencies) are pinned in requirements.txt.
+dependencies = [
+    "anthropic>=2.6,<3",        # Claude API (used only via src/llm.py)
+    "google-adk>=2.13,<3",      # agent framework; Claude via its AnthropicLlm model class
+    "python-dotenv>=1.0",       # loads .env in development
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+]
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Tests marked "live" call real (paid) APIs: excluded by default, run with: pytest -m live
+addopts = "-m 'not live'"
+markers = [
+    "live: calls real external APIs (Claude etc.) and costs money; run explicitly with -m live",
+]
