@@ -110,6 +110,7 @@ def get_retrieval_settings() -> RetrievalSettings:
     return load_retrieval_settings(os.environ)
 
 
+DEFAULT_DB_HOST = "127.0.0.1"  # matches compose.yaml, which publishes the port on 127.0.0.1 only
 DEFAULT_DB_PORT = 5434  # 5432/5433 are often taken by locally installed Postgres servers
 DEFAULT_TEST_DB = "eureka_test"  # created by infra/db/init/01-extensions.sql
 
@@ -160,7 +161,9 @@ def load_database_settings(environ: Mapping[str, str]) -> DatabaseSettings:
             "postgresql+asyncpg",
             username=value("POSTGRES_USER", "eureka"),
             password=password,  # URL.create escapes special characters
-            host=value("POSTGRES_HOST", "localhost"),
+            # 127.0.0.1, not "localhost": on Windows, "localhost" tries IPv6 (::1) first, and the
+            # Docker port listens on IPv4 only, so every connection waited ~2 s for the fallback.
+            host=value("POSTGRES_HOST", DEFAULT_DB_HOST),
             port=int(port),
             database=value("POSTGRES_DB", "eureka"),
         )

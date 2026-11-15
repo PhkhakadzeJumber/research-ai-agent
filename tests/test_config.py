@@ -7,8 +7,8 @@ from src.config import ConfigError, load_database_settings, load_retrieval_setti
 
 def test_database_url_is_built_from_postgres_variables_with_defaults():
     settings = load_database_settings({"POSTGRES_PASSWORD": "pw"})
-    assert settings.url == "postgresql+asyncpg://eureka:pw@localhost:5434/eureka"
-    assert settings.test_url == "postgresql+asyncpg://eureka:pw@localhost:5434/eureka_test"
+    assert settings.url == "postgresql+asyncpg://eureka:pw@127.0.0.1:5434/eureka"
+    assert settings.test_url == "postgresql+asyncpg://eureka:pw@127.0.0.1:5434/eureka_test"
 
 
 def test_database_password_with_special_characters_is_escaped():
