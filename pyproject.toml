@@ -14,6 +14,7 @@ dependencies = [
     "anthropic>=2.6,<3",        # Claude API (used only via src/llm.py)
     "asyncpg>=0.29",            # async PostgreSQL driver
     "pgvector>=0.3",            # vector column type for SQLAlchemy (embeddings)
+    "pydantic>=2.7,<3",         # agent output shapes (src/ai/schemas), validated on every LLM response
     "sqlalchemy[asyncio]>=2.0,<3",  # database toolkit: tables, queries, sessions
     "google-adk>=2.13,<3",      # agent framework; Claude via its AnthropicLlm model class
     "google-genai>=2.34,<3",    # Vertex AI embeddings (src/retrieval/embeddings.py)
