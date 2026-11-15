@@ -26,6 +26,7 @@ alembic current                              # which migration the database is a
 python -m scripts.search "your query" --sources arxiv     # arXiv only: free
 python -m scripts.search "your query" --limit 10 --from 2022  # all sources: uses a little OpenAlex budget, ask first
 python -m scripts.search "your query" --sources arxiv --save  # store as an investigation (needs the database)
+python -m scripts.search "your query" --sources arxiv --save --rank  # + rank by embeddings (needs Vertex AI setup)
 
 # Backend
 uvicorn src.api.main:app --reload            # (planned) API on http://127.0.0.1:8000

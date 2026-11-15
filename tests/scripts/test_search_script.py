@@ -121,3 +121,37 @@ def test_save_without_a_database_exits_with_code_2_before_searching(monkeypatch,
                         lambda **kwargs: pytest.fail("must not search when saving is impossible"))
     assert main(["rag", "--save", "--sources", "arxiv"]) == 2
     assert "--save needs the database" in capsys.readouterr().err
+
+
+def test_rank_requires_save(capsys):
+    assert main(["rag", "--rank", "--no-cache"]) == 2
+    assert "--rank needs --save" in capsys.readouterr().err
+
+
+def test_rank_without_google_cloud_settings_exits_before_searching(monkeypatch, capsys):
+    from src.config import ConfigError
+
+    def missing_settings():
+        raise ConfigError("GOOGLE_CLOUD_PROJECT is not set. Add your Google Cloud project ID to .env")
+
+    monkeypatch.setattr(search_script, "make_embedder", missing_settings)
+    monkeypatch.setattr(search_script.LiteratureSearch, "from_settings",
+                        lambda **kwargs: pytest.fail("must not search when ranking is impossible"))
+    assert main(["rag", "--save", "--rank"]) == 2
+    assert "GOOGLE_CLOUD_PROJECT is not set" in capsys.readouterr().err
+
+
+def test_format_ranking_shows_score_similarity_and_source_rank():
+    from types import SimpleNamespace
+
+    from scripts.search import format_ranking
+    from src.db.repositories.ranking import RankedHit
+
+    item = RankedHit(
+        hit=SimpleNamespace(source_rank=3), paper=SimpleNamespace(year=2025, title="Hallucination in small LMs"),
+        similarity=0.8123, score=0.8571,
+    )
+    output = format_ranking([item])
+    assert "0.857" in output and "0.812" in output
+    assert "Hallucination in small LMs" in output
+    assert format_ranking([]) == "Ranking: no papers to rank."

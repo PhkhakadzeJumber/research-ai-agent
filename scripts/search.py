@@ -15,6 +15,10 @@ with the file cache in .cache/http/ and prints a warning. --file-cache forces fi
 landscape scope): one query row per source, the papers deduplicated against
 everything already stored, and one retrieval hit per paper. It needs the database.
 
+--rank (with --save) ranks the saved papers by Eureka's own relevance score
+(embedding similarity + small citation/recency priors). It needs Vertex AI: the
+Google Cloud settings in .env and `gcloud auth application-default login`.
+
 OpenAlex requests use a little of your daily OpenAlex budget; arXiv is free.
 Exit code: 0 on success, 1 if every source failed, 2 for invalid arguments or an
 unavailable database with --save.
@@ -37,10 +41,12 @@ from src.config import ConfigError
 from src.db.models import Paper
 from src.db.models.run import COMPLEXITY_LEVELS, MODES
 from src.db.repositories.cache import DbResponseCache
+from src.db.repositories.ranking import RankedHit, rank_scope
 from src.db.repositories.runs import create_investigation
 from src.db.repositories.search_trail import save_search
 from src.db.session import Database
 from src.retrieval.cache import FileResponseCache, ResponseCache
+from src.retrieval.embeddings import Embedder, VertexEmbedder
 from src.retrieval.records import SearchRequest, SearchResult
 from src.retrieval.search import LiteratureSearch
 
@@ -63,6 +69,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mode", choices=MODES, default="discover", help="investigation mode for --save (default: discover)")
     parser.add_argument("--complexity", choices=COMPLEXITY_LEVELS, default="beginner",
                         help="investigation complexity for --save (default: beginner)")
+    parser.add_argument("--rank", action="store_true",
+                        help="with --save: rank the saved papers by embedding similarity (needs Vertex AI)")
     cache = parser.add_mutually_exclusive_group()
     cache.add_argument("--no-cache", action="store_true", help="don't read or write any response cache")
     cache.add_argument("--file-cache", action="store_true", help="use the file cache even if the database is available")
@@ -184,7 +192,26 @@ def format_result(result: SearchResult, cache_line: str = "Cache: off") -> str:
     return "\n".join(lines)
 
 
+def format_ranking(ranked: list[RankedHit]) -> str:
+    """Eureka's own ranking next to the sources' ranking."""
+    if not ranked:
+        return "Ranking: no papers to rank."
+    lines = ["Eureka ranking (similarity to the query + small citation/recency boost):",
+             f"{'#':>3}  {'Score':>5}  {'Sim':>5}  {'Src#':>4}  {'Year':<4}  Title"]
+    for position, item in enumerate(ranked, start=1):
+        lines.append(
+            f"{position:>3}  {item.score:5.3f}  {item.similarity:5.3f}  {item.hit.source_rank or '':>4}  "
+            f"{item.paper.year or '':<4}  {_shorten(item.paper.title, TITLE_WIDTH)}"
+        )
+    return "\n".join(lines)
+
+
 # --- main -------------------------------------------------------------------------------------------
+
+def make_embedder() -> Embedder:
+    """The real embedder (Vertex AI). Raises ConfigError if the Google Cloud settings are missing."""
+    return VertexEmbedder.from_settings()
+
 
 def open_database() -> Database | None:
     """The main database, or None if it isn't configured (e.g. no POSTGRES_PASSWORD)."""
@@ -197,6 +224,10 @@ def open_database() -> Database | None:
 async def run(args: argparse.Namespace) -> int:
     request = SearchRequest(query=args.query, year_from=args.year_from, year_to=args.year_to, limit=args.limit)
     sources = [name.strip() for name in args.sources.split(",") if name.strip()] if args.sources else None
+
+    if args.rank and not args.save:
+        raise ValueError("--rank needs --save (ranking works on the saved papers)")
+    embedder = make_embedder() if args.rank else None  # fail before searching if Vertex isn't configured
 
     needs_database = args.save or not (args.no_cache or args.file_cache)
     database = open_database() if needs_database else None
@@ -220,6 +251,12 @@ async def run(args: argparse.Namespace) -> int:
             async with database.session() as session:  # commits at the end
                 summary = await save_result(session, result, mode=args.mode, complexity=args.complexity)
             print(summary.describe())
+            if embedder is not None:
+                async with database.session() as session:  # stores embeddings and scores
+                    ranked = await rank_scope(session, embedder, investigation_id=summary.investigation_id,
+                                              query=request.query)
+                print()
+                print(format_ranking(ranked))
         return 1 if result.all_failed else 0
     finally:
         if database is not None:
@@ -233,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # paper titles contain any characters
     try:
         return asyncio.run(run(args))
-    except (ValueError, DatabaseUnavailable) as error:  # invalid input, or --save without a database
+    except (ValueError, DatabaseUnavailable, ConfigError) as error:  # invalid input, no database, missing settings
         print(f"Error: {error}", file=sys.stderr)
         return 2
 

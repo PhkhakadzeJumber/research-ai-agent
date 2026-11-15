@@ -11,8 +11,10 @@ so even a bug in our code can't store an invalid paper or quote:
 - quotes are unique per (paper, chunk, text hash), also for abstract quotes (no chunk);
 - a quote's source level matches whether it points at a chunk.
 
-Embedding columns are added in step 2.8, when the embedding model (and so the vector
-size) is chosen.
+Embeddings (step 2.8): papers (title + abstract) and chunks have an `embedding` vector
+and the `embedding_model` that made it; both are set together or not at all, and an
+HNSW index makes cosine-similarity search fast. Vectors from different models are
+never compared (doc 06 §2.4).
 """
 
 from __future__ import annotations
@@ -37,10 +39,12 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy import text as sql_text  # renamed: several tables have a column called `text`
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base, Timestamps, UUIDPrimaryKey
+from src.retrieval.embeddings import EMBEDDING_DIMENSIONS
 
 SOURCE_LEVELS = ("abstract", "full_text")
 FULL_TEXT_STATUSES = ("none", "fetched", "parsed", "failed")
@@ -57,6 +61,15 @@ def quote_text_hash(quote_text: str) -> str:
 
 def _one_of(column: str, values: tuple[str, ...]) -> str:
     return f"{column} IN ({', '.join(repr(v) for v in values)})"
+
+
+def _embedding_rules(table: str) -> tuple:
+    """Vector and model are set together, plus a cosine-similarity HNSW index."""
+    return (
+        CheckConstraint("(embedding IS NULL) = (embedding_model IS NULL)", name="embedding_has_model"),
+        Index(f"ix_{table}_embedding", "embedding", postgresql_using="hnsw",
+              postgresql_ops={"embedding": "vector_cosine_ops"}),
+    )
 
 
 class Paper(UUIDPrimaryKey, Timestamps, Base):
@@ -76,6 +89,7 @@ class Paper(UUIDPrimaryKey, Timestamps, Base):
         CheckConstraint("year IS NULL OR year BETWEEN 1800 AND 2200", name="year_plausible"),
         CheckConstraint("citation_count IS NULL OR citation_count >= 0", name="citations_not_negative"),
         CheckConstraint(_one_of("full_text_status", FULL_TEXT_STATUSES), name="full_text_status_valid"),
+        *_embedding_rules("papers"),
     )
 
     doi: Mapped[str | None] = mapped_column(String(255))
@@ -92,6 +106,8 @@ class Paper(UUIDPrimaryKey, Timestamps, Base):
     open_access_pdf_url: Mapped[str | None] = mapped_column(Text)
     tier: Mapped[int] = mapped_column(SmallInteger)
     full_text_status: Mapped[str] = mapped_column(String(16), default="none", server_default="none")
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIMENSIONS))  # of title + abstract
+    embedding_model: Mapped[str | None] = mapped_column(String(64))
 
     chunks: Mapped[list[Chunk]] = relationship(back_populates="paper", order_by="Chunk.position")
     analyses: Mapped[list[PaperAnalysis]] = relationship(back_populates="paper")
@@ -106,6 +122,7 @@ class Chunk(UUIDPrimaryKey, Timestamps, Base):
         UniqueConstraint("paper_id", "chunker_version", "position"),
         CheckConstraint("position >= 0", name="position_not_negative"),
         Index("ix_chunks_search_vector", "search_vector", postgresql_using="gin"),
+        *_embedding_rules("chunks"),
     )
 
     paper_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("papers.id"), index=True)
@@ -118,6 +135,8 @@ class Chunk(UUIDPrimaryKey, Timestamps, Base):
         TSVECTOR,
         Computed("to_tsvector('english', coalesce(section_title, '') || ' ' || text)", persisted=True),
     )
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIMENSIONS))  # the vector half of hybrid search
+    embedding_model: Mapped[str | None] = mapped_column(String(64))
 
     paper: Mapped[Paper] = relationship(back_populates="chunks")
 

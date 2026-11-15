@@ -11,6 +11,7 @@ There are independent groups, so a missing value in one never blocks the others:
 - Settings (get_settings): the LLM settings.
 - RetrievalSettings (get_retrieval_settings): the literature-source settings.
 - DatabaseSettings (get_database_settings): the database connections.
+- EmbeddingSettings (get_embedding_settings): the Vertex AI embedding model.
 """
 
 from __future__ import annotations
@@ -184,3 +185,44 @@ def get_database_settings() -> DatabaseSettings:
     """Returns the database settings, loading `.env` on first use."""
     load_dotenv()
     return load_database_settings(os.environ)
+
+
+@dataclass(frozen=True)
+class EmbeddingSettings:
+    model: str
+    """Vertex AI embedding model (EUREKA_EMBEDDING_MODEL), e.g. gemini-embedding-001."""
+
+    project: str
+    """Google Cloud project ID (GOOGLE_CLOUD_PROJECT)."""
+
+    location: str
+    """Vertex AI region (GOOGLE_CLOUD_LOCATION), e.g. europe-west1."""
+
+    batch_size: int
+    """Texts per embedding request (EUREKA_EMBEDDING_BATCH_SIZE, default 50)."""
+
+
+def load_embedding_settings(environ: Mapping[str, str]) -> EmbeddingSettings:
+    """Builds EmbeddingSettings. Credentials are NOT here: Google's library finds them itself
+    (`gcloud auth application-default login` locally, the service account in the cloud)."""
+
+    def required(name: str, hint: str) -> str:
+        value = environ.get(name, "").strip()
+        if not value:
+            raise ConfigError(f"{name} is not set. {hint} (see .env.example).")
+        return value
+
+    model = required("EUREKA_EMBEDDING_MODEL", "Add the embedding model to .env")
+    project = required("GOOGLE_CLOUD_PROJECT", "Add your Google Cloud project ID to .env")
+    location = required("GOOGLE_CLOUD_LOCATION", "Add the Vertex AI region to .env")
+    raw_batch = environ.get("EUREKA_EMBEDDING_BATCH_SIZE", "").strip() or "50"
+    if not raw_batch.isdigit() or int(raw_batch) < 1:
+        raise ConfigError(f"EUREKA_EMBEDDING_BATCH_SIZE must be a whole number >= 1, got {raw_batch!r}.")
+    return EmbeddingSettings(model=model, project=project, location=location, batch_size=int(raw_batch))
+
+
+@lru_cache(maxsize=1)
+def get_embedding_settings() -> EmbeddingSettings:
+    """Returns the embedding settings, loading `.env` on first use."""
+    load_dotenv()
+    return load_embedding_settings(os.environ)

@@ -90,7 +90,7 @@ Missing a paper because it uses different words is the most dangerous failure (i
 | A general local model (e.g. bge-small) | Simple, fast | Weaker on scientific text |
 | **Vertex AI text embeddings** | Managed, scalable; meaningful Vertex AI usage without Gemini | Costs per call; needs a GCP project |
 
-**Decision:** an embedder interface with two implementations: local (development, tests) and Vertex AI (deployment). **Never mix vectors from different models in one index.** Every stored vector records its model ID, and a model change triggers re-embedding.
+**Decision (step 2.8):** Vertex AI everywhere (development and cloud), so all stored vectors come from one model, plus a deterministic fake embedder so tests never call Google. The model is `gemini-embedding-001` at 768 dimensions: it's the Gemini embedding model the `google-genai` library sends in batches on Vertex AI (the others go one text per request). Documents and queries are embedded with different task types. **Never mix vectors from different models in one index.** Every stored vector records its model ID, and a model change triggers re-embedding.
 
 ### 2.5 Vector storage
 

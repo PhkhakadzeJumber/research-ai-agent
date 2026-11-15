@@ -16,6 +16,7 @@ dependencies = [
     "pgvector>=0.3",            # vector column type for SQLAlchemy (embeddings)
     "sqlalchemy[asyncio]>=2.0,<3",  # database toolkit: tables, queries, sessions
     "google-adk>=2.13,<3",      # agent framework; Claude via its AnthropicLlm model class
+    "google-genai>=2.34,<3",    # Vertex AI embeddings (src/retrieval/embeddings.py)
     "httpx>=0.28,<1",           # async HTTP client for the literature source adapters
     "python-dotenv>=1.0",       # loads .env in development
     "tzdata>=2024.1",           # time zone database (Asia/Tbilisi) for Windows and slim containers
