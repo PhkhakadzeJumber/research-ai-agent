@@ -167,6 +167,20 @@ def test_search_result_lists_ok_and_failed_sources():
             SourceReport(source="openalex", ok=True, result_count=1),
             SourceReport(source="arxiv", ok=False, error="timeout"),
         ),
+        retrieved_count=1,
     )
     assert result.ok_sources == ("openalex",)
     assert result.failed_sources == ("arxiv",)
+    assert result.all_failed is False
+    assert result.duplicates_removed == 0
+
+
+def test_search_result_counts_duplicates_and_detects_total_failure():
+    request = SearchRequest(query="x")
+    failed = SourceReport(source="arxiv", ok=False, error="timeout")
+
+    assert SearchResult(request=request, papers=(make_paper(),), retrieved_count=3).duplicates_removed == 2
+    assert SearchResult(request=request, reports=(failed,)).all_failed is True
+    assert SearchResult(request=request).all_failed is False  # no sources asked: nothing failed
+    with pytest.raises(ValueError, match="retrieved_count"):
+        SearchResult(request=request, papers=(make_paper(),), retrieved_count=0)

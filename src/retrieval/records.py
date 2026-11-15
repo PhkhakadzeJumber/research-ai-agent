@@ -226,6 +226,21 @@ class SearchResult:
     request: SearchRequest
     papers: tuple[PaperRecord, ...] = ()
     reports: tuple[SourceReport, ...] = field(default_factory=tuple)
+    retrieved_count: int = 0
+    """Records returned by all sources together, before deduplication (coverage funnel)."""
+
+    def __post_init__(self) -> None:
+        if self.retrieved_count < len(self.papers):
+            raise ValueError("retrieved_count can't be smaller than the number of deduplicated papers.")
+
+    @property
+    def duplicates_removed(self) -> int:
+        return self.retrieved_count - len(self.papers)
+
+    @property
+    def all_failed(self) -> bool:
+        """True if every source failed: the search found nothing because it couldn't look."""
+        return bool(self.reports) and not any(r.ok for r in self.reports)
 
     @property
     def failed_sources(self) -> tuple[str, ...]:

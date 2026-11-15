@@ -42,6 +42,8 @@ class SourceRequestError(Exception):
 
     def __init__(self, source: str, message: str, *, status: int | None = None, attempts: int = 1) -> None:
         self.source = source
+        self.message = message
+        """What went wrong, without the source name (used in SourceReport.error)."""
         self.status = status
         self.attempts = attempts
         super().__init__(f"{source}: {message}")
