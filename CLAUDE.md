@@ -18,7 +18,9 @@ pip freeze --exclude-editable > requirements.txt             # after changing de
 docker compose up -d db                      # start; port 5434 on localhost only
 docker compose ps                            # should show eureka-db as healthy
 python -m scripts.db_check                   # checks main + test database and pgvector
-alembic upgrade head                         # (planned) apply migrations
+alembic upgrade head                         # apply migrations (URL from settings, never in alembic.ini)
+alembic revision --autogenerate -m "what changed"  # draft a migration after changing models; review it before use
+alembic current                              # which migration the database is at
 
 # Literature search from the command line (responses cached 7 days in .cache/http/)
 python -m scripts.search "your query" --sources arxiv     # arXiv only: free

@@ -6,16 +6,31 @@
   calls session.commit() (commits become savepoints inside the outer transaction).
 - If the database can't be reached, every database test is skipped and the reason
   is printed in the summary (pytest runs with -rs): start it with `docker compose up -d db`.
+- Before the first database test, the test database is migrated to the latest
+  Alembic revision, so tests always run against the real, current schema.
 """
 
 import asyncio
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.config import ConfigError, get_database_settings
+
+ALEMBIC_INI = Path(__file__).resolve().parents[2] / "alembic.ini"
+
+
+def make_alembic_config(database_url: str) -> Config:
+    """An Alembic config pointed at the given database, without touching app logging."""
+    config = Config(str(ALEMBIC_INI))
+    config.attributes["database_url"] = database_url
+    config.attributes["configure_logger"] = False
+    return config
 
 pytestmark = pytest.mark.db
 
@@ -42,7 +57,13 @@ def test_database_url() -> str:
         asyncio.run(asyncio.wait_for(_probe(url), timeout=10))
     except Exception as error:  # connection refused, wrong password, timeout, ...
         pytest.skip(f"{SKIP_REASON} ({type(error).__name__})")
+    command.upgrade(make_alembic_config(url), "head")  # a failing migration fails loudly, not skips
     return url
+
+
+@pytest.fixture
+def alembic_config(test_database_url: str) -> Config:
+    return make_alembic_config(test_database_url)
 
 
 @pytest.fixture
