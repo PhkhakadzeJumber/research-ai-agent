@@ -2,7 +2,17 @@
 
 import pytest
 
-from src.config import ConfigError, load_settings
+from src.config import ConfigError, load_retrieval_settings, load_settings
+
+
+def test_retrieval_settings_are_optional_and_hide_secrets():
+    empty = load_retrieval_settings({})
+    assert empty.openalex_api_key is None and empty.openalex_mailto is None
+
+    settings = load_retrieval_settings({"OPENALEX_API_KEY": " secret-key ", "OPENALEX_MAILTO": ""})
+    assert settings.openalex_api_key == "secret-key"
+    assert settings.openalex_mailto is None
+    assert "secret-key" not in repr(settings)
 
 
 def test_reads_model_and_uses_defaults():

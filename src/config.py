@@ -2,16 +2,21 @@
 
 In development the variables come from the `.env` file in the repo root
 (see `.env.example` for the names). In the cloud they come from the
-environment directly (Secret Manager). Secrets such as ANTHROPIC_API_KEY are
-NOT stored here: the Anthropic SDK reads the key from the environment itself,
-so it never passes through our code or our logs.
+environment directly (Secret Manager). ANTHROPIC_API_KEY is NOT stored here:
+the Anthropic SDK reads it from the environment itself, so it never passes
+through our code. Keys our own code must send (e.g. OPENALEX_API_KEY) are
+stored with repr=False, so printing a settings object never shows them.
+
+There are two independent groups, so a missing value in one never blocks the other:
+- Settings (get_settings): the LLM settings.
+- RetrievalSettings (get_retrieval_settings): the literature-source settings.
 """
 
 from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 
 from dotenv import load_dotenv
@@ -76,3 +81,28 @@ def get_settings() -> Settings:
     """
     load_dotenv()
     return load_settings(os.environ)
+
+
+@dataclass(frozen=True)
+class RetrievalSettings:
+    openalex_api_key: str | None = field(default=None, repr=False)
+    """Free personal OpenAlex key (OPENALEX_API_KEY). Optional, but without it all
+    requests share a tiny daily budget per IP address. Get one at openalex.org/settings/api."""
+
+    openalex_mailto: str | None = field(default=None, repr=False)
+    """Optional contact email sent to OpenAlex (OPENALEX_MAILTO)."""
+
+
+def load_retrieval_settings(environ: Mapping[str, str]) -> RetrievalSettings:
+    """Builds RetrievalSettings from a mapping of environment variables (empty values = not set)."""
+    return RetrievalSettings(
+        openalex_api_key=environ.get("OPENALEX_API_KEY", "").strip() or None,
+        openalex_mailto=environ.get("OPENALEX_MAILTO", "").strip() or None,
+    )
+
+
+@lru_cache(maxsize=1)
+def get_retrieval_settings() -> RetrievalSettings:
+    """Returns the retrieval settings, loading `.env` on first use."""
+    load_dotenv()
+    return load_retrieval_settings(os.environ)
