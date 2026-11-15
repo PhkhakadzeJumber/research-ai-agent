@@ -28,7 +28,8 @@ python -m scripts.search "your query" --limit 10 --from 2022  # all sources: use
 uvicorn src.api.main:app --reload            # (planned) API on http://127.0.0.1:8000
 
 # Verify your work
-pytest                                       # default run: no network, no paid API calls ("live" tests excluded)
+pytest                                       # default run: no network, no paid API calls ("live" tests excluded);
+                                             # "db" tests use eureka_test, roll back, and are skipped (with reason) if the DB is down
 pytest -m live                               # calls Claude/real APIs: costs money, ask first
 ruff check . && ruff format --check .        # (planned)
 

@@ -1,0 +1,5 @@
+# Files that run inside Linux containers must keep Linux line endings (LF),
+# even on Windows checkouts (core.autocrlf). A CRLF line like `\connect eureka_test`
+# would otherwise end with an invisible \r and break the database init script.
+*.sql text eol=lf
+*.sh  text eol=lf

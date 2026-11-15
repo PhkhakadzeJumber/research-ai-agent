@@ -33,7 +33,9 @@ include = ["src*"]
 testpaths = ["tests"]
 pythonpath = ["."]  # lets tests import the repo-root `scripts` package
 # Tests marked "live" call real (paid) APIs: excluded by default, run with: pytest -m live
-addopts = "-m 'not live'"
+# -rs prints the reason for every skipped test (e.g. "database not running") in the summary.
+addopts = "-m 'not live' -rs"
 markers = [
     "live: calls real external APIs (Claude etc.) and costs money; run explicitly with -m live",
+    "db: needs the local test database (docker compose up -d db); skipped with a reason if it isn't running",
 ]
