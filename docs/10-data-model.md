@@ -174,7 +174,7 @@ Deferred: ConversationMessage, ToolCall (section 8)
 
 | Field | Meaning | Why we need it | Example |
 |---|---|---|---|
-| id, user id | Identity and owner | Ownership, access control | `inv_204`, `u_17` |
+| id, user id | Identity and owner. The user is empty for runs started from the command line (accounts arrive with the API) | Ownership, access control | `inv_204`, `u_17` |
 | mode | **evaluate** (Mode 1) or **discover** (Mode 2) | Selects Workflow A or B in the orchestrator | evaluate |
 | input | The raw user input as entered | Kept verbatim, so we can always show what the user asked, even after A1 restructures it | The idea text |
 | complexity level | beginner / intermediate / advanced | The desired ambition; steers the Scout, Feasibility and Proposal | beginner |
@@ -266,6 +266,7 @@ Deferred: ConversationMessage, ToolCall (section 8)
 | source | Which API | Coverage per source | openalex |
 | query text, filters | What was asked | Transparency; reproducibility | "hallucination small language models low-resource", year ≥ 2021 |
 | result count | How many results came back | Detects dead queries | 34 |
+| latency | How long the source took (ms) | Source health; spotting slow sources | 812 |
 | error | What failed, if anything | Failures appear in the coverage snapshot; source health monitoring | "429 rate limited (after retries)" |
 
 ### 4.2 RetrievalHit
@@ -281,10 +282,12 @@ Deferred: ConversationMessage, ToolCall (section 8)
 
 | Field | Meaning | Why we need it | Example |
 |---|---|---|---|
+| investigation id | Owner. Together with the evaluation id it defines the scope: (investigation, no evaluation) is that investigation's landscape phase | Without it, a landscape hit couldn't say whose landscape it belongs to | `inv_301` |
 | evaluation id (optional) | The scope; empty = landscape phase | See above. A full evaluation that extends a light one also sees the light evaluation's hits, so they're never screened twice | `ev_31` |
 | paper id | The global paper | — | `p_8812` |
 | found by query IDs | Which queries surfaced it | Shows *how* it was found (analyst vs Skeptic); saturation per round uses the first finder | `q_12`, `q_40` |
 | relevance (embedding) | Similarity score to the facets / idea | Ranking | 0.81 |
+| source rank | The best rank any source gave the paper (1 = top) | A free relevance signal before any embedding or LLM screening | 2 |
 | relevance (LLM) | Screening score 0–3 + reason | Precision filtering; "relevant" for saturation means ≥2 | 3, "same task and method" |
 | screened / selected for reading | Flags | Funnel counts in the coverage snapshot | selected |
 
