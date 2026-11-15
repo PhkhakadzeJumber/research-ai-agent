@@ -1,10 +1,17 @@
 """Tests for src/timeutil.py: aware timestamps with the Asia/Tbilisi offset."""
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from src import timeutil
+
+
+def test_real_time_zone_database_is_used():
+    # tzdata is a dependency, so the named zone must load (not the +04:00 safety net).
+    assert isinstance(timeutil.TZ, ZoneInfo)
+    assert str(timeutil.TZ) == "Asia/Tbilisi"
 
 
 def test_now_is_timezone_aware_with_tbilisi_offset():

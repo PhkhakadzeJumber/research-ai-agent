@@ -1,0 +1,33 @@
+# Local development database: PostgreSQL 17 + pgvector (doc 11, doc 14).
+#
+#   docker compose up -d db      start (first start also runs infra/db/init/)
+#   docker compose ps            status (should say "healthy")
+#   docker compose stop db       stop; data is kept in the eureka-db-data volume
+#   docker compose down -v       stop AND delete all data (careful)
+#
+# Values come from .env in this folder (names in .env.example). POSTGRES_PASSWORD
+# has no default on purpose: Docker refuses to start without it.
+# Port 5434, because 5432/5433 are often taken by locally installed Postgres servers.
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: eureka-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-eureka}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-eureka}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5434}:5432"   # reachable only from this computer
+    volumes:
+      - eureka-db-data:/var/lib/postgresql/data
+      - ./infra/db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  eureka-db-data:

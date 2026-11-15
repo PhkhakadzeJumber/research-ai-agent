@@ -7,9 +7,10 @@ the Anthropic SDK reads it from the environment itself, so it never passes
 through our code. Keys our own code must send (e.g. OPENALEX_API_KEY) are
 stored with repr=False, so printing a settings object never shows them.
 
-There are two independent groups, so a missing value in one never blocks the other:
+There are independent groups, so a missing value in one never blocks the others:
 - Settings (get_settings): the LLM settings.
 - RetrievalSettings (get_retrieval_settings): the literature-source settings.
+- DatabaseSettings (get_database_settings): the database connections.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 
 from dotenv import load_dotenv
+from sqlalchemy.engine import URL, make_url
 
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 
@@ -106,3 +108,76 @@ def get_retrieval_settings() -> RetrievalSettings:
     """Returns the retrieval settings, loading `.env` on first use."""
     load_dotenv()
     return load_retrieval_settings(os.environ)
+
+
+DEFAULT_DB_PORT = 5434  # 5432/5433 are often taken by locally installed Postgres servers
+DEFAULT_TEST_DB = "eureka_test"  # created by infra/db/init/01-extensions.sql
+
+
+@dataclass(frozen=True)
+class DatabaseSettings:
+    url: str = field(repr=False)
+    """SQLAlchemy URL of the main database (contains the password: never print it)."""
+
+    test_url: str = field(repr=False)
+    """SQLAlchemy URL of the test database: tests never touch the main one."""
+
+    def redacted(self, test: bool = False) -> str:
+        """The URL with the password hidden, safe for logs and messages."""
+        return make_url(self.test_url if test else self.url).render_as_string(hide_password=True)
+
+
+def load_database_settings(environ: Mapping[str, str]) -> DatabaseSettings:
+    """Builds DatabaseSettings from environment variables.
+
+    - DATABASE_URL (e.g. Cloud SQL in the cloud) wins if set.
+    - Otherwise the URL is built from the POSTGRES_* variables that compose.yaml uses,
+      so locally you only set POSTGRES_PASSWORD once.
+    - TEST_DATABASE_URL wins for tests if set; otherwise it's the main URL with the
+      database name replaced by POSTGRES_TEST_DB (default: eureka_test).
+    """
+
+    def value(name: str, default: str | None = None) -> str | None:
+        return environ.get(name, "").strip() or default
+
+    explicit = value("DATABASE_URL")
+    if explicit:
+        try:
+            url = make_url(explicit)
+        except Exception:  # SQLAlchemy raises ArgumentError for malformed URLs
+            raise ConfigError("DATABASE_URL is not a valid database URL.") from None
+    else:
+        password = value("POSTGRES_PASSWORD")
+        if not password:
+            raise ConfigError(
+                "The database isn't configured. For the local Docker database, set POSTGRES_PASSWORD "
+                "in .env (see .env.example); in the cloud, set DATABASE_URL."
+            )
+        port = value("POSTGRES_PORT", str(DEFAULT_DB_PORT))
+        if not port.isdigit():
+            raise ConfigError(f"POSTGRES_PORT must be a number, got {port!r}.")
+        url = URL.create(
+            "postgresql+asyncpg",
+            username=value("POSTGRES_USER", "eureka"),
+            password=password,  # URL.create escapes special characters
+            host=value("POSTGRES_HOST", "localhost"),
+            port=int(port),
+            database=value("POSTGRES_DB", "eureka"),
+        )
+
+    explicit_test = value("TEST_DATABASE_URL")
+    test_url = make_url(explicit_test) if explicit_test else url.set(database=value("POSTGRES_TEST_DB", DEFAULT_TEST_DB))
+    if test_url.database == url.database and test_url.host == url.host and test_url.port == url.port:
+        raise ConfigError("The test database must be different from the main database.")
+
+    return DatabaseSettings(
+        url=url.render_as_string(hide_password=False),
+        test_url=test_url.render_as_string(hide_password=False),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_database_settings() -> DatabaseSettings:
+    """Returns the database settings, loading `.env` on first use."""
+    load_dotenv()
+    return load_database_settings(os.environ)

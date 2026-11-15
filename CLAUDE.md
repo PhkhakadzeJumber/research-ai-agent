@@ -14,8 +14,10 @@ python -m venv .venv && source .venv/Scripts/activate
 pip install -r requirements.txt && pip install -e ".[dev]"   # exact pinned versions, then the app + dev tools
 pip freeze --exclude-editable > requirements.txt             # after changing dependencies in pyproject.toml (keep the header)
 
-# Database: Postgres + pgvector in Docker
-docker compose up -d db                      # (planned)
+# Database: Postgres 17 + pgvector in Docker (compose.yaml; needs Docker Desktop running and POSTGRES_PASSWORD in .env)
+docker compose up -d db                      # start; port 5434 on localhost only
+docker compose ps                            # should show eureka-db as healthy
+python -m scripts.db_check                   # checks main + test database and pgvector
 alembic upgrade head                         # (planned) apply migrations
 
 # Literature search from the command line (responses cached 7 days in .cache/http/)

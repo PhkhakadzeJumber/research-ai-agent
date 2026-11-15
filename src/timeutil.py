@@ -3,9 +3,10 @@
 Timestamps are timezone-aware and written as ISO 8601 with the Asia/Tbilisi offset,
 e.g. 2026-11-15T18:30:00+04:00. Naive datetimes (without an offset) are rejected.
 
-On Windows, Python needs the `tzdata` package for named time zones. Until it's
-installed, a fixed +04:00 offset is used, which is exact for Georgia: it has had
-no daylight-saving changes since 2005.
+The time zone database comes from the `tzdata` dependency (Windows and slim
+containers have none of their own). If it's ever missing, a fixed +04:00 offset
+is used as a safety net, which is exact for Georgia: it has had no
+daylight-saving changes since 2005.
 """
 
 from __future__ import annotations

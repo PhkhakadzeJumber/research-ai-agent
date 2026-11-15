@@ -2,7 +2,48 @@
 
 import pytest
 
-from src.config import ConfigError, load_retrieval_settings, load_settings
+from src.config import ConfigError, load_database_settings, load_retrieval_settings, load_settings
+
+
+def test_database_url_is_built_from_postgres_variables_with_defaults():
+    settings = load_database_settings({"POSTGRES_PASSWORD": "pw"})
+    assert settings.url == "postgresql+asyncpg://eureka:pw@localhost:5434/eureka"
+    assert settings.test_url == "postgresql+asyncpg://eureka:pw@localhost:5434/eureka_test"
+
+
+def test_database_password_with_special_characters_is_escaped():
+    settings = load_database_settings({"POSTGRES_PASSWORD": "p@ss:w/rd"})
+    assert "p%40ss%3Aw%2Frd" in settings.url
+
+
+def test_database_url_wins_and_test_url_is_derived():
+    settings = load_database_settings({
+        "DATABASE_URL": "postgresql+asyncpg://user:secret@cloudhost:5432/prod",
+        "POSTGRES_PASSWORD": "ignored",
+    })
+    assert settings.url == "postgresql+asyncpg://user:secret@cloudhost:5432/prod"
+    assert settings.test_url.endswith("/eureka_test")
+
+
+def test_database_secrets_never_show_when_printed():
+    settings = load_database_settings({"POSTGRES_PASSWORD": "TOPSECRET"})
+    assert "TOPSECRET" not in repr(settings)
+    assert "TOPSECRET" not in settings.redacted() and "***" in settings.redacted()
+    assert "TOPSECRET" not in settings.redacted(test=True)
+
+
+@pytest.mark.parametrize(
+    "environ, message",
+    [
+        ({}, "POSTGRES_PASSWORD"),
+        ({"POSTGRES_PASSWORD": "pw", "POSTGRES_PORT": "abc"}, "POSTGRES_PORT"),
+        ({"POSTGRES_PASSWORD": "pw", "POSTGRES_TEST_DB": "eureka"}, "different"),
+        ({"DATABASE_URL": "not a url"}, "DATABASE_URL"),
+    ],
+)
+def test_invalid_database_settings(environ, message):
+    with pytest.raises(ConfigError, match=message):
+        load_database_settings(environ)
 
 
 def test_retrieval_settings_are_optional_and_hide_secrets():

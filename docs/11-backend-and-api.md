@@ -21,6 +21,7 @@ All Python code is **one package, `src/`**, for one service. Inside it, each fol
 ```text
 research-ai-agent/
   README.md · CLAUDE.md · pyproject.toml · requirements.txt · .env.example
+  compose.yaml               # local Postgres 17 + pgvector (Docker)
   docs/                      # these documents
   src/                       # all Python code
     config.py                # settings from env vars (read once)
@@ -51,7 +52,7 @@ research-ai-agent/
   tests/                     # mirrors src/ (tests/retrieval/, tests/ai/, …) + fixtures/ (recorded responses)
   eval/                      # evaluation harness, datasets, baselines, reports (doc 13)
   frontend/                  # Next.js app, frontend only (doc 12)
-  infra/                     # docker-compose (Postgres), Dockerfiles, deploy scripts (doc 14)
+  infra/                     # db/init/ (first-start SQL), Dockerfiles, deploy scripts (doc 14)
   scripts/                   # small command-line helpers (e.g. run a search)
 ```
 
