@@ -16,34 +16,58 @@
 
 ## 2. Repository layout
 
+All Python code is **one package, `src/`**, for one service. Inside it, each folder has one responsibility, and AI engineering is kept apart from web plumbing.
+
 ```text
 research-ai-agent/
-  README.md
+  README.md · CLAUDE.md · pyproject.toml · requirements.txt · .env.example
   docs/                      # these documents
-  .env.example               # key names only, no values
-  backend/
-    app/
-      api/                   # HTTP routes (investigations, candidates, papers, export, conversation)
-      orchestrator/          # state machines for Workflow A and B, triage rules, budgets
-      agents/                # A1–A7 definitions, prompts (versioned files), output schemas
-      tools/                 # agent tools (doc 09)
-      services/
-        literature/          # source adapters, dedup, snowballing, ranking, full text, chunking
-        signals/             # GitHub, Hugging Face, Hacker News, RSS adapters
-        datasets/            # dataset lookup
-        mining/              # landscape map, limitation clusters, contradictions, matrix
-        embeddings/          # embedder interface + implementations
-        evidence/            # verifier + verdict engine + coverage report
-        export/              # Markdown / PDF rendering
-      db/                    # models, migrations
-      observability/         # logging, ADK callbacks, cost accounting
-      config/                # role models, budgets, rule tables, tiers
-    tests/                   # unit, contract, integration, fixtures (doc 13)
-    eval/                    # datasets, runners, baselines, reports (doc 13)
-  frontend/                  # React app (doc 12)
-  infra/                     # Dockerfiles, deployment scripts, DB setup (doc 14)
-  mcp/                       # optional eureka-mcp server (doc 09), later
+  src/                       # all Python code
+    config.py                # settings from env vars (read once)
+    llm.py                   # the single gateway to Claude (all model calls)
+    ai/                      # AI engineering
+      agents/                # A1–A7, one file per agent (doc 04)
+      prompts/               # versioned prompt files, one per agent (doc 08)
+      schemas/               # agent output shapes: PaperAnalysis, NoveltyAssessment, … (doc 10 §12)
+      tools/                 # agent tools: search_papers, get_passages, … (doc 09)
+      workflows/             # orchestrator: Workflow A/B, triage rules, budgets (doc 05)
+      evidence/              # quote verifier, verdict engine, coverage snapshot (doc 07)
+    retrieval/               # RAG / data gathering (doc 06)
+      records.py             # normalized paper record + search request/result shapes
+      sources/               # Semantic Scholar, OpenAlex, arXiv, Crossref adapters
+      signals/               # GitHub, Hugging Face adapters (tier 3)
+      fulltext/              # PDF fetching, parsing, chunking
+      embeddings.py · ranking.py · dedup.py
+      mining/                # limitation clusters, contradictions, method × problem matrix
+    db/                      # data layer
+      models/                # SQLAlchemy tables, grouped by the six ER regions (er-model.md)
+      repositories/          # read/write functions per region
+      migrations/            # Alembic
+    api/                     # web backend
+      main.py                # FastAPI app
+      routes/                # investigations, candidates, papers, export (section 3)
+      schemas/               # API request/response models
+      events.py              # progress streaming (SSE)
+  tests/                     # mirrors src/ (tests/retrieval/, tests/ai/, …) + fixtures/ (recorded responses)
+  eval/                      # evaluation harness, datasets, baselines, reports (doc 13)
+  frontend/                  # Next.js app, frontend only (doc 12)
+  infra/                     # docker-compose (Postgres), Dockerfiles, deploy scripts (doc 14)
+  scripts/                   # small command-line helpers (e.g. run a search)
 ```
+
+**Dependency rules:**
+
+- Imports only go downward: `api → ai → retrieval / db → config / llm`. Nothing imports a layer above it, so the AI part runs without the website (from scripts, tests and the evaluation harness).
+- Agents use retrieval only through `ai/tools/` or the workflows' context building.
+- The frontend talks to the backend only over HTTP.
+- **Three kinds of shapes stay separate**, even when they look alike:
+  - agent output shapes (`ai/schemas/`)
+  - database tables (`db/models/`)
+  - API responses (`api/schemas/`)
+
+  The LLM fills agent shapes, code adds IDs and trust fields, and the API decides what the user sees.
+
+Folders are created when their first file is written, not in advance.
 
 ## 3. API
 

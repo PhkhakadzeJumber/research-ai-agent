@@ -33,7 +33,14 @@ cd frontend && npm run lint && npm run build # (planned)
 
 ## Conventions
 
-- **Layout:** `src/` backend (Python), `tests/` (mirrors `src/`), `frontend/` Next.js, `docs/` design. Prompts live in `src/prompts/` as versioned files.
+- **Layout** (full tree in `docs/11-backend-and-api.md` §2): one Python package `src/`, with `config.py` + `llm.py` at the top, and these areas:
+  - `ai/`: agents, prompts (versioned files), schemas, tools, workflows, evidence
+  - `retrieval/`: sources, dedup, ranking, full text, embeddings, mining
+  - `db/`: models, repositories, migrations
+  - `api/`: FastAPI
+
+  Outside `src/`: `tests/` (mirrors `src/`, with `fixtures/` for recorded responses), `eval/`, `frontend/` (Next.js), `infra/`, `scripts/`, `docs/`. Create folders when their first file is written.
+- **Imports only go downward:** `api → ai → retrieval/db → config/llm`. Agent output shapes (`ai/schemas`), DB tables (`db/models`) and API responses (`api/schemas`) are separate types.
 - **Model IDs come from env vars** (names listed in `.env.example`), read once in `src/config.py`. Never hardcode a model ID.
 - **All Claude calls go through `src/llm.py`**: it builds the ADK `AnthropicLlm` models per role, makes any direct SDK calls, and logs tokens/cost/latency. No other module imports `anthropic`. Pass `AnthropicLlm(...)` objects, never a bare `"claude-..."` string (ADK routes those to Vertex AI).
 - **Structured outputs need adaptive thinking** in ADK (`thinking_budget=-1`), otherwise Claude rejects the forced tool call.
