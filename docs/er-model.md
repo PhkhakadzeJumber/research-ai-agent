@@ -118,8 +118,8 @@ erDiagram
     string mode "evaluate | discover"
     string complexity "beginner | intermediate | advanced"
     json constraints_snapshot "frozen copy of profile"
-    string status "created | clarifying | running | awaiting_user | completed | failed | cancelled"
-    string stage "state-machine step"
+    string status "created | running | clarifying | completed | failed | cancelled"
+    string stage "exact stage name, doc 05 section 11.1"
     json budget "limits + counters"
     string config_version "prompts, rules, models"
   }
@@ -381,7 +381,7 @@ erDiagram
     int version
     string origin "user | discover | alternative | refine | replenish"
     string origin_strategy "limitation | future_work | contradiction | combination | practical | refinement"
-    string status "lifecycle state"
+    string status "exact status, doc 05 section 11.5"
     uuid current_evaluation_id FK
   }
   FACET {
@@ -455,6 +455,7 @@ erDiagram
     uuid candidate_id FK
     uuid extends_id FK "light evaluation it upgrades"
     string depth "light | full"
+    string step "exact step name, doc 05 section 11.4"
     string status "running | done | partial | failed"
     json coverage_snapshot "frozen at the end, see region 6"
   }

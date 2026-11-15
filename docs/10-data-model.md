@@ -179,8 +179,8 @@ Deferred: ConversationMessage, ToolCall (section 8)
 | input | The raw user input as entered | Kept verbatim, so we can always show what the user asked, even after A1 restructures it | The idea text |
 | complexity level | beginner / intermediate / advanced | The desired ambition; steers the Scout, Feasibility and Proposal | beginner |
 | constraints snapshot | A **copy** of the user's profile at run time | If the user edits their profile later, old results must still be explained by the constraints that were actually used. A reference would silently rewrite history | (copy of 2.1) |
-| status | created / clarifying / running / awaiting user / completed / failed / cancelled | The coarse lifecycle state for the UI and the resume logic | running |
-| stage | The fine-grained state-machine step (doc 05), e.g. `light_evaluation` | Resume from the last completed stage; show progress. A stage counts as completed only when its output rows are committed in the same transaction | skeptic_round_2 |
+| status | created / running / clarifying / completed / failed / cancelled | The coarse lifecycle state for the UI and the resume logic. `completed` means results are ready; user actions (proposal, deep dive, steering) set it back to `running` | running |
+| stage | The orchestrator's position: one of the exact stage names in doc 05 §11.1, e.g. `light_evaluation` | Resume from the last completed stage; show progress. A stage counts as completed only when its output rows are committed in the same transaction | full_evaluation |
 | budget | Limits and counters: papers screened/read, rounds, refinements, cost, time | The orchestrator **reserves** budget before a stage and settles it after, so parallel candidate evaluations can't overspend | read 23/40, cost $1.10/$5 |
 | cost so far, timings | Running totals | Fast budget checks (reconciled with the LlmCall rows), UI display | $1.10, 6 min |
 | assumptions | Assumptions recorded when clarification was skipped | Honesty: the report lists what Eureka assumed instead of asking | "Assumed English-language QA benchmarks are acceptable" |
@@ -241,7 +241,7 @@ Deferred: ConversationMessage, ToolCall (section 8)
 | investigation | Owner | — | `inv_204` |
 | sequence number | Order within the investigation | Replay: a browser asks for "everything after event 57" | 58 |
 | time | When it happened | Display | — |
-| stage | The current stage | The stage rail | skeptic_round_2 |
+| stage | The current investigation stage (doc 05 §11.1) | The stage rail | full_evaluation |
 | message | Human-readable text | The activity feed | "Found 1 new relevant paper" |
 | counters snapshot | Counts at this moment | Live counters, funnel chart | read 27 |
 | cost so far | Spend at this moment | The live cost display | $1.40 |
@@ -452,7 +452,7 @@ What each type contains:
 | potential contribution (initial) | The Scout's claim of what this adds | A *hypothesis* to be judged by A6, never trusted as-is | "First evaluation of RAG for sub-1B models in Georgian" |
 | complexity fit, constraint notes | The Scout's own estimate of fit | A hypothesis checked by Feasibility; also a pre-screen hint | "T1, 8 weeks, public data" |
 | change note | For refinements: what changed and why | The user understands the refinement; tests check it addresses the reason | "Reduced to one language and 2 models to fit T1" |
-| status | proposed / screened out / light evaluating / needs refinement / advanced / full evaluating / finalist / rejected / selected / proposal ready | The lifecycle (doc 05). Changes only if the current status matches what the orchestrator expects, so parallel workers can't both move one candidate | finalist |
+| status | One of the exact values in doc 05 §11.5: `proposed` / `screened_out` / `light_evaluating` / `advanced` / `full_evaluating` / `needs_refinement` / `refined` / `finalist` / `rejected` / `selected` / `proposal_ready` | The lifecycle, with its allowed transitions in doc 05 §11.5. Changes only if the current status matches what the orchestrator expects, so parallel workers can't both move one candidate | finalist |
 | current evaluation id | The evaluation the UI shows: the latest completed one, preferring full over light | One definition of "the current result" for every screen | `ev_31` |
 | rejection reason | Summary of the rejecting TriageDecision | Rejections are shown openly | "Rule 3: previously investigated (p_9001)" |
 
@@ -520,11 +520,12 @@ Facets belong to a specific candidate version and are frozen with it.
 | Field | Meaning | Why we need it | Example |
 |---|---|---|---|
 | id, candidate id | Identity; which candidate version | — | `ev_31`, `cand_3` |
-| extends id | The light evaluation this full evaluation upgrades | Makes reuse explicit: the full pass inherits the light pass's retrieval hits and claims | `ev_22` |
+| extends id | The light evaluation this full evaluation upgrades | Makes reuse explicit: the full pass inherits the light pass's retrieval hits and claims | `ev_30` |
 | depth | light / full | Verdict thresholds differ by depth | full |
+| step | Where the evaluation is: one of the exact step names in doc 05 §11.4, from `normalizing` to `done` | In Mode 2 several evaluations run in parallel, so each needs its own position; resume and progress per candidate | skeptic_review |
 | started / finished | Timing | Latency analysis, UI | — |
 | counters | Queries, papers screened/read, Skeptic rounds | Budgets; input to the snapshot | 280 screened, 31 read, 3 rounds |
-| status | running / done / partial / failed | Partial results are allowed but labelled | done |
+| status | running / done / partial / failed | *How* it ended: a failed step degrades the evaluation to `partial` instead of stopping the investigation | done |
 
 **Coverage snapshot fields** (computed from the search trail and challenges, then frozen)
 
@@ -740,8 +741,12 @@ Using the running example:
 8. **Skeptic round 1** → 4 `Challenge` rows, 14 more `SearchQuery` rows (origin skeptic, round 1), 3 new `RetrievalHit` rows. A4 accepts one challenge (a 2025 paper is "same" on method and setting).
 9. **Rounds 2–3** → the measured saturation is 3 → 1 → 0. The coverage snapshot in `ev_22` is frozen.
 10. **A6** → significance and feasibility claims. The **Verdict engine** writes `Verdict` rows: novelty *Incremental variation*, significance *Moderate*, feasibility *Feasible with adjustments*, recommendation *Refine*.
-11. **Triage** → `TriageDecision` (rule 4, refine, created candidate `cand_3`). The Scout writes `Candidate` v2 (`cand_3`: parent `cand_1`, root `cand_1`, change note "focus on sub-1B models and Armenian, where the 2025 paper didn't test"). A light re-check → `Evaluation` `ev_31`, then `Verdict` rows (novelty *Potential opportunity*, recommendation *Pursue*). `cand_3`'s current evaluation = `ev_31`.
-12. **The user requests a proposal** → `ResearchPackage` (candidate `cand_3`, evaluation `ev_31`, revision 1).
+11. **Triage** (stage `triage`) → `TriageDecision` (rule 4, refine); `cand_1` → `needs_refinement`.
+12. **Stage `refining`:** the Scout writes `Candidate` v2 (`cand_3`: parent `cand_1`, root `cand_1`, change note "focus on sub-1B models and Armenian, where the 2025 paper didn't test"). It passes the pre-screen checks; `cand_1` → `refined`, `cand_3` → `light_evaluating`.
+13. **Stage `light_evaluation`:** `Evaluation` `ev_30` (light) → `Verdict` rows (novelty *Potential opportunity*: a light evaluation can't say more). Triage applies rule 9 → `cand_3` → `advanced`.
+14. **Stage `full_evaluation`:** `Evaluation` `ev_31` (full, extends `ev_30`, so its hits and claims are reused) → Skeptic saturates → `Verdict` rows (novelty *Potential opportunity*, significance *Moderate*, feasibility *Feasible*, recommendation *Pursue*). Triage rule 9 → `cand_3` → `finalist`; current evaluation = `ev_31`.
+15. **Stages `ranking` → `reporting` → `results_ready`:** the report is built; investigation status *completed*.
+16. **The user requests a proposal:** `cand_3` → `selected`; stage `writing_proposal` → `ResearchPackage` (candidate `cand_3`, evaluation `ev_31`, revision 1); `cand_3` → `proposal_ready`; stage back to `results_ready`.
 
 Throughout the run: `ProgressEvent` rows (with sequence numbers) stream to the UI; every model call writes an `LlmCall`; repeated API requests hit `ApiCache`.
 
