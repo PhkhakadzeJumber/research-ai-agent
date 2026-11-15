@@ -7,7 +7,9 @@ One SourceHttpClient per source (OpenAlex, arXiv, ...) gives:
 - a rate limiter, so requests to one source are spaced out (arXiv asks for
   about one request every 3 seconds) instead of getting us blocked;
 - one error type, SourceRequestError, for every kind of failure. The search
-  layer turns it into a SourceReport (doc 07 §5): failures are reported, not hidden.
+  layer turns it into a SourceReport (doc 07 §5): failures are reported, not hidden;
+- an optional response cache (src/retrieval/cache.py). Only responses that parse
+  correctly are cached, so an error page is never "remembered".
 
 Request parameters are never logged, because some sources take a contact email or a key there.
 """
@@ -15,6 +17,7 @@ Request parameters are never logged, because some sources take a contact email o
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import time
@@ -22,11 +25,15 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any
+from typing import Any, TypeVar
 
 import httpx
 
+from src.retrieval.cache import ResponseCache
+
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 USER_AGENT = "eureka-research-agent/0.1 (+https://github.com/PhkhakadzeJumber/research-ai-agent)"
 
@@ -92,6 +99,13 @@ class RateLimiter:
             self._last_start = self._clock()
 
 
+def _parse_json(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except ValueError:
+        raise ValueError("response was not valid JSON") from None
+
+
 def parse_retry_after(value: str | None, *, now: datetime | None = None) -> float | None:
     """Reads a Retry-After header: either seconds ('7') or an HTTP date. Returns seconds or None."""
     if not value:
@@ -124,6 +138,7 @@ class SourceHttpClient:
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Sleep = asyncio.sleep,
         clock: Clock = time.monotonic,
+        cache: ResponseCache | None = None,
     ) -> None:
         """
         Args:
@@ -135,9 +150,11 @@ class SourceHttpClient:
             headers: Extra headers; a descriptive User-Agent is always sent.
             transport, sleep, clock: Normally left empty. Tests pass fakes here
                 so no network or real waiting is involved.
+            cache: Optional response cache used by get_json / get_parsed.
         """
         self.source = source
         self.retry = retry or RetryPolicy()
+        self._cache = cache
         self._sleep = sleep
         self._limiter = RateLimiter(min_interval, clock=clock, sleep=sleep)
         self._client = httpx.AsyncClient(
@@ -157,16 +174,40 @@ class SourceHttpClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def get_json(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
-        """GET a JSON endpoint. Raises SourceRequestError if it fails or the body isn't JSON."""
+    async def get_parsed(
+        self, path: str, params: Mapping[str, Any] | None, parse: Callable[[str], T]
+    ) -> T:
+        """GET an endpoint and parse its text with `parse`, using the cache if there is one.
+
+        `parse` must raise SourceRequestError (or ValueError) for unusable responses.
+        A cached response that no longer parses is ignored and fetched again; a fresh
+        response is cached only after it parsed successfully.
+        """
+        params = dict(params or {})
+        if self._cache is not None:
+            cached = self._cache.get(self.source, path, params)
+            if cached is not None:
+                try:
+                    return parse(cached)
+                except (SourceRequestError, ValueError):
+                    logger.warning("cached response for source=%s path=%s no longer parses; refetching",
+                                   self.source, path)
+
         response = await self._get(path, params)
         try:
-            return response.json()
-        except ValueError:
-            raise SourceRequestError(self.source, "response was not valid JSON", status=response.status_code) from None
+            result = parse(response.text)
+        except ValueError as error:
+            raise SourceRequestError(self.source, str(error), status=response.status_code) from None
+        if self._cache is not None:
+            self._cache.put(self.source, path, params, response.text)
+        return result
+
+    async def get_json(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
+        """GET a JSON endpoint (cached if a cache is set). Raises SourceRequestError on failure or invalid JSON."""
+        return await self.get_parsed(path, params, _parse_json)
 
     async def get_text(self, path: str, params: Mapping[str, Any] | None = None) -> str:
-        """GET an endpoint that returns text (e.g. arXiv's XML feed)."""
+        """GET an endpoint's raw text, never cached (use get_parsed for cached, validated responses)."""
         response = await self._get(path, params)
         return response.text
 

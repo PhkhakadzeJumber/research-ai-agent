@@ -18,6 +18,10 @@ pip freeze --exclude-editable > requirements.txt             # after changing de
 docker compose up -d db                      # (planned)
 alembic upgrade head                         # (planned) apply migrations
 
+# Literature search from the command line (responses cached 7 days in .cache/http/)
+python -m scripts.search "your query" --sources arxiv     # arXiv only: free
+python -m scripts.search "your query" --limit 10 --from 2022  # all sources: uses a little OpenAlex budget, ask first
+
 # Backend
 uvicorn src.api.main:app --reload            # (planned) API on http://127.0.0.1:8000
 

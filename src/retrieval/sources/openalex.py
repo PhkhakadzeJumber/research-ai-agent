@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from src.config import get_retrieval_settings
+from src.retrieval.cache import ResponseCache
 from src.retrieval.http import SourceHttpClient, SourceRequestError
 from src.retrieval.records import ExternalIds, PaperRecord, SearchRequest, normalize_arxiv_id
 
@@ -154,17 +155,18 @@ class OpenAlexSource:
         api_key: str | None = None,
         mailto: str | None = None,
         http: SourceHttpClient | None = None,
+        cache: ResponseCache | None = None,
     ) -> None:
         self._api_key = api_key
         self._mailto = mailto
         # ~10 requests per second at most; OpenAlex's limits are generous, the budget is what counts.
-        self._http = http or SourceHttpClient(SOURCE, base_url=BASE_URL, min_interval=0.1)
+        self._http = http or SourceHttpClient(SOURCE, base_url=BASE_URL, min_interval=0.1, cache=cache)
 
     @classmethod
-    def from_settings(cls) -> OpenAlexSource:
+    def from_settings(cls, *, cache: ResponseCache | None = None) -> OpenAlexSource:
         """Creates the source with the key/email from the environment (.env)."""
         settings = get_retrieval_settings()
-        return cls(api_key=settings.openalex_api_key, mailto=settings.openalex_mailto)
+        return cls(api_key=settings.openalex_api_key, mailto=settings.openalex_mailto, cache=cache)
 
     async def __aenter__(self) -> OpenAlexSource:
         return self

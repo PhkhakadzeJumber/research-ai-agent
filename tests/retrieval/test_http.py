@@ -200,3 +200,85 @@ def test_rate_limiter_spaces_requests():
 
     run(go())
     assert waits == [2.0]
+
+
+# --- response cache ---------------------------------------------------------------
+
+class MemoryCache:
+    """A minimal ResponseCache for tests."""
+
+    def __init__(self):
+        self.entries = {}
+
+    def get(self, source, path, params):
+        return self.entries.get((source, path, tuple(sorted(params.items()))))
+
+    def put(self, source, path, params, text):
+        self.entries[(source, path, tuple(sorted(params.items())))] = text
+
+
+def make_cached_client(responses, cache):
+    calls = []
+    queue = list(responses)
+
+    def handler(request):
+        calls.append(request)
+        return queue.pop(0)
+
+    client = SourceHttpClient(
+        "testsource", base_url="https://api.example.org", retry=NO_JITTER,
+        transport=httpx.MockTransport(handler), sleep=FakeSleep(), cache=cache,
+    )
+    return client, calls
+
+
+def test_cached_json_is_served_without_a_request():
+    cache = MemoryCache()
+    client, calls = make_cached_client([httpx.Response(200, json={"n": 1})], cache)
+
+    async def go():
+        try:
+            first = await client.get_json("/x", {"q": "a"})
+            second = await client.get_json("/x", {"q": "a"})
+            return first, second
+        finally:
+            await client.aclose()
+
+    assert run(go()) == ({"n": 1}, {"n": 1})
+    assert len(calls) == 1  # the second answer came from the cache
+
+
+def test_invalid_responses_are_not_cached():
+    cache = MemoryCache()
+    client, _ = make_cached_client([httpx.Response(200, text="<html>maintenance</html>")], cache)
+    with pytest.raises(SourceRequestError, match="not valid JSON"):
+        run(get_json_and_close(client, "/x"))
+    assert cache.entries == {}
+
+
+def test_cached_entry_that_no_longer_parses_is_refetched():
+    cache = MemoryCache()
+    cache.put("testsource", "/x", {}, "garbage that is not json")
+    client, calls = make_cached_client([httpx.Response(200, json={"fresh": True})], cache)
+
+    assert run(get_json_and_close(client, "/x")) == {"fresh": True}
+    assert len(calls) == 1
+    assert cache.get("testsource", "/x", {}) == '{"fresh":true}'
+
+
+def test_get_parsed_does_not_cache_when_the_parser_rejects_the_response():
+    cache = MemoryCache()
+    client, _ = make_cached_client([httpx.Response(200, text="<error/>")], cache)
+
+    def reject(text):
+        raise SourceRequestError("testsource", "error entry in feed")
+
+    async def go():
+        try:
+            return await client.get_parsed("/feed", None, reject)
+        finally:
+            await client.aclose()
+
+    with pytest.raises(SourceRequestError, match="error entry"):
+        run(go())
+    assert cache.entries == {}

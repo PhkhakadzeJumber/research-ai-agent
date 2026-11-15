@@ -22,6 +22,7 @@ import time
 from collections.abc import Sequence
 from typing import Protocol
 
+from src.retrieval.cache import ResponseCache
 from src.retrieval.dedup import deduplicate
 from src.retrieval.http import SourceRequestError
 from src.retrieval.records import PaperRecord, SearchRequest, SearchResult, SourceReport
@@ -110,9 +111,24 @@ class LiteratureSearch:
         self._timeout = source_timeout
 
     @classmethod
-    def from_settings(cls) -> LiteratureSearch:
-        """The default sources: OpenAlex (with the key from .env, if set) and arXiv."""
-        return cls([OpenAlexSource.from_settings(), ArxivSource()])
+    def from_settings(
+        cls, *, cache: ResponseCache | None = None, sources: Sequence[str] | None = None
+    ) -> LiteratureSearch:
+        """The default sources: OpenAlex (with the key from .env, if set) and arXiv.
+
+        Args:
+            cache: Optional response cache shared by all sources.
+            sources: Limit to these source names (e.g. ["arxiv"]); default: all.
+        """
+        factories = {
+            "openalex": lambda: OpenAlexSource.from_settings(cache=cache),
+            "arxiv": lambda: ArxivSource(cache=cache),
+        }
+        names = list(sources) if sources else list(factories)
+        unknown = [name for name in names if name not in factories]
+        if unknown:
+            raise ValueError(f"Unknown source(s): {', '.join(unknown)}. Available: {', '.join(factories)}.")
+        return cls([factories[name]() for name in names])
 
     @property
     def source_names(self) -> tuple[str, ...]:

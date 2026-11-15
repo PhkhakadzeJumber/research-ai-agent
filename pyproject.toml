@@ -26,6 +26,7 @@ include = ["src*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]  # lets tests import the repo-root `scripts` package
 # Tests marked "live" call real (paid) APIs: excluded by default, run with: pytest -m live
 addopts = "-m 'not live'"
 markers = [

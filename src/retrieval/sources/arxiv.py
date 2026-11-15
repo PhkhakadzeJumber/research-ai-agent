@@ -24,6 +24,7 @@ import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
+from src.retrieval.cache import ResponseCache
 from src.retrieval.http import SourceHttpClient, SourceRequestError
 from src.retrieval.records import ExternalIds, PaperRecord, SearchRequest, collapse_whitespace
 
@@ -151,9 +152,9 @@ class ArxivSource:
 
     name = SOURCE
 
-    def __init__(self, *, http: SourceHttpClient | None = None) -> None:
+    def __init__(self, *, http: SourceHttpClient | None = None, cache: ResponseCache | None = None) -> None:
         self._http = http or SourceHttpClient(
-            SOURCE, base_url=BASE_URL, min_interval=MIN_INTERVAL_SECONDS, timeout=30.0
+            SOURCE, base_url=BASE_URL, min_interval=MIN_INTERVAL_SECONDS, timeout=30.0, cache=cache
         )
 
     async def __aenter__(self) -> ArxivSource:
@@ -171,7 +172,7 @@ class ArxivSource:
         Raises:
             SourceRequestError: the request failed or the response was unusable.
         """
-        xml_text = await self._http.get_text(QUERY_PATH, build_params(request))
-        papers = parse_feed(xml_text)
+        # get_parsed caches the response only if parse_feed accepts it (no cached error pages).
+        papers = await self._http.get_parsed(QUERY_PATH, build_params(request), parse_feed)
         logger.info("arxiv: %d papers", len(papers))
         return papers
