@@ -9,13 +9,11 @@ import json
 from decimal import Decimal
 
 import pytest
-from google.adk.models.base_llm import BaseLlm
-from google.adk.models.llm_response import LlmResponse
 from google.genai import types
-from pydantic import PrivateAttr
 
 from src.ai.schemas.paper_analysis import PaperAnalysisOutput
 from src.config import ConfigError, RoleLlmSettings, load_role_llm_settings
+from tests.fakes import ScriptedLlm, answer
 from src.llm import (
     LlmOutputInvalid,
     LlmRefusal,
@@ -26,41 +24,6 @@ from src.llm import (
 
 SETTINGS = RoleLlmSettings(role="paper_reader", model="claude-opus-5-5", effort="low", max_tokens=16000)
 VALID = json.dumps({"contribution_type": "method", "methods": ["Ragas"]})
-
-
-class ScriptedLlm(BaseLlm):
-    """Returns prepared answers in order and records every request it receives."""
-
-    model: str = "claude-opus-5-5"
-    _answers: list = PrivateAttr(default_factory=list)
-    _requests: list = PrivateAttr(default_factory=list)
-
-    @classmethod
-    def with_answers(cls, *answers):
-        llm = cls()
-        llm._answers = list(answers)
-        return llm
-
-    @property
-    def requests(self):
-        return self._requests
-
-    async def generate_content_async(self, llm_request, stream=False):
-        self._requests.append(llm_request)
-        text, finish = self._answers.pop(0)
-        yield LlmResponse(
-            content=types.Content(role="model", parts=[types.Part(text=text)]),
-            usage_metadata=types.GenerateContentResponseUsageMetadata(
-                prompt_token_count=3000, cached_content_token_count=2200, candidates_token_count=400,
-                thoughts_token_count=100,
-            ),
-            finish_reason=finish,
-            model_version="claude-opus-5-5",
-        )
-
-
-def answer(text, finish=types.FinishReason.STOP):
-    return (text, finish)
 
 
 def run(llm, **kwargs):
