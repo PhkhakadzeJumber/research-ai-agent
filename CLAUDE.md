@@ -62,7 +62,7 @@ cd frontend && npm run lint && npm run build # (planned)
 - **External APIs** go through adapters with timeouts, retries with backoff, rate limits and the API cache. Tools return errors as data (`status` + `error_message`).
 - **Tests:** the default `pytest` run uses recorded fixtures (no network). Tests that hit real APIs are marked `live`.
 - **Docs stay true:** if code changes the design, update the relevant doc in the same change.
-- **Commits:** plain messages in the user's name only. No `Co-Authored-By`, no mention of Claude. Commit only when asked.
+- **Commits:** in the user's name only. A short subject line, a blank line, then a description: what changed and why (key files, decisions, test status). No `Co-Authored-By`, no mention of Claude. Commit only when asked.
 
 ## Always
 
