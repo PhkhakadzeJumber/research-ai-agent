@@ -185,7 +185,7 @@ class SourceHttpClient:
         """
         params = dict(params or {})
         if self._cache is not None:
-            cached = self._cache.get(self.source, path, params)
+            cached = await self._cache.get(self.source, path, params)
             if cached is not None:
                 try:
                     return parse(cached)
@@ -199,7 +199,7 @@ class SourceHttpClient:
         except ValueError as error:
             raise SourceRequestError(self.source, str(error), status=response.status_code) from None
         if self._cache is not None:
-            self._cache.put(self.source, path, params, response.text)
+            await self._cache.put(self.source, path, params, response.text)
         return result
 
     async def get_json(self, path: str, params: Mapping[str, Any] | None = None) -> Any:

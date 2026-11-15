@@ -287,7 +287,7 @@ Deferred: ConversationMessage, ToolCall (section 8)
 | paper id | The global paper | — | `p_8812` |
 | found by query IDs | Which queries surfaced it | Shows *how* it was found (analyst vs Skeptic); saturation per round uses the first finder | `q_12`, `q_40` |
 | relevance (embedding) | Similarity score to the facets / idea | Ranking | 0.81 |
-| source rank | The best rank any source gave the paper (1 = top) | A free relevance signal before any embedding or LLM screening | 2 |
+| source rank | The paper's rank in the combined, deduplicated search result (1 = top); the best rank is kept when the same scope searches again | A free relevance signal before any embedding or LLM screening | 2 |
 | relevance (LLM) | Screening score 0–3 + reason | Precision filtering; "relevant" for saturation means ≥2 | 3, "same task and method" |
 | screened / selected for reading | Flags | Funnel counts in the coverage snapshot | selected |
 

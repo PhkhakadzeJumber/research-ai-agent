@@ -87,7 +87,7 @@ class RetrievalHit(UUIDPrimaryKey, Timestamps, Base):
     found_by_query_ids: Mapped[list[uuid.UUID]] = mapped_column(
         ARRAY(Uuid), default=list, server_default=sql_text("'{}'")
     )
-    source_rank: Mapped[int | None] = mapped_column(Integer)  # best rank any source gave it (1 = top)
+    source_rank: Mapped[int | None] = mapped_column(Integer)  # rank in the combined result (1 = top); best kept
     embed_score: Mapped[float | None] = mapped_column(Float)
     llm_score: Mapped[int | None] = mapped_column(SmallInteger)
     llm_reason: Mapped[str | None] = mapped_column(Text)

@@ -3,9 +3,9 @@
 Why: OpenAlex charges each request against a daily budget, arXiv asks for slow request
 rates, and tests/demos should be repeatable. A cached response is reused for 7 days.
 
-This is a temporary file-based cache in `.cache/http/` (gitignored). In step 2 it's
-replaced by the ApiCache database table (doc 10 §8), behind the same ResponseCache
-interface, so the source adapters won't change.
+FileResponseCache stores files in `.cache/http/` (gitignored); DbResponseCache
+(src/db/repositories/cache.py) stores rows in the api_cache table. Both follow the
+ResponseCache interface, so the source adapters don't care which one is used.
 
 Secrets never reach the cache: parameters like `api_key` and `mailto` are left out of
 both the cache key and the stored file. The same query with a different key is the
@@ -32,11 +32,13 @@ SECRET_PARAMS = frozenset({"api_key", "key", "token", "mailto", "email"})
 
 
 class ResponseCache(Protocol):
-    """What SourceHttpClient needs from a cache. Implemented by files now, by the database later."""
+    """What SourceHttpClient needs from a cache: FileResponseCache (files) or
+    DbResponseCache (the api_cache table, src/db/repositories/cache.py).
+    Async, because database access is async."""
 
-    def get(self, source: str, path: str, params: Mapping[str, Any]) -> str | None: ...
+    async def get(self, source: str, path: str, params: Mapping[str, Any]) -> str | None: ...
 
-    def put(self, source: str, path: str, params: Mapping[str, Any], text: str) -> None: ...
+    async def put(self, source: str, path: str, params: Mapping[str, Any], text: str) -> None: ...
 
 
 def public_params(params: Mapping[str, Any]) -> dict[str, str]:
@@ -69,7 +71,7 @@ class FileResponseCache:
     def _file(self, source: str, path: str, params: Mapping[str, Any]) -> Path:
         return self.directory / source / f"{cache_key(source, path, params)}.json"
 
-    def get(self, source: str, path: str, params: Mapping[str, Any]) -> str | None:
+    async def get(self, source: str, path: str, params: Mapping[str, Any]) -> str | None:
         """The cached response text, or None if missing, expired or unreadable."""
         file = self._file(source, path, params)
         if not file.exists():
@@ -89,7 +91,7 @@ class FileResponseCache:
         self.hits += 1
         return text
 
-    def put(self, source: str, path: str, params: Mapping[str, Any], text: str) -> None:
+    async def put(self, source: str, path: str, params: Mapping[str, Any], text: str) -> None:
         """Stores a response. A failure to write is logged, never raised: caching is optional."""
         file = self._file(source, path, params)
         entry = {

@@ -210,10 +210,10 @@ class MemoryCache:
     def __init__(self):
         self.entries = {}
 
-    def get(self, source, path, params):
+    async def get(self, source, path, params):
         return self.entries.get((source, path, tuple(sorted(params.items()))))
 
-    def put(self, source, path, params, text):
+    async def put(self, source, path, params, text):
         self.entries[(source, path, tuple(sorted(params.items())))] = text
 
 
@@ -258,12 +258,12 @@ def test_invalid_responses_are_not_cached():
 
 def test_cached_entry_that_no_longer_parses_is_refetched():
     cache = MemoryCache()
-    cache.put("testsource", "/x", {}, "garbage that is not json")
+    asyncio.run(cache.put("testsource", "/x", {}, "garbage that is not json"))
     client, calls = make_cached_client([httpx.Response(200, json={"fresh": True})], cache)
 
     assert run(get_json_and_close(client, "/x")) == {"fresh": True}
     assert len(calls) == 1
-    assert cache.get("testsource", "/x", {}) == '{"fresh":true}'
+    assert asyncio.run(cache.get("testsource", "/x", {})) == '{"fresh":true}'
 
 
 def test_get_parsed_does_not_cache_when_the_parser_rejects_the_response():
