@@ -43,7 +43,7 @@ Almost every call returns a schema (the data shapes in doc 10). Rules:
 - Every schema field has a description; the model reads those as instructions.
 - After the response arrives, code validates it against the schema. **On failure:** one retry with the validation error included in the request. If it fails again, the stage is marked partial and the run continues.
 - Enumerations (categories, statuses) are closed sets, so the model can't invent new labels.
-- **Important ADK + Claude detail:** ADK delivers an output schema to Claude as a hidden tool. If thinking isn't configured, ADK *forces* that tool call, and the current Opus/Sonnet models reject forced tool calls with a 400 error. Every structured-output agent therefore sets **adaptive thinking** in its generation config, which makes ADK offer the tool instead of forcing it. This comes from reading ADK's source (google-adk 2.13). **Confirm it in the week-1 spike.**
+- **Important ADK + Claude detail:** ADK delivers an output schema to Claude as a hidden tool. If thinking isn't configured, ADK *forces* that tool call, and the current Opus/Sonnet models reject forced tool calls with a 400 error. Every structured-output agent therefore sets **adaptive thinking** in its generation config, which makes ADK offer the tool instead of forcing it. This comes from reading ADK's source (google-adk 2.13) and is **confirmed against the real API** (step 3.4 live test, 2026-11-15: valid output on the first attempt, prompt caching active on the repeat call). Implemented in `run_structured()` in `src/llm.py`.
 - Don't set temperature or other sampling parameters; current models reject them. Use effort to trade quality against cost.
 
 ## 4. Prompt design conventions

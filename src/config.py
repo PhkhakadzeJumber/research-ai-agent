@@ -12,6 +12,7 @@ There are independent groups, so a missing value in one never blocks the others:
 - RetrievalSettings (get_retrieval_settings): the literature-source settings.
 - DatabaseSettings (get_database_settings): the database connections.
 - EmbeddingSettings (get_embedding_settings): the Vertex AI embedding model.
+- RoleLlmSettings (get_role_llm_settings): model and effort per agent role.
 """
 
 from __future__ import annotations
@@ -226,3 +227,48 @@ def get_embedding_settings() -> EmbeddingSettings:
     """Returns the embedding settings, loading `.env` on first use."""
     load_dotenv()
     return load_embedding_settings(os.environ)
+
+
+# Default reasoning effort per agent role (doc 08 §2). Effort controls how hard Claude
+# thinks: more effort = better on hard judgments, more tokens and time.
+ROLE_DEFAULT_EFFORT = {
+    "idea_analyst": "medium",
+    "scout": "high",
+    "paper_reader": "low",
+    "relevance_screening": "low",
+    "novelty": "high",
+    "skeptic": "high",
+    "feasibility_quick": "medium",
+    "value_feasibility": "high",
+    "proposal": "medium",
+}
+
+
+@dataclass(frozen=True)
+class RoleLlmSettings:
+    role: str
+    model: str
+    effort: str
+    max_tokens: int
+
+
+def load_role_llm_settings(role: str, environ: Mapping[str, str]) -> RoleLlmSettings:
+    """The model and effort for one agent role.
+
+    Defaults: EUREKA_LLM_MODEL, the role's default effort (ROLE_DEFAULT_EFFORT, else
+    EUREKA_LLM_EFFORT) and EUREKA_LLM_MAX_TOKENS. Per-role overrides, e.g. a cheaper
+    Paper Reader: EUREKA_LLM_MODEL_PAPER_READER, EUREKA_LLM_EFFORT_PAPER_READER.
+    """
+    base = load_settings(environ)
+    suffix = role.upper()
+    model = environ.get(f"EUREKA_LLM_MODEL_{suffix}", "").strip() or base.llm_model
+    effort = environ.get(f"EUREKA_LLM_EFFORT_{suffix}", "").strip() or ROLE_DEFAULT_EFFORT.get(role, base.llm_effort)
+    if effort not in EFFORT_LEVELS:
+        raise ConfigError(f"EUREKA_LLM_EFFORT_{suffix} must be one of {', '.join(EFFORT_LEVELS)}, got {effort!r}.")
+    return RoleLlmSettings(role=role, model=model, effort=effort, max_tokens=base.llm_max_tokens)
+
+
+def get_role_llm_settings(role: str) -> RoleLlmSettings:
+    """The model and effort for one agent role, loading `.env` on first use."""
+    get_settings()  # loads .env and validates the base settings
+    return load_role_llm_settings(role, os.environ)

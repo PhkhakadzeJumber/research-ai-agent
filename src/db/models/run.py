@@ -1,7 +1,7 @@
 """Request & run control (ER region 1; field meanings in doc 10 §2–§3). Minimal for now.
 
-Only the fields retrieval needs today. Intake, ProgressEvent, LlmCall and the
-remaining investigation columns arrive with the code that fills them.
+Only the fields needed so far. Intake, ProgressEvent and the remaining investigation
+columns arrive with the code that fills them. LlmCall arrived with step 3.4.
 
 The exact status and stage names of the formal state graph (doc 05 §11) are defined
 here and enforced by CHECK constraints, so an investigation can never be in a state
@@ -15,7 +15,7 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import CheckConstraint, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, Numeric, SmallInteger, String, UniqueConstraint, Uuid
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -93,3 +93,38 @@ class Investigation(UUIDPrimaryKey, Timestamps, Base):
     cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("0"), server_default="0")
     assumptions: Mapped[list[Any]] = mapped_column(JSONB, default=list, server_default=sql_text("'[]'::jsonb"))
     config_version: Mapped[str | None] = mapped_column(String(64))
+
+
+class LlmCall(UUIDPrimaryKey, Timestamps, Base):
+    """One call to Claude (doc 10 §8): cost accounting, budgets, debugging, and tying
+    evaluation results to prompt versions. Written from src/llm.py's LlmCallRecord."""
+
+    __tablename__ = "llm_calls"
+    __table_args__ = (
+        CheckConstraint(
+            "input_tokens >= 0 AND output_tokens >= 0 AND thinking_tokens >= 0 "
+            "AND cache_read_tokens >= 0 AND cache_creation_tokens >= 0",
+            name="tokens_not_negative",
+        ),
+        CheckConstraint("cost_usd IS NULL OR cost_usd >= 0", name="cost_not_negative"),
+        CheckConstraint("attempt >= 1", name="attempt_positive"),
+    )
+
+    # Empty for calls outside an investigation (e.g. a paper analysed for the global library).
+    investigation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("investigations.id", ondelete="CASCADE"), index=True
+    )
+    evaluation_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, index=True)  # FK added in step 4
+    role: Mapped[str] = mapped_column(String(32), index=True)
+    model: Mapped[str] = mapped_column(String(64))
+    effort: Mapped[str] = mapped_column(String(16))
+    prompt_version: Mapped[str] = mapped_column(String(128))
+    attempt: Mapped[int] = mapped_column(SmallInteger)  # 2 = the repair attempt after invalid output
+    input_tokens: Mapped[int] = mapped_column(Integer)
+    output_tokens: Mapped[int] = mapped_column(Integer)
+    thinking_tokens: Mapped[int] = mapped_column(Integer)
+    cache_read_tokens: Mapped[int] = mapped_column(Integer)
+    cache_creation_tokens: Mapped[int] = mapped_column(Integer)
+    latency_ms: Mapped[int] = mapped_column(Integer)
+    stop_reason: Mapped[str] = mapped_column(String(32))
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))  # estimate; NULL if the price is unknown
