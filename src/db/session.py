@@ -18,6 +18,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import asyncio
+
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from src.config import get_database_settings
@@ -49,6 +52,19 @@ class Database:
             except BaseException:
                 await session.rollback()
                 raise
+
+    async def ping(self, timeout: float = 3.0) -> bool:
+        """True if the database answers within `timeout` seconds. Never raises."""
+
+        async def select_one() -> None:
+            async with self.engine.connect() as connection:
+                await connection.execute(text("SELECT 1"))
+
+        try:
+            await asyncio.wait_for(select_one(), timeout)
+            return True
+        except Exception:  # refused, wrong password, timeout, ...: all mean "not usable now"
+            return False
 
     async def dispose(self) -> None:
         """Closes all pooled connections."""

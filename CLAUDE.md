@@ -22,9 +22,10 @@ alembic upgrade head                         # apply migrations (URL from settin
 alembic revision --autogenerate -m "what changed"  # draft a migration after changing models; review it before use
 alembic current                              # which migration the database is at
 
-# Literature search from the command line (responses cached 7 days in .cache/http/)
+# Literature search from the command line (responses cached 7 days: database api_cache, or .cache/http/ if the DB is down)
 python -m scripts.search "your query" --sources arxiv     # arXiv only: free
 python -m scripts.search "your query" --limit 10 --from 2022  # all sources: uses a little OpenAlex budget, ask first
+python -m scripts.search "your query" --sources arxiv --save  # store as an investigation (needs the database)
 
 # Backend
 uvicorn src.api.main:app --reload            # (planned) API on http://127.0.0.1:8000
