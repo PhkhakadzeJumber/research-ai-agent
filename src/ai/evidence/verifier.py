@@ -52,7 +52,9 @@ _NEGATIONS = re.compile(r"\b(?:not|no|never|none|nor|neither|nothing|nobody|nowh
 
 def normalize(text: str) -> str:
     """The comparison form of a text: same words, formatting differences removed."""
-    text = unicodedata.normalize("NFKC", text).translate(_TRANSLATION)
+    # "&lt;" -> "<": paper text shown to agents has tag-like text neutralized (src/ai/context.py),
+    # so a quote of such a passage must still match the stored original.
+    text = unicodedata.normalize("NFKC", text).replace("&lt;", "<").translate(_TRANSLATION)
     text = _LINE_BREAK_HYPHEN.sub(r"\1\2", text)  # "evalu-\nation" -> "evaluation" (before newlines vanish)
     return _WHITESPACE.sub(" ", text).strip().lower()
 

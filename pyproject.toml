@@ -31,6 +31,9 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["src*"]
 
+[tool.setuptools.package-data]
+"src.ai.prompts" = ["*.md"]  # prompt files ship with the package (e.g. in the Docker image)
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]  # lets tests import the repo-root `scripts` package
