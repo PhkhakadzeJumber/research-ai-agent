@@ -1,5 +1,6 @@
 """Context packets: exactly what an agent sees, built by code (doc 08 §5). Papers for the
-Paper Reader (render_paper) and ideas for the Idea Analyst (render_idea).
+Paper Reader (render_paper); ideas, revisions and query-planning tasks for the Idea
+Analyst (render_idea, render_revision, render_query_task).
 
 Agents never read the database themselves. The orchestrator gives each one a curated
 packet, rendered as clearly labelled blocks so the model knows what it may cite:
@@ -183,3 +184,50 @@ def render_revision(request: IdeaForAnalysis, reading_json: str, answers: tuple[
         f"<reading>\n{_contain_revision_text(reading_json)}\n</reading>",
         f"<answers>\n{items}\n</answers>",
     ])
+
+
+
+# --- the Idea Analyst's query-planning packet ----------------------------------------------------------
+#
+#     <candidate>
+#     <title>...</title>
+#     <research_question>...</research_question>
+#     <facet number="1" kind="problem" key="yes">...</facet>
+#     </candidate>
+#     <task>Write 15-20 queries. Quotas: ...</task>
+
+_CANDIDATE_TAGS = re.compile(r"<(/?)(candidate|title|research_question|facet|task)\b", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class FacetForPlanning:
+    number: int
+    kind: str
+    text: str
+    is_key: bool
+
+
+@dataclass(frozen=True)
+class CandidateForPlanning:
+    title: str
+    research_question: str
+    facets: tuple[FacetForPlanning, ...]
+
+
+def _contain_candidate_text(text: str) -> str:
+    return _CANDIDATE_TAGS.sub(lambda match: f"&lt;{match.group(1)}{match.group(2)}", text.strip())
+
+
+def render_query_task(candidate: CandidateForPlanning, *, task: str) -> str:
+    """The Idea Analyst's input for a query plan. `task` states the count and quotas (written by code)."""
+    if not candidate.facets:
+        raise ValueError("A candidate needs facets to plan queries.")
+    lines = ["<candidate>", f"<title>{_contain_candidate_text(candidate.title)}</title>",
+             f"<research_question>{_contain_candidate_text(candidate.research_question)}</research_question>"]
+    for facet in candidate.facets:
+        key = "yes" if facet.is_key else "no"
+        lines.append(f'<facet number="{facet.number}" kind="{facet.kind}" key="{key}">'
+                     f"{_contain_candidate_text(facet.text)}</facet>")
+    lines.append("</candidate>")
+    lines.append(f"<task>{task}</task>")
+    return "\n".join(lines)

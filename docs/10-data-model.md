@@ -528,6 +528,7 @@ Facets belong to a specific candidate version and are frozen with it.
 | step | Where the evaluation is: one of the exact step names in doc 05 §11.4, from `normalizing` to `done` | In Mode 2 several evaluations run in parallel, so each needs its own position; resume and progress per candidate | skeptic_review |
 | started / finished | Timing | Latency analysis, UI | — |
 | counters | Queries, papers screened/read, Skeptic rounds | Budgets; input to the snapshot | 280 screened, 31 read, 3 rounds |
+| query plan | A1's planned queries: text, kind, the facets each covers, optional first year | Which facets were searched for and how; the search trail stores each query sent, but not the facets it was meant to cover | 18 queries, 9 terminology variants |
 | status | running / done / partial / failed | *How* it ended: a failed step degrades the evaluation to `partial` instead of stopping the investigation | done |
 
 **Coverage snapshot fields** (computed from the search trail and challenges, then frozen)

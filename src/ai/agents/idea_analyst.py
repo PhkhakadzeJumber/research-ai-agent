@@ -10,8 +10,13 @@ revise_idea() (step 4.3) gives A1 its earlier reading plus the user's answers to
 clarifying questions, and returns the corrected reading in the same shape (prompt
 idea_analyst_revise). It's called only when the user answered something.
 
+plan_queries() (step 4.4) writes the searches for one candidate (prompt
+idea_analyst_query_plan). Code checks the quotas (src/ai/schemas/query_plan.py); a plan
+that misses them is regenerated once with the exact shortfalls. If the second plan still
+misses some, it is used anyway and the shortfalls are returned (recorded as a degraded step).
+
 The facet rules live in the schema, so a broken answer gets one automatic repair attempt.
-Field brief (Mode 2), query plan and candidate normalization come with later steps.
+Field brief (Mode 2) and candidate normalization come with later steps.
 """
 
 from __future__ import annotations
@@ -20,8 +25,17 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from src.ai.context import IdeaForAnalysis, QuestionAnswer, render_idea, render_revision
+from src.ai.context import (
+    CandidateForPlanning,
+    IdeaForAnalysis,
+    QuestionAnswer,
+    render_idea,
+    render_query_task,
+    render_revision,
+)
 from src.ai.prompts import system_prompt
+from src.ai.schemas import query_plan
+from src.ai.schemas.query_plan import QUERY_COUNTS, FacetRef, QueryPlanOutput, check_quotas, required_variants
 from src.ai.schemas.structured_idea import SCHEMA_VERSION, StructuredIdeaOutput
 from src.config import RoleLlmSettings
 from src.llm import LlmCallRecord, run_structured
@@ -79,3 +93,67 @@ async def revise_idea(
     output = result.output.model_copy(update={"clarifying_questions": []})
     return IdeaReading(output=output, schema_version=SCHEMA_VERSION, prompt_version=system.version_id,
                        records=result.records)
+
+
+
+@dataclass(frozen=True)
+class QueryPlanReading:
+    output: QueryPlanOutput
+    schema_version: str
+    prompt_version: str
+    records: list[LlmCallRecord]
+    problems: list[str]
+    """Quota shortfalls left after the regeneration (empty normally)."""
+    regenerated: bool = False
+    """True if the first plan missed the quotas and a second one was written."""
+
+
+def quota_task(candidate: CandidateForPlanning, depth: str) -> str:
+    """The count and quotas, stated for the model (the same numbers check_quotas() enforces)."""
+    low, high = QUERY_COUNTS[depth]
+    keys = [facet for facet in candidate.facets if facet.is_key]
+    variants = required_variants(len(keys), depth)
+    parts = [f"Write {low}-{high} queries.",
+             f"At least {query_plan.MIN_WITHOUT_METHOD} must be 'without_method' queries that cover no method facet."]
+    if keys:
+        numbers = ", ".join(str(facet.number) for facet in keys)
+        parts.append(f"For each key facet ({numbers}), at least {variants} 'terminology_variant' queries that "
+                     "list that facet.")
+    return " ".join(parts)
+
+
+async def plan_queries(
+    candidate: CandidateForPlanning,
+    *,
+    depth: str,
+    settings: RoleLlmSettings | None = None,
+    model: Any | None = None,
+) -> QueryPlanReading:
+    """A query plan meeting the quotas (regenerated once if needed). Raises LlmError subclasses."""
+    system = system_prompt(ROLE, task="query_plan")
+    facets = [FacetRef(f.number, f.kind, f.is_key) for f in candidate.facets]
+    task = quota_task(candidate, depth)
+    message = render_query_task(candidate, task=task)
+    records: list[LlmCallRecord] = []
+
+    result = await run_structured(
+        ROLE, system=system.text, prompt_version=system.version_id, user_message=message,
+        output_schema=QueryPlanOutput, settings=settings, model=model, cache=PROMPT_CACHE,
+    )
+    records.extend(result.records)
+    plan, problems = result.output, check_quotas(result.output, facets, depth)
+    regenerated = bool(problems)
+
+    if problems:  # one regeneration, naming exactly what was missing
+        retry = (f"{message}\n<previous_plan>\n{plan.model_dump_json(indent=1)}\n</previous_plan>\n"
+                 f"<problems>Your previous plan missed: {'; '.join(problems)}. Write a complete new plan that "
+                 "fixes these and keeps what was good.</problems>")
+        result = await run_structured(
+            ROLE, system=system.text, prompt_version=system.version_id, user_message=retry,
+            output_schema=QueryPlanOutput, settings=settings, model=model, cache=PROMPT_CACHE,
+        )
+        records.extend(result.records)
+        plan, problems = result.output, check_quotas(result.output, facets, depth)
+
+    return QueryPlanReading(output=plan, schema_version=query_plan.SCHEMA_VERSION, prompt_version=system.version_id,
+                            records=records, problems=problems, regenerated=regenerated)

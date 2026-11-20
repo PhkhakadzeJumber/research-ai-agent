@@ -50,6 +50,8 @@ Model settings use Claude through ADK (doc 08). *Effort* is the model's reasonin
 - The title and research question use only what the user stated; A1's proposals appear only in facets and assumptions (prompt v2, after the step 4.2 live run showed A1 turning a vague idea into a concrete idea of its own). A key facet A1 proposed must be confirmed by the user at clarification and can't be skipped (step 4.3).
 - Vagueness flags must be specific, e.g. "the evaluation is undefined" rather than "too vague".
 - Query plans must include at least 3 terminology variants per key concept and at least 2 queries that leave out the method (to find the same problem solved differently).
+  - As built (step 4.4, `src/ai/schemas/query_plan.py`): light 8–10 queries, full 15–20; each query is 3–8 keywords (some sources require every word); "key concept" = key facet, with the variants per key facet reduced (min. 1) when the plan has no room for 3 each; a `without_method` query may not list any method facet.
+  - If A1 fails to write a plan at all, a plain plan built from the facets is used and the step is recorded as degraded (the evaluation ends `partial`).
 - The field brief must respect exclusions and the complexity level. For Beginner, prefer subtopics with public datasets and established baselines.
 
 **Failure modes:**

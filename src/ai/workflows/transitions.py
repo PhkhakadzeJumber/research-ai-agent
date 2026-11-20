@@ -1,4 +1,4 @@
-"""Applying investigation and candidate state changes to the database (doc 05 §11.7).
+"""Applying investigation, candidate and evaluation state changes to the database (doc 05 §11.7).
 
 Every change:
   1. locks the investigation row (two workers can't move it at once),
@@ -15,8 +15,8 @@ resumes at the last committed stage. Typical use:
                                                     expected_from="full_evaluation")
         session.add(...)                               # the stage's outputs
 
-Candidate statuses work the same way (set_candidate_status, step 4.3). Evaluation steps
-get their function when the Evaluation table arrives; check_step already exists.
+Candidate statuses (set_candidate_status, step 4.3) and evaluation steps
+(start_evaluation, advance_evaluation, end_evaluation, step 4.4) work the same way.
 Progress events (doc 10 ProgressEvent) are emitted from here once that table exists.
 """
 
@@ -29,16 +29,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.ai.workflows.states import (
     FINAL_INVESTIGATION_STATUSES,
     CandidateStatus,
+    EvaluationStatus,
+    EvaluationStep,
     STAGE_STATUS,
     IllegalTransition,
     InvestigationStatus,
     Stage,
     check_candidate_status,
     check_stage,
+    check_step,
 )
-from src.db.models import Candidate, Investigation
+from src.db.models import Candidate, Evaluation, Investigation
+from src.db.repositories.evaluations import create_evaluation, lock_evaluation
 from src.db.repositories.candidates import lock_candidate
 from src.db.repositories.runs import lock_investigation
+from src.timeutil import now
 
 
 class InvestigationNotFound(LookupError):
@@ -46,6 +51,10 @@ class InvestigationNotFound(LookupError):
 
 
 class CandidateNotFound(LookupError):
+    pass
+
+
+class EvaluationNotFound(LookupError):
     pass
 
 
@@ -144,3 +153,62 @@ async def set_candidate_status(
         candidate.rejection_reason = reason
     await session.flush()
     return candidate
+
+
+# --- evaluations (doc 05 §11.4) -------------------------------------------------------------------------
+
+async def start_evaluation(
+    session: AsyncSession, candidate_id: uuid.UUID, *, depth: str, extends_id: uuid.UUID | None = None
+) -> Evaluation:
+    """A new evaluation pass at its first step: normalizing, or planning_queries when it extends a light one."""
+    first = check_step(None, EvaluationStep.PLANNING_QUERIES if extends_id else EvaluationStep.NORMALIZING)
+    return await create_evaluation(session, candidate_id=candidate_id, depth=depth, step=first,
+                                   extends_id=extends_id)
+
+
+async def _locked_evaluation(session: AsyncSession, evaluation_id: uuid.UUID) -> Evaluation:
+    evaluation = await lock_evaluation(session, evaluation_id)
+    if evaluation is None:
+        raise EvaluationNotFound(f"No evaluation {evaluation_id}.")
+    if evaluation.status != EvaluationStatus.RUNNING:
+        raise IllegalTransition(f"evaluation {evaluation_id} has ended ({evaluation.status})")
+    return evaluation
+
+
+async def advance_evaluation(
+    session: AsyncSession, evaluation_id: uuid.UUID, *, to: str, expected_from: str
+) -> Evaluation:
+    """Moves a running evaluation to step `to`. Reaching `done` ends it (status done, or partial
+    if a step degraded it). Raises EvaluationNotFound, IllegalTransition (StaleState included)."""
+    evaluation = await _locked_evaluation(session, evaluation_id)
+    if evaluation.step != EvaluationStep(expected_from):
+        raise StaleState(f"evaluation {evaluation_id} is at {evaluation.step}, not {expected_from}")
+    evaluation.step = check_step(evaluation.step, to)
+    if evaluation.step == EvaluationStep.DONE:
+        degraded = bool((evaluation.counters or {}).get("degraded_steps"))
+        evaluation.status = EvaluationStatus.PARTIAL if degraded else EvaluationStatus.DONE
+        evaluation.finished_at = now()
+    await session.flush()
+    return evaluation
+
+
+async def note_degraded(session: AsyncSession, evaluation_id: uuid.UUID, step: str, reason: str) -> Evaluation:
+    """Records that a step failed and was worked around: the evaluation will end `partial`
+    instead of stopping the investigation (doc 05 §11.4)."""
+    evaluation = await _locked_evaluation(session, evaluation_id)
+    counters = dict(evaluation.counters or {})
+    counters["degraded_steps"] = [*counters.get("degraded_steps", []), {"step": step, "reason": reason}]
+    evaluation.counters = counters
+    await session.flush()
+    return evaluation
+
+
+async def end_evaluation(session: AsyncSession, evaluation_id: uuid.UUID, *, status: str = "failed") -> Evaluation:
+    """Ends a running evaluation early (e.g. failed). The step keeps its last value."""
+    if EvaluationStatus(status) == EvaluationStatus.RUNNING:
+        raise IllegalTransition("an evaluation can't be ended as running")
+    evaluation = await _locked_evaluation(session, evaluation_id)
+    evaluation.status = EvaluationStatus(status)
+    evaluation.finished_at = now()
+    await session.flush()
+    return evaluation

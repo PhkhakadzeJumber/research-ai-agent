@@ -56,7 +56,9 @@ class SearchQuery(UUIDPrimaryKey, Timestamps, Base):
     investigation_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("investigations.id", ondelete="CASCADE"), index=True
     )
-    evaluation_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, index=True)  # FK added in step 4
+    evaluation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("evaluations.id", ondelete="CASCADE"), index=True
+    )
     origin: Mapped[str] = mapped_column(String(16))
     query_type: Mapped[str | None] = mapped_column(String(32))
     round: Mapped[int | None] = mapped_column(Integer)  # Skeptic round, for saturation
@@ -82,7 +84,9 @@ class RetrievalHit(UUIDPrimaryKey, Timestamps, Base):
     investigation_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("investigations.id", ondelete="CASCADE"), index=True
     )
-    evaluation_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, index=True)  # FK added in step 4
+    evaluation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("evaluations.id", ondelete="CASCADE"), index=True
+    )
     paper_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("papers.id"), index=True)
     found_by_query_ids: Mapped[list[uuid.UUID]] = mapped_column(
         ARRAY(Uuid), default=list, server_default=sql_text("'{}'")

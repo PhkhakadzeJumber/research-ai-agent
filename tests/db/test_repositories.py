@@ -12,6 +12,7 @@ from src.db.repositories.cache import DbResponseCache
 from src.db.repositories.papers import PaperMergeConflict, upsert_paper
 from src.db.repositories.runs import create_investigation
 from src.db.repositories.search_trail import save_search
+from tests.db.factories import make_evaluation
 from src.retrieval.records import ExternalIds, PaperRecord, SearchRequest, SearchResult, SourceReport
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
@@ -172,12 +173,11 @@ async def test_repeated_search_updates_hits_instead_of_duplicating(db_session):
 
 
 async def test_another_scope_gets_its_own_hit(db_session):
-    import uuid
-
     investigation = await new_investigation(db_session)
+    evaluation = await make_evaluation(db_session, investigation.id)
     await save_search(db_session, investigation.id, search_result(record(openalex="W1")), origin="landscape")
     await save_search(db_session, investigation.id, search_result(record(openalex="W1")), origin="analyst",
-                      evaluation_id=uuid.uuid4())
+                      evaluation_id=evaluation.id)
     assert await count(db_session, RetrievalHit) == 2
     assert await count(db_session, Paper) == 1
 

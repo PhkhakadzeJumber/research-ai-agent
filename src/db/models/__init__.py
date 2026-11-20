@@ -6,6 +6,7 @@ a model that isn't imported here is invisible to migrations.
 """
 
 from src.db.models.candidates import Candidate, Facet  # region 4: where ideas come from
+from src.db.models.evaluations import Evaluation  # region 5: judging a candidate
 from src.db.models.library import Chunk, Paper, PaperAnalysis, Quote  # region 3: science library
 from src.db.models.run import Intake, Investigation, LlmCall, User  # region 1: request & run control
 from src.db.models.search_trail import ApiCache, RetrievalHit, SearchQuery  # region 2: search trail
@@ -14,6 +15,7 @@ __all__ = [
     "ApiCache",
     "Candidate",
     "Chunk",
+    "Evaluation",
     "Facet",
     "Intake",
     "Investigation",

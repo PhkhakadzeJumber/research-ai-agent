@@ -16,7 +16,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, Numeric, SmallInteger, String, UniqueConstraint, Uuid
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, Numeric, SmallInteger, String, UniqueConstraint
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -170,7 +170,9 @@ class LlmCall(UUIDPrimaryKey, Timestamps, Base):
     investigation_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("investigations.id", ondelete="CASCADE"), index=True
     )
-    evaluation_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, index=True)  # FK added in step 4
+    evaluation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("evaluations.id", ondelete="CASCADE"), index=True
+    )
     role: Mapped[str] = mapped_column(String(32), index=True)
     model: Mapped[str] = mapped_column(String(64))
     effort: Mapped[str] = mapped_column(String(16))

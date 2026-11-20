@@ -10,6 +10,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from src.db.models import ApiCache, Investigation, Paper, RetrievalHit, SearchQuery, User
+from tests.db.factories import make_evaluation
 from src.db.models.run import INVESTIGATION_STAGES, INVESTIGATION_STATUSES
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
@@ -116,8 +117,9 @@ async def test_one_hit_per_paper_per_scope(db_session):
         constraint="uq_retrieval_hits_investigation_id_evaluation_id_paper_id",
     )
     # Same paper in an evaluation's scope: a different scope, so allowed.
+    evaluation = await make_evaluation(db_session, investigation.id)
     await add_and_flush(db_session, RetrievalHit(investigation_id=investigation.id, paper_id=paper.id,
-                                                 evaluation_id=uuid.uuid4()))
+                                                 evaluation_id=evaluation.id))
 
 
 @pytest.mark.parametrize(

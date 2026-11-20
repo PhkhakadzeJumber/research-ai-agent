@@ -7,18 +7,21 @@ Usage (from the repo root, venv active, database running, Anthropic key in .env)
     python -m scripts.evaluate --continue <investigation id>     resume at the clarification
     python -m scripts.evaluate "..." --yes                       skip the questions
 
-So far (steps 4.2-4.3):
+So far (steps 4.2-4.4):
   1. understanding: the Idea Analyst's reading of the idea (facets, assumptions,
      vagueness flags, clarifying questions), stored as the investigation's Intake;
   2. clarification: you answer the questions (Enter skips one), may edit facets, and
      confirm. Answers are applied by one more Idea Analyst call. Your idea becomes
-     Candidate v1 and the investigation moves to full_evaluation.
+     Candidate v1 and the investigation moves to full_evaluation;
+  3. the full evaluation begins: the Idea Analyst plans 15-20 searches, which run on
+     arXiv and OpenAlex (responses cached 7 days); the papers found are stored.
 If Eureka had to propose a KEY facet, you must confirm the reading yourself: --yes is
 refused. Quitting at the confirmation keeps everything; resume with --continue.
 Later steps extend this until the whole evaluation runs (step 4.8).
 
-This calls the paid Anthropic API (one Opus call, plus one if you answer questions;
-roughly 4 cents each).
+This calls the paid Anthropic API (one Opus call, plus one if you answer questions,
+plus one or two for the query plan; roughly 4-5 cents each) and the free arXiv and
+OpenAlex APIs (a small share of OpenAlex's daily allowance).
 Exit code: 0 ok, 1 an Idea Analyst call failed, 2 invalid input, a confirmation that
 --yes can't give, or an unavailable database.
 """
@@ -43,11 +46,18 @@ from src.ai.workflows.clarification import (
     confirm_idea,
     load_pending,
 )
+from src.ai.schemas.query_plan import QueryPlanOutput
+from src.ai.workflows.evaluation import begin_evaluation, plan_step, retrieve_step
+from src.ai.workflows.states import EvaluationStep, Stage
 from src.ai.workflows.understanding import understand_idea
 from src.config import ConfigError
-from src.db.models import Investigation
+from src.db.models import Evaluation, Investigation
+from src.db.repositories.cache import DbResponseCache
+from src.db.repositories.candidates import investigation_candidates
+from src.db.repositories.evaluations import latest_evaluation, top_hits
 from src.db.models.run import COMPLEXITY_LEVELS
 from src.db.repositories.runs import create_investigation
+from src.retrieval.search import LiteratureSearch
 from src.db.session import Database
 
 MAX_IDEA_CHARS = 2000  # doc 02 §2.1
@@ -212,8 +222,84 @@ async def clarify(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool,
         print(f"Confirm it yourself: python -m scripts.evaluate --continue {investigation_id}")
         return 2
     print(f"\nConfirmed: your idea is candidate {candidate_id} (v1).")
-    print("Next: the evaluation itself (query plan, search, reading) comes with step 4.4.")
     return 0
+
+
+# --- the evaluation -------------------------------------------------------------------------------------
+
+TITLE_WIDTH = 80
+
+
+def format_plan(plan: QueryPlanOutput) -> str:
+    lines = [f"Search plan: {len(plan.queries)} queries"]
+    for query in plan.queries:
+        since = f", from {query.year_from}" if query.year_from else ""
+        facets = ",".join(str(n) for n in query.facets)
+        lines.append(f"  {query.kind:<20} {query.text}   (facets {facets}{since})")
+    return "\n".join(lines)
+
+
+def _short(text: str, width: int = TITLE_WIDTH) -> str:
+    return text if len(text) <= width else text[: width - 1] + "…"
+
+
+async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, search_factory=None, settings=None,
+                   model=None) -> int:
+    """Runs the full evaluation of the investigation's confirmed idea, from wherever it stands."""
+    async with sessions() as session:
+        candidates = [c for c in await investigation_candidates(session, investigation_id)
+                      if c.status == "full_evaluating"]
+        if not candidates:
+            print("No candidate is waiting for a full evaluation.")
+            return 2
+        candidate_id = candidates[0].id
+        evaluation = await latest_evaluation(session, candidate_id)
+        evaluation_id = evaluation.id if evaluation is not None and evaluation.status == "running" else None
+    if evaluation_id is None:
+        evaluation_id = await begin_evaluation(sessions, candidate_id, depth="full")
+        print(f"\nFull evaluation {evaluation_id} started.")
+
+    while True:
+        async with sessions() as session:
+            evaluation = await session.get(Evaluation, evaluation_id)
+            await session.refresh(evaluation)
+            step, status = evaluation.step, evaluation.status
+        if status != "running":
+            print(f"\nThe evaluation ended: {status} (at {step}).")
+            return 1 if status == "failed" else 0
+
+        if step == EvaluationStep.PLANNING_QUERIES:
+            print("\nPlanning the searches (one Idea Analyst call)...")
+            outcome = await plan_step(sessions, evaluation_id, settings=settings, model=model)
+            if outcome.regenerated:
+                print("  (the first plan missed a quota and was rewritten once)")
+            if outcome.fallback_reason:
+                print(f"  The Idea Analyst failed ({outcome.fallback_reason}); using a simple plan from the facets.")
+            for problem in outcome.problems:
+                print(f"  quota still missed: {problem}")
+            print(format_plan(outcome.plan))
+        elif step == EvaluationStep.RETRIEVING:
+            async with sessions() as session:
+                planned = len((await session.get(Evaluation, evaluation_id)).query_plan["queries"])
+            print(f"\nSearching arXiv and OpenAlex ({planned} queries)...")
+            factory = search_factory or (lambda: LiteratureSearch.from_settings(cache=DbResponseCache(sessions)))
+            async with factory() as search:
+                outcome = await retrieve_step(sessions, evaluation_id, search)
+            print(f"  {outcome.searches} searches -> {outcome.retrieved} results -> {outcome.unique_papers} unique papers"
+                  + (f" | failed source searches: {outcome.failed_source_searches}"
+                     if outcome.failed_source_searches else ""))
+            if outcome.failed:
+                print("  Every search failed on every source: nothing could be looked at.")
+                return 1
+            async with sessions() as session:
+                top = await top_hits(session, evaluation_id, limit=10)
+            print("\nMost-found papers (a rough order; screening comes next):")
+            for number, (paper, hit) in enumerate(top, start=1):
+                found = len(hit.found_by_query_ids)
+                print(f"  {number:>2}. {_short(paper.title)} ({paper.year or 'n.d.'}) | found {found} times")
+        else:
+            print(f"\nNext: screening and reading the most relevant papers comes with step 4.5 (now at {step}).")
+            return 0
 
 
 # --- main -----------------------------------------------------------------------------------------------
@@ -228,12 +314,7 @@ async def run(args: argparse.Namespace) -> int:
         if not await database.ping():
             raise InputError("The database isn't reachable: start it with `docker compose up -d db`.")
         if args.continue_id is not None:
-            try:
-                pending = await load_pending(database.session, args.continue_id)
-            except NotWaitingForClarification as error:
-                raise InputError(str(error)) from None
-            print(f"Investigation {args.continue_id}\n\n{format_reading(pending.reading)}")
-            return await clarify(database.session, args.continue_id, yes=args.yes)
+            return await resume(database.session, args.continue_id, yes=args.yes)
 
         async with database.session() as session:
             investigation = await create_investigation(session, mode="evaluate", complexity=args.complexity,
@@ -253,9 +334,39 @@ async def run(args: argparse.Namespace) -> int:
         print(f"\nStage: {stage} ({status}) | cost so far: ${cost:.4f}")
         if outcome.error:
             return 1
-        return await clarify(database.session, investigation_id, yes=args.yes)
+        code = await clarify(database.session, investigation_id, yes=args.yes)
+        return await evaluate_if_confirmed(database.session, investigation_id, code)
     finally:
         await database.dispose()
+
+
+async def evaluate_if_confirmed(sessions: Sessions, investigation_id: uuid.UUID, code: int) -> int:
+    async with sessions() as session:
+        stage = (await session.get(Investigation, investigation_id)).stage
+    if code != 0 or stage != Stage.FULL_EVALUATION:
+        return code
+    return await evaluate(sessions, investigation_id)
+
+
+async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool) -> int:
+    """--continue: picks the investigation up where it stopped."""
+    async with sessions() as session:
+        investigation = await session.get(Investigation, investigation_id)
+    if investigation is None:
+        raise InputError(f"No investigation {investigation_id}.")
+    print(f"Investigation {investigation_id} | stage {investigation.stage} ({investigation.status})")
+    if investigation.stage == Stage.AWAITING_CLARIFICATION:
+        try:
+            pending = await load_pending(sessions, investigation_id)
+        except NotWaitingForClarification as error:
+            raise InputError(str(error)) from None
+        print(f"\n{format_reading(pending.reading)}")
+        code = await clarify(sessions, investigation_id, yes=yes)
+        return await evaluate_if_confirmed(sessions, investigation_id, code)
+    if investigation.stage == Stage.FULL_EVALUATION and investigation.status == "running":
+        return await evaluate(sessions, investigation_id)
+    raise InputError(f"Investigation {investigation_id} can't be continued from stage {investigation.stage} "
+                     f"({investigation.status}).")
 
 
 def main(argv: list[str] | None = None) -> int:

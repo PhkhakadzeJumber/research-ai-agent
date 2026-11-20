@@ -14,6 +14,7 @@ from src.db.repositories.ranking import rank_scope
 from src.db.repositories.runs import create_investigation
 from src.db.repositories.search_trail import save_search
 from src.retrieval.embeddings import EMBEDDING_DIMENSIONS, FakeEmbedder
+from tests.db.factories import make_evaluation
 from src.retrieval.records import ExternalIds, PaperRecord, SearchRequest, SearchResult, SourceReport
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
@@ -81,8 +82,9 @@ def record(openalex_id, title, **extra):
                        authors=(f"Author {openalex_id}",), **extra)
 
 
-async def saved_scope(session, *records, evaluation_id=None):
-    investigation = await create_investigation(session, mode="discover", complexity="beginner", input={"q": "x"})
+async def saved_scope(session, *records, evaluation_id=None, investigation=None):
+    investigation = investigation or await create_investigation(session, mode="discover", complexity="beginner",
+                                                                input={"q": "x"})
     result = SearchResult(request=SearchRequest(query="x"), papers=tuple(records),
                           reports=(SourceReport(source="openalex", ok=True, result_count=len(records)),),
                           retrieved_count=len(records))
@@ -118,8 +120,10 @@ async def test_ranking_again_does_not_re_embed_papers(db_session):
 
 
 async def test_ranking_stays_inside_its_scope(db_session):
-    evaluation = uuid.uuid4()
-    investigation = await saved_scope(db_session, record("W1", "Small language models"), evaluation_id=evaluation)
+    investigation = await create_investigation(db_session, mode="evaluate", complexity="beginner", input={"q": "x"})
+    evaluation = (await make_evaluation(db_session, investigation.id)).id
+    await saved_scope(db_session, record("W1", "Small language models"), evaluation_id=evaluation,
+                      investigation=investigation)
     landscape = await rank_scope(db_session, FakeEmbedder(), investigation_id=investigation.id, query="models")
     evaluation_scope = await rank_scope(db_session, FakeEmbedder(), investigation_id=investigation.id,
                                         query="models", evaluation_id=evaluation)
