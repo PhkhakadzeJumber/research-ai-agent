@@ -4,14 +4,23 @@ Usage (from the repo root, venv active, database running, Anthropic key in .env)
     python -m scripts.evaluate "use RAG to reduce hallucinations of small LMs for Georgian QA"
     python -m scripts.evaluate "..." --field NLP --complexity beginner --seed 2401.12345 \\
         --constraint "available time=8 weeks" --constraint "compute=laptop only"
+    python -m scripts.evaluate --continue <investigation id>     resume at the clarification
+    python -m scripts.evaluate "..." --yes                       skip the questions
 
-So far (step 4.2) it runs intake + understanding: the Idea Analyst's reading of the
-idea, its assumptions, vagueness flags and clarifying questions, stored as the
-investigation's Intake. It stops at the clarification checkpoint; later steps extend
-it until the whole evaluation runs (step 4.7).
+So far (steps 4.2-4.3):
+  1. understanding: the Idea Analyst's reading of the idea (facets, assumptions,
+     vagueness flags, clarifying questions), stored as the investigation's Intake;
+  2. clarification: you answer the questions (Enter skips one), may edit facets, and
+     confirm. Answers are applied by one more Idea Analyst call. Your idea becomes
+     Candidate v1 and the investigation moves to full_evaluation.
+If Eureka had to propose a KEY facet, you must confirm the reading yourself: --yes is
+refused. Quitting at the confirmation keeps everything; resume with --continue.
+Later steps extend this until the whole evaluation runs (step 4.8).
 
-This calls the paid Anthropic API (one Opus call, roughly 3-6 cents).
-Exit code: 0 ok, 1 the Idea Analyst failed, 2 invalid input or an unavailable database.
+This calls the paid Anthropic API (one Opus call, plus one if you answer questions;
+roughly 4 cents each).
+Exit code: 0 ok, 1 an Idea Analyst call failed, 2 invalid input, a confirmation that
+--yes can't give, or an unavailable database.
 """
 
 from __future__ import annotations
@@ -20,8 +29,20 @@ import argparse
 import asyncio
 import logging
 import sys
+import uuid
+from collections.abc import Callable
 
 from src.ai.schemas.structured_idea import FACET_KINDS, StructuredIdeaOutput
+from src.ai.workflows.clarification import (
+    ConfirmationRequired,
+    NotWaitingForClarification,
+    Sessions,
+    answers_for,
+    apply_answers,
+    apply_edits,
+    confirm_idea,
+    load_pending,
+)
 from src.ai.workflows.understanding import understand_idea
 from src.config import ConfigError
 from src.db.models import Investigation
@@ -45,7 +66,10 @@ def parse_constraint(text: str) -> tuple[str, str]:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="python -m scripts.evaluate", description="Evaluate a research idea.")
-    parser.add_argument("idea", help=f"the idea in your own words (up to {MAX_IDEA_CHARS} characters)")
+    which = parser.add_mutually_exclusive_group(required=True)
+    which.add_argument("idea", nargs="?", help=f"the idea in your own words (up to {MAX_IDEA_CHARS} characters)")
+    which.add_argument("--continue", dest="continue_id", type=uuid.UUID, metavar="INVESTIGATION",
+                       help="resume an investigation waiting for clarification")
     parser.add_argument("--field", help="field or subfield, e.g. NLP (inferred if missing)")
     parser.add_argument("--complexity", choices=COMPLEXITY_LEVELS, default="intermediate",
                         help="desired ambition (default: intermediate)")
@@ -53,6 +77,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="a paper you already know: DOI, arXiv ID or title (repeatable)")
     parser.add_argument("--constraint", action="append", default=[], type=parse_constraint, metavar="NAME=VALUE",
                         help='a constraint, e.g. "available time=8 weeks" (repeatable)')
+    parser.add_argument("--yes", action="store_true",
+                        help="skip the questions and confirm (refused if Eureka proposed a key facet)")
     parser.add_argument("--verbose", action="store_true", help="show logs")
     return parser.parse_args(argv)
 
@@ -73,7 +99,8 @@ def investigation_input(args: argparse.Namespace) -> dict:
 
 # --- output -------------------------------------------------------------------------------------------
 
-def format_reading(reading: StructuredIdeaOutput) -> str:
+def format_reading(reading: StructuredIdeaOutput, *, questions: bool = True) -> str:
+    """The reading as text. questions=False for a revised reading (the user has already answered)."""
     lines = [f"Title:  {reading.title}", f"RQ:     {reading.research_question}", "",
              "Facets (* = key, [proposed] = Eureka's suggestion, not in your idea):"]
     for kind in FACET_KINDS:
@@ -88,6 +115,8 @@ def format_reading(reading: StructuredIdeaOutput) -> str:
     if reading.proposed_key_facets():
         lines.append("")
         lines.append("Key facets Eureka proposed: you'll be asked to confirm these before the search.")
+    if not questions:
+        return "\n".join(lines)
     lines.append("")
     if reading.clarifying_questions:
         lines.append("Questions (Eureka uses the assumption after → if you skip):")
@@ -99,10 +128,98 @@ def format_reading(reading: StructuredIdeaOutput) -> str:
     return "\n".join(lines)
 
 
+def format_facet_list(reading: StructuredIdeaOutput) -> str:
+    lines = []
+    for number, facet in enumerate(reading.facets, start=1):
+        proposed = "" if facet.stated_by_user else "  [proposed]"
+        key = "*" if facet.is_key else " "
+        lines.append(f"  {number}. {facet.kind.replace('_', '-'):<13}{key} {facet.text}{proposed}")
+    return "\n".join(lines)
+
+
+# --- clarification (interactive) ----------------------------------------------------------------------
+
+Ask = Callable[[str], str]
+
+
+def _ask(ask: Ask, prompt: str) -> str | None:
+    """The user's reply, or None if input ended (Ctrl+Z / Ctrl+D, or no terminal)."""
+    try:
+        return ask(prompt)
+    except EOFError:
+        return None
+
+
+def _paused(investigation_id: uuid.UUID) -> int:
+    print(f"\nPaused at the clarification. Continue with: python -m scripts.evaluate --continue {investigation_id}")
+    return 0
+
+
+async def clarify(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, ask: Ask = input,
+                  settings=None, model=None) -> int:
+    """Questions -> answers applied -> optional facet edits -> confirmation -> Candidate v1."""
+    pending = await load_pending(sessions, investigation_id)
+    reading, edits = pending.reading, {}
+
+    if yes:
+        answers = answers_for(reading, [None] * len(reading.clarifying_questions))
+    else:
+        replies = []
+        for number, question in enumerate(reading.clarifying_questions, start=1):
+            print(f"\n{number}. {question.question}")
+            reply = _ask(ask, f"   your answer (Enter = skip → {question.if_skipped}): ")
+            if reply is None:
+                return _paused(investigation_id)
+            replies.append(reply)
+        answers = answers_for(reading, replies)
+        if any(not answer.skipped for answer in answers):
+            print("\nApplying your answers (one Idea Analyst call)...")
+        outcome = await apply_answers(sessions, pending, answers, settings=settings, model=model)
+        if outcome.error:
+            print(f"Applying your answers failed: {outcome.error}")
+            print(f"Nothing was lost; try again with: python -m scripts.evaluate --continue {investigation_id}")
+            return 1
+        reading = outcome.reading
+        if outcome.revised:
+            print("\n" + format_reading(reading, questions=False))
+
+        while True:
+            print("\nFacets (* = key):\n" + format_facet_list(reading))
+            choice = _ask(ask, "\nConfirm this reading? [y] confirm  [e] edit a facet  [q] quit for now: ")
+            choice = (choice or "q").strip().lower()
+            if choice == "q":
+                return _paused(investigation_id)
+            if choice == "y":
+                break
+            if choice == "e":
+                number = (_ask(ask, "   facet number: ") or "").strip()
+                text = (_ask(ask, "   new text: ") or "").strip()
+                if not number.isdigit() or not text:
+                    print("   Give a facet number and the new text.")
+                    continue
+                try:
+                    reading = apply_edits(reading, {int(number) - 1: text})
+                except ValueError as error:
+                    print(f"   Not changed: {str(error).splitlines()[0]}")
+                    continue
+                edits[int(number) - 1] = text
+
+    try:
+        candidate_id = await confirm_idea(sessions, investigation_id, final=reading, answers=answers, edits=edits,
+                                          explicit=not yes)
+    except ConfirmationRequired as error:
+        print(f"\n{error}")
+        print(f"Confirm it yourself: python -m scripts.evaluate --continue {investigation_id}")
+        return 2
+    print(f"\nConfirmed: your idea is candidate {candidate_id} (v1).")
+    print("Next: the evaluation itself (query plan, search, reading) comes with step 4.4.")
+    return 0
+
+
 # --- main -----------------------------------------------------------------------------------------------
 
 async def run(args: argparse.Namespace) -> int:
-    data = investigation_input(args)
+    data = investigation_input(args) if args.continue_id is None else None
     try:
         database = Database.from_settings()
     except ConfigError as error:
@@ -110,6 +227,14 @@ async def run(args: argparse.Namespace) -> int:
     try:
         if not await database.ping():
             raise InputError("The database isn't reachable: start it with `docker compose up -d db`.")
+        if args.continue_id is not None:
+            try:
+                pending = await load_pending(database.session, args.continue_id)
+            except NotWaitingForClarification as error:
+                raise InputError(str(error)) from None
+            print(f"Investigation {args.continue_id}\n\n{format_reading(pending.reading)}")
+            return await clarify(database.session, args.continue_id, yes=args.yes)
+
         async with database.session() as session:
             investigation = await create_investigation(session, mode="evaluate", complexity=args.complexity,
                                                        input=data, constraints=dict(args.constraint))
@@ -126,9 +251,9 @@ async def run(args: argparse.Namespace) -> int:
         else:
             print(format_reading(outcome.reading))
         print(f"\nStage: {stage} ({status}) | cost so far: ${cost:.4f}")
-        if not outcome.error:
-            print("Next: confirming or answering the questions comes with step 4.3.")
-        return 1 if outcome.error else 0
+        if outcome.error:
+            return 1
+        return await clarify(database.session, investigation_id, yes=args.yes)
     finally:
         await database.dispose()
 

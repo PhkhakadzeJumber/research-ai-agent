@@ -55,3 +55,8 @@ def test_format_reading_without_questions():
     text = format_reading(StructuredIdeaOutput.model_validate({**VALID, "clarifying_questions": [],
                                                                "assumptions": [], "vagueness_flags": []}))
     assert "Questions: none" in text and "Assumed" not in text and "Vague" not in text
+
+
+def test_a_revised_reading_is_shown_without_the_questions_block():
+    text = format_reading(StructuredIdeaOutput.model_validate({**VALID, "clarifying_questions": []}), questions=False)
+    assert "Questions" not in text and text.endswith("- how hallucination is measured is unspecified")

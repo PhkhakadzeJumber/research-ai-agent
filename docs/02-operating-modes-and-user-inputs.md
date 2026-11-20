@@ -48,6 +48,8 @@ After intake, the Idea Analyst shows its structured reading of the request:
 
 Along with that, it asks **at most 3 clarifying questions**. The user can answer, edit the facets/brief, or skip. When the user skips, Eureka proceeds with its stated assumptions and lists them in the report. This is the main human-in-the-loop checkpoint.
 
+**One exception to skipping:** if the Idea Analyst had to *propose* a key facet (the user's text didn't state it, e.g. no method for "make LLMs better at low-resource languages"), the user must confirm or edit the reading explicitly before anything is evaluated. Otherwise Eureka could end up judging an idea the user never had.
+
 ## 3. Complexity levels
 
 Complexity is the user's *desired ambition*. Constraints are the user's *actual limits*. Both influence generation (Scout), evaluation (Feasibility) and the proposal (methodology, experiment design).

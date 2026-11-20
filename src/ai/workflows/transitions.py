@@ -1,4 +1,4 @@
-"""Applying investigation state changes to the database (doc 05 §11.7).
+"""Applying investigation and candidate state changes to the database (doc 05 §11.7).
 
 Every change:
   1. locks the investigation row (two workers can't move it at once),
@@ -15,8 +15,8 @@ resumes at the last committed stage. Typical use:
                                                     expected_from="full_evaluation")
         session.add(...)                               # the stage's outputs
 
-Evaluation steps and candidate statuses get their database functions when their tables
-arrive; their checks (check_step, check_candidate_status) already exist in states.py.
+Candidate statuses work the same way (set_candidate_status, step 4.3). Evaluation steps
+get their function when the Evaluation table arrives; check_step already exists.
 Progress events (doc 10 ProgressEvent) are emitted from here once that table exists.
 """
 
@@ -28,17 +28,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.ai.workflows.states import (
     FINAL_INVESTIGATION_STATUSES,
+    CandidateStatus,
     STAGE_STATUS,
     IllegalTransition,
     InvestigationStatus,
     Stage,
+    check_candidate_status,
     check_stage,
 )
-from src.db.models import Investigation
+from src.db.models import Candidate, Investigation
+from src.db.repositories.candidates import lock_candidate
 from src.db.repositories.runs import lock_investigation
 
 
 class InvestigationNotFound(LookupError):
+    pass
+
+
+class CandidateNotFound(LookupError):
     pass
 
 
@@ -110,3 +117,30 @@ async def _finish(session: AsyncSession, investigation_id: uuid.UUID, status: In
     investigation.status = status
     await session.flush()
     return investigation
+
+
+async def set_candidate_status(
+    session: AsyncSession,
+    candidate_id: uuid.UUID,
+    *,
+    to: str,
+    expected_from: str,
+    reason: str | None = None,
+) -> Candidate:
+    """Moves a candidate to status `to` if it's still in `expected_from` and the graph allows it.
+
+    expected_from is required: parallel workers (Mode 2 evaluations) must never both move
+    one candidate (doc 10 §6.3). reason: the rejection reason, stored when `to` is rejected.
+    Raises CandidateNotFound, IllegalTransition (StaleState included).
+    """
+    candidate = await lock_candidate(session, candidate_id)
+    if candidate is None:
+        raise CandidateNotFound(f"No candidate {candidate_id}.")
+    if candidate.status != CandidateStatus(expected_from):
+        raise StaleState(f"candidate {candidate_id} is {candidate.status}, not {expected_from}")
+    target = check_candidate_status(candidate.status, to)
+    candidate.status = target
+    if target == CandidateStatus.REJECTED:
+        candidate.rejection_reason = reason
+    await session.flush()
+    return candidate

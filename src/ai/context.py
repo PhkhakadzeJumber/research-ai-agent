@@ -145,3 +145,41 @@ def render_idea(request: IdeaForAnalysis) -> str:
                           for name, value in request.constraints)
         lines.append(f"<constraints>\n{items}\n</constraints>")
     return "\n".join(lines)
+
+
+# --- the Idea Analyst's revision packet ----------------------------------------------------------------
+#
+#     (the idea packet above)
+#     <reading>{the earlier reading as JSON}</reading>
+#     <answers>
+#     <answer question="Which languages?">Georgian and Armenian</answer>
+#     </answers>
+
+_REVISION_TAGS = re.compile(r"<(/?)(reading|answers|answer)\b", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class QuestionAnswer:
+    question: str
+    answer: str
+
+
+def _contain_revision_text(text: str) -> str:
+    text = _contain_user_text(text)
+    return _REVISION_TAGS.sub(lambda match: f"&lt;{match.group(1)}{match.group(2)}", text)
+
+
+def render_revision(request: IdeaForAnalysis, reading_json: str, answers: tuple[QuestionAnswer, ...]) -> str:
+    """The Idea Analyst's input for revising its reading with the user's answers."""
+    if not answers:
+        raise ValueError("Nothing to revise: no answers.")
+    items = "\n".join(
+        f'<answer question="{_attribute(_contain_revision_text(item.question))}">'
+        f"{_contain_revision_text(item.answer)}</answer>"
+        for item in answers
+    )
+    return "\n".join([
+        render_idea(request),
+        f"<reading>\n{_contain_revision_text(reading_json)}\n</reading>",
+        f"<answers>\n{items}\n</answers>",
+    ])

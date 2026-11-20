@@ -73,9 +73,10 @@ def load_prompt(name: str) -> Prompt:
     return Prompt(name=name, version=int(fields["version"]), text=text)
 
 
-def system_prompt(role: str) -> SystemPrompt:
-    """The shared preamble followed by the role's prompt."""
-    parts = [load_prompt(SHARED_PREAMBLE), load_prompt(role)]
+def system_prompt(role: str, task: str | None = None) -> SystemPrompt:
+    """The shared preamble followed by the role's prompt, or by the prompt of one of the
+    role's tasks (file <role>_<task>.md, e.g. idea_analyst_revise.md)."""
+    parts = [load_prompt(SHARED_PREAMBLE), load_prompt(f"{role}_{task}" if task else role)]
     return SystemPrompt(
         text="\n\n".join(part.text for part in parts),
         version_id="+".join(part.version_id for part in parts),

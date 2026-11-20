@@ -2,8 +2,11 @@
 
 Run with:  pytest -m live tests/ai/test_idea_analyst_live.py -s
 
-Two ideas: a clear one, and a deliberately vague one (doc 13: vague ideas should get
-specific flags and questions). Cost: two Opus calls at effort medium, roughly 10 cents.
+test_real_idea_readings: two ideas, a clear one and a deliberately vague one (doc 13:
+vague ideas should get specific flags and questions). Two Opus calls, roughly 9 cents.
+
+test_real_revision: the vague idea, then the user's answers applied by the revise call
+(step 4.3). Two Opus calls, roughly 9 cents. Run one test with -k.
 """
 
 import asyncio
@@ -11,8 +14,8 @@ import sys
 
 import pytest
 
-from src.ai.agents.idea_analyst import analyse_idea
-from src.ai.context import IdeaForAnalysis
+from src.ai.agents.idea_analyst import analyse_idea, revise_idea
+from src.ai.context import IdeaForAnalysis, QuestionAnswer
 from scripts.evaluate import format_reading
 
 pytestmark = pytest.mark.live
@@ -51,3 +54,24 @@ def test_real_idea_readings():
     # the vague idea's gaps are filled as proposals, never as the user's: the user named no method
     assert not any(f.stated_by_user for f in vague.output.facets_of("method"))
     assert vague.output.proposed_key_facets()
+
+
+def test_real_revision():
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    async def read_then_revise():
+        first = await analyse_idea(VAGUE)
+        questions = first.output.clarifying_questions
+        assert questions, "the vague idea should get questions"
+        # The user answers the first question only: the approach.
+        answers = (QuestionAnswer(questions[0].question, "LoRA fine-tuning of a small open model on Georgian data"),)
+        return first, await revise_idea(VAGUE, first.output, answers)
+
+    first, revised = asyncio.run(read_then_revise())
+    print(f"\n--- before (${first.cost_usd}) ---\n{format_reading(first.output)}")
+    print(f"\n--- after the answer (${revised.cost_usd}) ---\n{format_reading(revised.output)}")
+
+    methods = revised.output.facets_of("method")
+    assert any("lora" in f.text.lower() and f.stated_by_user for f in methods)  # the answer is the user's now
+    assert revised.output.clarifying_questions == []
