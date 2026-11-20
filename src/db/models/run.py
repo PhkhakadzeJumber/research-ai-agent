@@ -48,6 +48,37 @@ INVESTIGATION_STAGES = (
     "writing_proposal",
 )
 
+# doc 05 §11.4: evaluation steps and how an evaluation ended. doc 05 §11.5: candidate
+# statuses. The Evaluation and Candidate tables arrive later in step 4; their CHECK
+# constraints will use these same tuples.
+EVALUATION_STEPS = (
+    "normalizing",
+    "planning_queries",
+    "retrieving",
+    "screening",
+    "reading",
+    "assessing_novelty",
+    "skeptic_review",
+    "revising_novelty",
+    "assessing_value_feasibility",
+    "concluding",
+    "done",
+)
+EVALUATION_STATUSES = ("running", "done", "partial", "failed")
+CANDIDATE_STATUSES = (
+    "proposed",
+    "screened_out",
+    "light_evaluating",
+    "advanced",
+    "full_evaluating",
+    "needs_refinement",
+    "refined",
+    "finalist",
+    "rejected",
+    "selected",
+    "proposal_ready",
+)
+
 
 def one_of(column: str, values: tuple[str, ...]) -> str:
     return f"{column} IN ({', '.join(repr(v) for v in values)})"
