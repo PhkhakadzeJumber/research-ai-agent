@@ -165,3 +165,19 @@ async def test_nothing_relevant_means_nothing_to_read(db_session):
                               model=PaperAwareLlm.with_answers({}))
     assert outcome.papers == []
     assert (await evaluation(db_session, evaluation_id)).step == "assessing_novelty"
+
+
+async def test_relevant_papers_without_text_never_take_a_reading_slot(db_session):
+    from src.db.models import Paper
+
+    _, evaluation_id = await retrieved(db_session, {CORE: ["Paper A", "Paper B"]})
+    paper_a = (await db_session.execute(select(Paper).where(Paper.title == "Paper A"))).scalar_one()
+    paper_a.abstract = None  # e.g. an OpenAlex record without an abstract
+    await db_session.flush()
+
+    outcome = await screen_step(sessions_on(db_session), evaluation_id, max_read=5, settings=SCREEN_SETTINGS,
+                                model=ScriptedLlm.with_answers(screening_answer(3, 2)))
+
+    assert (outcome.selected, outcome.relevant_unreadable) == (1, 1)
+    assert [paper.title for paper, _ in await selected_papers(db_session, evaluation_id)] == ["Paper B"]
+    assert (await evaluation(db_session, evaluation_id)).counters["relevant_unreadable"] == 1

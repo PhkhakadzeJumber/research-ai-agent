@@ -224,3 +224,32 @@ def test_real_openalex_and_arxiv_results_have_no_false_merges():
     # The two recorded searches share no papers, so nothing may be merged.
     assert len(result.papers) == len(openalex_papers) + len(arxiv_papers)
     assert result.merges == ()
+
+
+# --- versioned repositories (step 4.5b) -------------------------------------------------------------------
+
+def test_zenodo_versions_of_one_deposit_merge():
+    # Zenodo mints a DOI per version; OpenAlex lists each version as its own work.
+    v1 = paper(doi="10.5281/zenodo.20308029", openalex="W7161798167", tier=2)
+    v2 = paper(doi="10.5281/zenodo.20308287", openalex="W7161795279", tier=2)
+    result = deduplicate([v1, v2])
+    assert len(result.papers) == 1
+    assert result.papers[0].ids.doi == "10.5281/zenodo.20308029"  # one DOI kept
+
+
+def test_figshare_versions_merge_too():
+    assert len(deduplicate([paper(doi="10.6084/m9.figshare.111.v1"),
+                            paper(doi="10.6084/m9.figshare.111.v2")]).papers) == 1
+
+
+def test_versions_still_need_the_same_first_author_and_close_years():
+    v1 = paper(doi="10.5281/zenodo.1")
+    assert len(deduplicate([v1, paper(doi="10.5281/zenodo.2", authors=("Grace Hopper",))]).papers) == 2
+    assert len(deduplicate([v1, paper(doi="10.5281/zenodo.3", year=2020)]).papers) == 2
+
+
+def test_a_zenodo_deposit_and_a_journal_paper_with_the_same_title_merge_but_two_journals_do_not():
+    deposit = paper(doi="10.5281/zenodo.9", tier=2)
+    journal = paper(doi="10.1/journal")
+    assert len(deduplicate([deposit, journal]).papers) == 1  # a deposit of the published paper
+    assert len(deduplicate([deposit, journal, paper(doi="10.1/other-journal")]).papers) == 2

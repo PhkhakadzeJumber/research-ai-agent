@@ -326,6 +326,8 @@ async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read:
             more = (f" ({outcome.relevant_not_selected} more relevant papers over the limit; raise it with --max-read)"
                     if outcome.relevant_not_selected else "")
             print(f"  selected for reading: {outcome.selected}{more}")
+            if outcome.relevant_unreadable:
+                print(f"  relevant but unreadable (no abstract or full text): {outcome.relevant_unreadable}")
         elif step == EvaluationStep.READING:
             async with sessions() as session:
                 chosen = await selected_papers(session, evaluation_id)

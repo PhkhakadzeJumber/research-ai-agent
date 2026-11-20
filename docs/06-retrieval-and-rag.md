@@ -36,6 +36,7 @@ Normalize ─► Paper record { ids: doi / arxiv / s2 / openalex, title, abstrac
    │
    ▼
 Dedup: exact ID match ─► fuzzy match (normalized title + year ±1 + first author)
+   │     (same rules again when storing, against papers already in the library)
    │
    ▼
 Snowball (full evaluation): references + citations of the top ~10 (Semantic Scholar)
@@ -58,6 +59,11 @@ Full text for the top ~10 open-access papers ─► parse ─► chunk ─► em
    ▼
 Passage retrieval for agents: hybrid (vector similarity + keyword full-text search)
 ```
+
+**Dedup as built (steps 1.6, 2.x, 4.5b):** records are the same work if they share any external ID, or (rule 2) if their normalized titles are ≥95% similar (≥4 words), their years at most 1 apart and their first authors' surnames equal. Rule 2 never merges two different arXiv IDs or two different *published* DOIs (a conference paper and its journal extension stay separate), but DOIs of arXiv and of versioned repositories (Zenodo, Figshare: one DOI per version) don't count as conflicting. Each query's results are deduplicated in memory; `upsert_paper` applies the same rules against stored papers, so versions found by different queries end up as one paper (the step 4.5 live run had one Zenodo preprint four times). Near-identical titles (one word changed between versions) are deliberately not merged: fuzzier matching would risk hiding a different paper.
+
+**Screening as built (step 4.5):** every found paper is screened (not only the top ~60: on a small model, ~600 abstracts cost about 5 cents), and papers with neither abstract nor full text never take a reading slot; they're counted as relevant but unreadable.
+
 
 ### 2.1 Query diversity: the main defense against missed prior work
 

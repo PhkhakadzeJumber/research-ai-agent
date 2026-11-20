@@ -18,6 +18,7 @@ from src.retrieval.records import ExternalIds, PaperRecord, SearchRequest, Searc
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
 
 TITLE = "Retrieval Augmented Generation for Low Resource Languages"
+PREPRINT_TITLE = "An early preprint title of the same retrieval study"
 
 
 def record(*, doi=None, arxiv=None, openalex=None, source="openalex", tier=1, year=2024, title=TITLE, **extra):
@@ -68,7 +69,7 @@ async def test_stored_preprint_becomes_published(db_session):
 async def test_two_stored_rows_of_one_work_are_merged(db_session):
     investigation = await new_investigation(db_session)
     by_doi = await upsert_paper(db_session, record(doi="10.1/pub", openalex="W1"))
-    by_arxiv = await upsert_paper(db_session, record(arxiv="2405.01234", source="arxiv", tier=2))
+    by_arxiv = await upsert_paper(db_session, record(arxiv="2405.01234", source="arxiv", tier=2, title=PREPRINT_TITLE))
     db_session.add_all([
         RetrievalHit(investigation_id=investigation.id, paper_id=by_doi.id, source_rank=5),
         RetrievalHit(investigation_id=investigation.id, paper_id=by_arxiv.id, source_rank=2, screened=True),
@@ -87,7 +88,7 @@ async def test_two_stored_rows_of_one_work_are_merged(db_session):
 
 async def test_merging_rows_with_content_is_refused(db_session):
     by_doi = await upsert_paper(db_session, record(doi="10.1/pub", openalex="W1"))
-    by_arxiv = await upsert_paper(db_session, record(arxiv="2405.01234", source="arxiv", tier=2))
+    by_arxiv = await upsert_paper(db_session, record(arxiv="2405.01234", source="arxiv", tier=2, title=PREPRINT_TITLE))
     db_session.add(PaperAnalysis(paper_id=by_arxiv.id, extractor_version="v1", model="m",
                                  source_level="abstract", content={}))
     await db_session.flush()
@@ -101,15 +102,21 @@ async def test_merging_rows_with_content_is_refused(db_session):
 async def test_insert_conflict_retries_as_a_merge(db_session, monkeypatch):
     stored = await upsert_paper(db_session, record(arxiv="2405.01234", source="arxiv", tier=2))
 
-    # Simulate another transaction: the first lookup misses the stored row, so the insert collides.
+    # Simulate another transaction: the first lookups miss the stored row (by ID and by title,
+    # as a row committed concurrently would be invisible), so the insert collides.
     real_find = papers_repository.find_papers_by_ids
+    real_find_by_title = papers_repository.find_paper_by_title
     calls = []
 
     async def find_missing_once(session, ids, *, lock=False):
         calls.append(ids)
         return [] if len(calls) == 1 else await real_find(session, ids, lock=lock)
 
+    async def title_missing_once(session, record):
+        return None if len(calls) == 1 else await real_find_by_title(session, record)
+
     monkeypatch.setattr(papers_repository, "find_papers_by_ids", find_missing_once)
+    monkeypatch.setattr(papers_repository, "find_paper_by_title", title_missing_once)
     again = await upsert_paper(db_session, record(arxiv="2405.01234", openalex="W7"))
 
     assert len(calls) == 2  # first attempt collided, second merged
@@ -234,3 +241,34 @@ async def test_db_cache_overwrites_and_never_stores_secrets(db_session):
     row = (await db_session.execute(select(ApiCache))).scalar_one()
     assert row.response == "new" and row.params == {"search": "rag"}
     assert "SECRET" not in str(row.params) and "me@example.org" not in str(row.params)
+
+
+# --- versions of one work found by different queries (step 4.5b) --------------------------------------
+
+async def test_a_later_version_merges_into_the_stored_paper_by_title(db_session):
+    v1 = await upsert_paper(db_session, record(doi="10.5281/zenodo.1", openalex="W1", tier=2, authors=("A. Kapanadze",)))
+    db_session.add(PaperAnalysis(paper_id=v1.id, extractor_version="v1", model="m", source_level="abstract",
+                                 content={}))
+    await db_session.flush()
+
+    v2 = await upsert_paper(db_session, record(doi="10.5281/zenodo.2", openalex="W2", tier=2,
+                                               authors=("A. Kapanadze",), abstract="A longer abstract."))
+
+    assert v2.id == v1.id and await count(db_session, Paper) == 1  # no conflict: nothing was deleted
+    assert v2.doi == "10.5281/zenodo.1" and v2.abstract == "A longer abstract."
+    assert await count(db_session, PaperAnalysis) == 1
+
+
+async def test_same_title_with_two_published_dois_stays_two_papers(db_session):
+    await upsert_paper(db_session, record(doi="10.1/conference", openalex="W1"))
+    await upsert_paper(db_session, record(doi="10.1/journal", openalex="W2"))
+    assert await count(db_session, Paper) == 2
+
+
+async def test_title_matching_respects_year_author_and_title_length(db_session):
+    await upsert_paper(db_session, record(doi="10.5281/zenodo.1", authors=("Ada Lovelace",)))
+    await upsert_paper(db_session, record(doi="10.5281/zenodo.2", year=2019, authors=("Ada Lovelace",)))
+    await upsert_paper(db_session, record(doi="10.5281/zenodo.3", authors=("Grace Hopper",)))
+    await upsert_paper(db_session, record(doi="10.5281/zenodo.4", title="RAG survey"))
+    await upsert_paper(db_session, record(doi="10.5281/zenodo.5", title="RAG survey"))  # too short to match
+    assert await count(db_session, Paper) == 5

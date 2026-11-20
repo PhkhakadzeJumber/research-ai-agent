@@ -14,7 +14,9 @@ Two records are the same work if:
      the first authors' surnames match (when both are listed).
 Never merged by title (rule 2) when the records carry different arXiv IDs, or
 different DOIs where neither is an arXiv DOI (e.g. a conference paper and its journal
-extension).
+extension). Exception: DOIs of versioned repositories (Zenodo, Figshare) give every
+version of a deposit its own DOI, so, like arXiv DOIs, they don't block a title match
+(step 4.5 live run: one Zenodo preprint appeared four times, once per version).
 
 Merged records take: all IDs; tier 1 if any version is published; the EARLIEST year
 (when the idea first became public, which is what novelty cares about); title and
@@ -40,6 +42,8 @@ TITLE_SIMILARITY = 0.95
 MIN_TITLE_WORDS_FOR_TITLE_MATCH = 4
 MAX_YEAR_GAP = 1
 ARXIV_DOI_PREFIX = "10.48550/arxiv."
+# Repositories that mint one DOI per version of the same deposit.
+VERSIONED_DOI_PREFIXES = ("10.5281/zenodo.", "10.6084/m9.figshare.")
 _BLOCK_WORDS = 3  # title-matching only compares records whose titles start with the same 3 words
 
 REASON_DOI = "same DOI"
@@ -67,6 +71,11 @@ def surname(name: str) -> str:
 
 def is_arxiv_doi(doi: str | None) -> bool:
     return bool(doi) and doi.startswith(ARXIV_DOI_PREFIX)
+
+
+def is_version_doi(doi: str | None) -> bool:
+    """An arXiv DOI or a versioned-repository DOI: one of possibly several DOIs of the same work."""
+    return is_arxiv_doi(doi) or (bool(doi) and doi.startswith(VERSIONED_DOI_PREFIXES))
 
 
 @dataclass(frozen=True)
@@ -138,11 +147,18 @@ def _titles_match(a: PaperRecord, b: PaperRecord) -> bool:
 
 def _conflicting_ids(group_a: list[PaperRecord], group_b: list[PaperRecord]) -> bool:
     """True if merging the two groups would combine two different arXiv IDs or two different
-    non-arXiv DOIs: signs of distinct works that only look alike."""
+    published DOIs (not arXiv or versioned-repository DOIs): signs of distinct works that only
+    look alike."""
     records = group_a + group_b
     arxiv_ids = {r.ids.arxiv_id for r in records if r.ids.arxiv_id}
-    published_dois = {r.ids.doi for r in records if r.ids.doi and not is_arxiv_doi(r.ids.doi)}
+    published_dois = {r.ids.doi for r in records if r.ids.doi and not is_version_doi(r.ids.doi)}
     return len(arxiv_ids) > 1 or len(published_dois) > 1
+
+
+def same_work_by_title(a: PaperRecord, b: PaperRecord) -> bool:
+    """Rule 2 for two single records (used for stored papers): the titles, years and first
+    authors match, and no IDs say they're different works."""
+    return _titles_match(a, b) and not _conflicting_ids([a], [b])
 
 
 def merge_records(records: list[PaperRecord]) -> PaperRecord:

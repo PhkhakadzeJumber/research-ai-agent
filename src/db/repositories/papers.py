@@ -1,7 +1,12 @@
 """Saving papers into the global library, deduplicated against what's already stored.
 
 upsert_paper(session, record) finds existing rows by ANY external ID:
-  - no match: inserts a new paper;
+  - no match: looks for a stored paper that is the same work by title (the same rule 2
+    as src/retrieval/dedup.py: same title, year +-1, same first author, no conflicting
+    IDs). Each query's results are deduplicated separately, so without this, version A
+    found by one query and version B by another became two papers (step 4.5b). If one is
+    found, the record is merged into it (nothing is deleted, so its analyses are kept);
+    otherwise a new paper is inserted;
   - one match: merges the new information into it (same rules as src/retrieval/dedup.py:
     tier 1 wins, earliest year, longest abstract, all IDs kept, ...). This is how a stored
     arXiv preprint becomes "published" when OpenAlex later returns the journal version;
@@ -26,7 +31,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import Chunk, Paper, PaperAnalysis, Quote, RetrievalHit
-from src.retrieval.dedup import merge_records
+from src.retrieval.dedup import (
+    MAX_YEAR_GAP,
+    MIN_TITLE_WORDS_FOR_TITLE_MATCH,
+    merge_records,
+    normalize_title,
+    same_work_by_title,
+)
 from src.retrieval.records import ExternalIds, PaperRecord
 
 logger = logging.getLogger(__name__)
@@ -125,8 +136,36 @@ async def _ensure_no_content(session: AsyncSession, paper_ids: list[uuid.UUID]) 
             )
 
 
+_TITLE_PREFIX_WORDS = 3
+
+
+async def find_paper_by_title(session: AsyncSession, record: PaperRecord) -> Paper | None:
+    """A stored paper that is the same work as `record` by title (dedup rule 2), or None.
+
+    Candidates are narrowed in SQL (titles starting with the same words, years close
+    enough), then checked with the exact rule in Python.
+    """
+    words = normalize_title(record.title).split()
+    if len(words) < MIN_TITLE_WORDS_FOR_TITLE_MATCH:
+        return None
+    prefix = " ".join(words[:_TITLE_PREFIX_WORDS])
+    normalized = func.trim(func.regexp_replace(func.lower(Paper.title), "[^a-z0-9]+", " ", "g"))
+    statement = select(Paper).where(normalized.like(prefix.replace("%", "") + "%")).order_by(Paper.created_at)
+    if record.year is not None:
+        statement = statement.where(or_(Paper.year.is_(None),
+                                        Paper.year.between(record.year - MAX_YEAR_GAP, record.year + MAX_YEAR_GAP)))
+    for candidate in (await session.execute(statement.with_for_update())).scalars():
+        if same_work_by_title(paper_to_record(candidate), record):
+            return candidate
+    return None
+
+
 async def _upsert_once(session: AsyncSession, record: PaperRecord) -> Paper:
     matches = await find_papers_by_ids(session, record.ids, lock=True)
+    if not matches and (same_work := await find_paper_by_title(session, record)) is not None:
+        logger.info("papers: %s is a version of stored paper %s (same title, year, first author)",
+                    record.ids, same_work.id)
+        matches = [same_work]
     if not matches:
         paper = Paper()
         _apply(paper, record)

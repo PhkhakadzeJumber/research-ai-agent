@@ -35,7 +35,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.ai.agents.idea_analyst import plan_queries
@@ -53,7 +53,7 @@ from src.ai.workflows.transitions import (
     start_evaluation,
 )
 from src.config import RoleLlmSettings
-from src.db.models import Candidate, Evaluation, Paper, RetrievalHit
+from src.db.models import Candidate, Chunk, Evaluation, Paper, RetrievalHit
 from src.db.repositories.candidates import candidate_facets
 from src.db.repositories.evaluations import count_hits
 from src.db.repositories.llm_calls import record_llm_calls
@@ -265,6 +265,9 @@ class ScreeningOutcome:
     """Papers left unscreened because their batch failed or the model skipped them."""
     relevant_not_selected: int
     """Papers scored 2-3 that the max_read limit left out (reported in the coverage snapshot)."""
+    relevant_unreadable: int = 0
+    """Papers scored 2-3 with neither an abstract nor full text: they can't be read, so they
+    never take a reading slot (step 4.5b); the coverage snapshot reports them."""
 
 
 def _found_count():
@@ -335,14 +338,19 @@ async def screen_step(
                                 f"{not_screened} papers could not be screened (failed or skipped batches)")
 
         # Selection over the whole evaluation (also papers screened by an earlier, interrupted run).
-        ranked = (await session.execute(
-            select(RetrievalHit).where(RetrievalHit.evaluation_id == evaluation_id,
-                                       RetrievalHit.llm_score >= READ_THRESHOLD)
+        has_text = or_(Paper.abstract.is_not(None), select(Chunk.id).where(Chunk.paper_id == Paper.id).exists())
+        rows = (await session.execute(
+            select(RetrievalHit, has_text).join(Paper, Paper.id == RetrievalHit.paper_id)
+            .where(RetrievalHit.evaluation_id == evaluation_id, RetrievalHit.llm_score >= READ_THRESHOLD)
             .order_by(RetrievalHit.llm_score.desc(), _found_count().desc(),
                       RetrievalHit.source_rank.asc().nulls_last())
-        )).scalars().all()
+        )).all()
+        ranked = [hit for hit, readable in rows if readable]
+        unreadable = [hit for hit, readable in rows if not readable]
         for position, hit in enumerate(ranked):
             hit.selected_for_reading = position < limit
+        for hit in unreadable:
+            hit.selected_for_reading = False
         counts = dict((await session.execute(
             select(RetrievalHit.llm_score, func.count()).where(RetrievalHit.evaluation_id == evaluation_id,
                                                                RetrievalHit.screened.is_(True))
@@ -356,9 +364,11 @@ async def screen_step(
         evaluation.counters = {**evaluation.counters, "screened": sum(score_counts.values()),
                                "score_counts": {str(k): v for k, v in score_counts.items()},
                                "not_screened": not_screened, "max_read": limit, "selected_for_reading": selected,
-                               "relevant_not_selected": len(ranked) - selected}
+                               "relevant_not_selected": len(ranked) - selected,
+                               "relevant_unreadable": len(unreadable)}
     return ScreeningOutcome(screened=screened, score_counts=score_counts, selected=selected,
-                            not_screened=not_screened, relevant_not_selected=len(ranked) - selected)
+                            not_screened=not_screened, relevant_not_selected=len(ranked) - selected,
+                            relevant_unreadable=len(unreadable))
 
 
 # --- reading --------------------------------------------------------------------------------------------
