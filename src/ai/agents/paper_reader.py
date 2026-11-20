@@ -38,6 +38,13 @@ logger = logging.getLogger(__name__)
 ROLE = "paper_reader"
 DEFAULT_CONCURRENCY = 4
 
+# Prompt caching is off for the Paper Reader. The only prefix shared across papers is
+# the system prompt, which is shorter than the minimum Claude caches, so ADK's cache
+# entry always ended with the paper text: every new paper paid the 1.25x cache-write
+# price and no later call ever read it (step 3.7 live run: cache_read=0 on every call).
+# A paper is read once and then reused from the library, so there is nothing to cache.
+PROMPT_CACHE = False
+
 
 def extractor_version() -> str:
     """Which prompts and schema produce a reading, e.g. 'reader-p1.1-s1' (preamble 1, role prompt 1,
@@ -95,7 +102,7 @@ async def read_paper(
     system = system_prompt(ROLE)
     result = await run_structured(
         ROLE, system=system.text, prompt_version=system.version_id, user_message=render_paper(paper),
-        output_schema=PaperAnalysisOutput, settings=settings, model=model,
+        output_schema=PaperAnalysisOutput, settings=settings, model=model, cache=PROMPT_CACHE,
     )
     verification = verify_analysis(
         result.output, abstract=paper.abstract, chunks={chunk.chunk_id: chunk.text for chunk in paper.chunks}

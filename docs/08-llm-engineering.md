@@ -92,7 +92,7 @@ The orchestrator builds a **context packet** per call. It never sends "everythin
 Claude can cache a stable prompt prefix; reads from the cache cost about 10% of normal input. Eureka's structure is ideal for this:
 
 - The shared preamble + role instructions are identical across calls → cached.
-- In Mode 2, dozens of Paper Reader calls share the same prefix → large savings.
+- **Not the Paper Reader** (measured in the step 3.7 live run): its shared prefix (preamble + role instructions) is shorter than the minimum length Claude caches, so the only cache entry written ended with the paper text and was never read again (`cache_read=0`, each call paying the 1.25× write price). Each paper is read once and then reused from the paper-analysis library, so Paper Reader calls run with caching off (`PROMPT_CACHE = False` in `src/ai/agents/paper_reader.py`).
 - Within an investigation, the profile + facets prefix repeats across the Novelty Investigator and Skeptic rounds.
 - **Rule:** nothing volatile (timestamps, run IDs) goes before the cache breakpoint.
 - **Check:** the cached-token count in each call's usage stats is logged. A persistent zero means the prefix is being changed somewhere.

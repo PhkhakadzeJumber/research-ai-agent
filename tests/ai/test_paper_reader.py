@@ -51,6 +51,14 @@ def test_reading_an_abstract_verifies_its_quotes():
     assert '<paper id="p_1">' in llm.requests[0].contents[-1].parts[0].text
 
 
+def test_paper_reader_calls_are_not_prompt_cached():
+    # each paper is read once, so a cache entry would cost the write premium and never be read
+    paper = PaperForReading(paper_id="p_1", title="T", abstract=ABSTRACT)
+    llm = ScriptedLlm.with_answers(answer(analysis()))
+    read(paper, llm)
+    assert llm.requests[0].cache_config is None
+
+
 def test_invented_quotes_are_flagged_not_trusted():
     paper = PaperForReading(paper_id="p_1", title="T", abstract=ABSTRACT)
     reading = read(paper, ScriptedLlm.with_answers(answer(analysis(
