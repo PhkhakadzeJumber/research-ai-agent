@@ -1,6 +1,7 @@
 """Context packets: exactly what an agent sees, built by code (doc 08 §5). Papers for the
 Paper Reader (render_paper); ideas, revisions and query-planning tasks for the Idea
-Analyst (render_idea, render_revision, render_query_task).
+Analyst (render_idea, render_revision, render_query_task); batches of papers for the
+relevance screener (render_screening_batch).
 
 Agents never read the database themselves. The orchestrator gives each one a curated
 packet, rendered as clearly labelled blocks so the model knows what it may cite:
@@ -230,4 +231,44 @@ def render_query_task(candidate: CandidateForPlanning, *, task: str) -> str:
                      f"{_contain_candidate_text(facet.text)}</facet>")
     lines.append("</candidate>")
     lines.append(f"<task>{task}</task>")
+    return "\n".join(lines)
+
+
+
+# --- the relevance screener's packet -------------------------------------------------------------------
+#
+#     (the candidate block of render_query_task, without a task)
+#     <papers>
+#     <paper label="P1" year="2024"><title>...</title><abstract>...</abstract></paper>
+#     </papers>
+
+SCREENING_ABSTRACT_CHARS = 1500  # enough to judge relevance; keeps a batch of 25 near 10k tokens
+
+
+@dataclass(frozen=True)
+class PaperForScreening:
+    label: str
+    title: str
+    year: int | None = None
+    abstract: str | None = None
+
+
+def _shorten_abstract(text: str, limit: int = SCREENING_ABSTRACT_CHARS) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + " [...]"
+
+
+def render_screening_batch(candidate: CandidateForPlanning, papers: tuple[PaperForScreening, ...]) -> str:
+    """The relevance screener's input: the idea, then the batch of papers."""
+    if not papers:
+        raise ValueError("A screening batch needs papers.")
+    idea = render_query_task(candidate, task="Score every paper in the batch below.")
+    lines = [idea, "<papers>"]
+    for paper in papers:
+        year = f' year="{paper.year}"' if paper.year else ""
+        abstract = (f"<abstract>{_contain(_shorten_abstract(paper.abstract))}</abstract>" if paper.abstract
+                    else "<abstract>(no abstract available)</abstract>")
+        lines.append(f'<paper label="{_attribute(paper.label)}"{year}><title>{_contain(paper.title)}</title>'
+                     f"{abstract}</paper>")
+    lines.append("</papers>")
     return "\n".join(lines)

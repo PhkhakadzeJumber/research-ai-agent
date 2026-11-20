@@ -63,7 +63,11 @@ class LibraryOutcome:
 
 
 async def store_reading(
-    session: AsyncSession, reading: PaperReading, *, investigation_id: uuid.UUID | None = None
+    session: AsyncSession,
+    reading: PaperReading,
+    *,
+    investigation_id: uuid.UUID | None = None,
+    evaluation_id: uuid.UUID | None = None,
 ) -> PaperAnalysis:
     """Stores one reading as a unit: its quotes (with verification results), the analysis
     with each quote referenced by quote ID (doc 10 §5.3), and the Claude call records.
@@ -101,7 +105,7 @@ async def store_reading(
         session, paper_id=paper_id, extractor_version=reading.extractor_version,
         source_level=reading.source_level, model=reading.model, content=content,
     )
-    await record_llm_calls(session, reading.records, investigation_id=investigation_id)
+    await record_llm_calls(session, reading.records, investigation_id=investigation_id, evaluation_id=evaluation_id)
     return analysis
 
 
@@ -119,6 +123,7 @@ async def read_into_library(
     paper_ids: Sequence[uuid.UUID],
     *,
     investigation_id: uuid.UUID | None = None,
+    evaluation_id: uuid.UUID | None = None,
     concurrency: int = DEFAULT_CONCURRENCY,
     settings: RoleLlmSettings | None = None,
     model: Any | None = None,
@@ -148,7 +153,8 @@ async def read_into_library(
                 logger.warning("reading: %s failed: %s", paper_id, error)
                 return LibraryOutcome(paper_id, error=f"{type(error).__name__}: {error}")
         async with write_lock, sessions() as session:
-            stored = await store_reading(session, reading, investigation_id=investigation_id)
+            stored = await store_reading(session, reading, investigation_id=investigation_id,
+                                         evaluation_id=evaluation_id)
             return LibraryOutcome(paper_id, stored.id, verified_quotes=len(reading.verification.verified_quotes),
                                   quotes=len(reading.verification.quotes))
 

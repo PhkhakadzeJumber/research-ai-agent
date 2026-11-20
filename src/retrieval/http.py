@@ -72,6 +72,10 @@ class RetryPolicy:
     jitter: bool = True
     """Adds a little randomness to the wait, so parallel requests don't retry in lockstep."""
 
+    rate_limited_delay: float = 0.0
+    """Minimum wait after HTTP 429 when the server gives no Retry-After. Some sources (arXiv)
+    throttle for longer than the normal backoff, so retrying after 1-4 s just fails again."""
+
     def backoff(self, attempt: int) -> float:
         """Wait before retry number `attempt` (1 = first retry)."""
         delay = self.base_delay * 2 ** (attempt - 1)
@@ -236,6 +240,8 @@ class SourceHttpClient:
                 )
 
             delay = self.retry.backoff(attempt) if retry_after is None else min(retry_after, self.retry.max_delay)
+            if status == 429 and retry_after is None:
+                delay = max(delay, min(self.retry.rate_limited_delay, self.retry.max_delay))
             logger.warning(
                 "source request retry source=%s path=%s problem=%s attempt=%d/%d wait=%.1fs",
                 self.source, path, problem, attempt, attempts, delay,

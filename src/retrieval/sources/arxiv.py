@@ -31,7 +31,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 from src.retrieval.cache import ResponseCache
-from src.retrieval.http import SourceHttpClient, SourceRequestError
+from src.retrieval.http import RetryPolicy, SourceHttpClient, SourceRequestError
 from src.retrieval.records import ExternalIds, PaperRecord, SearchRequest, collapse_whitespace
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,8 @@ SOURCE = "arxiv"
 BASE_URL = "https://export.arxiv.org"
 QUERY_PATH = "/api/query"
 MIN_INTERVAL_SECONDS = 3.0  # arXiv's requested spacing between requests
+# arXiv answers bursts with HTTP 429 and no Retry-After (step 4.4b live run); wait this long instead.
+RATE_LIMITED_WAIT_SECONDS = 10.0
 FIRST_ARXIV_YEAR = 1991
 
 NS = {
@@ -178,7 +180,8 @@ class ArxivSource:
 
     def __init__(self, *, http: SourceHttpClient | None = None, cache: ResponseCache | None = None) -> None:
         self._http = http or SourceHttpClient(
-            SOURCE, base_url=BASE_URL, min_interval=MIN_INTERVAL_SECONDS, timeout=30.0, cache=cache
+            SOURCE, base_url=BASE_URL, min_interval=MIN_INTERVAL_SECONDS, timeout=30.0, cache=cache,
+            retry=RetryPolicy(rate_limited_delay=RATE_LIMITED_WAIT_SECONDS),
         )
 
     async def __aenter__(self) -> ArxivSource:

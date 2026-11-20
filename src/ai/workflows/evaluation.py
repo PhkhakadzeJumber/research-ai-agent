@@ -1,4 +1,5 @@
-"""The evaluation sub-graph (doc 05 §11.4), first steps: normalizing -> planning_queries -> retrieving.
+"""The evaluation sub-graph (doc 05 §11.4), first steps: normalizing -> planning_queries ->
+retrieving -> screening -> reading.
 
   begin_evaluation()  a new evaluation of a candidate. Mode 1's v1 skips `normalizing`:
                       its facets come from the confirmed Intake.
@@ -12,8 +13,16 @@
                       If EVERY search failed on every source, nothing could be looked at:
                       the evaluation and the investigation fail (doc 05 §11.6).
 
-Each step's results commit together with the step change. Screening and reading come
-with step 4.5.
+  screen_step()       the relevance screener (a small model) scores every found paper 0-3
+                      against the candidate, in parallel batches; code then selects for
+                      reading the papers scored 3, then 2, most-found first, up to
+                      max_read. Batches that fail leave their papers unscreened and mark
+                      the step degraded.
+  read_step()         the Paper Reader reads the selected papers into the library (stored
+                      analyses are reused for free) with quote verification.
+
+Each step's results commit together with the step change. Snowballing (4.5b) and full
+text come later.
 """
 
 from __future__ import annotations
@@ -26,11 +35,14 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.ai.agents.idea_analyst import plan_queries
-from src.ai.context import CandidateForPlanning, FacetForPlanning
+from src.ai.agents.relevance_screener import BATCH_SIZE, BatchScreening, screen_batch
+from src.ai.context import CandidateForPlanning, FacetForPlanning, PaperForScreening
 from src.ai.schemas.query_plan import PlannedQuery, QueryPlanOutput
+from src.ai.workflows.reading import LibraryOutcome, read_into_library
 from src.ai.workflows.states import EvaluationStep
 from src.ai.workflows.transitions import (
     StaleState,
@@ -41,7 +53,7 @@ from src.ai.workflows.transitions import (
     start_evaluation,
 )
 from src.config import RoleLlmSettings
-from src.db.models import Candidate, Evaluation
+from src.db.models import Candidate, Evaluation, Paper, RetrievalHit
 from src.db.repositories.candidates import candidate_facets
 from src.db.repositories.evaluations import count_hits
 from src.db.repositories.llm_calls import record_llm_calls
@@ -232,3 +244,186 @@ async def retrieve_step(
                                "searches_not_stored": save_errors}
     return RetrievalOutcome(searches=len(results), retrieved=retrieved, unique_papers=unique,
                             failed_source_searches=failed_pairs, failed=everything_failed)
+
+
+
+# --- screening ------------------------------------------------------------------------------------------
+
+MAX_READ = {"light": 12, "full": 25}  # papers read per evaluation by default (step 4.5: about 3.4 cents each on Opus)
+READ_THRESHOLD = 2  # scores 2 and 3 are worth reading; 1 and 0 never are
+SCREEN_CONCURRENCY = 4
+
+
+@dataclass(frozen=True)
+class ScreeningOutcome:
+    screened: int
+    """Papers scored in this step."""
+    score_counts: dict[int, int]
+    """Over all screened papers of the evaluation: score -> count."""
+    selected: int
+    not_screened: int
+    """Papers left unscreened because their batch failed or the model skipped them."""
+    relevant_not_selected: int
+    """Papers scored 2-3 that the max_read limit left out (reported in the coverage snapshot)."""
+
+
+def _found_count():
+    return func.cardinality(RetrievalHit.found_by_query_ids)
+
+
+async def screen_step(
+    sessions: Sessions,
+    evaluation_id: uuid.UUID,
+    *,
+    max_read: int | None = None,
+    batch_size: int = BATCH_SIZE,
+    concurrency: int = SCREEN_CONCURRENCY,
+    settings: RoleLlmSettings | None = None,
+    model: Any | None = None,
+) -> ScreeningOutcome:
+    async with sessions() as session:
+        evaluation = await _at_step(session, evaluation_id, EvaluationStep.SCREENING)
+        candidate = await session.get(Candidate, evaluation.candidate_id)
+        investigation_id = candidate.investigation_id
+        limit = max_read if max_read is not None else MAX_READ[evaluation.depth]
+        view = await candidate_for_planning(session, candidate)
+        rows = (await session.execute(
+            select(RetrievalHit.id, Paper.title, Paper.year, Paper.abstract)
+            .join(Paper, Paper.id == RetrievalHit.paper_id)
+            .where(RetrievalHit.evaluation_id == evaluation_id, RetrievalHit.screened.is_(False))
+            .order_by(_found_count().desc(), RetrievalHit.source_rank.asc().nulls_last())
+        )).all()
+
+    batches = []
+    for start in range(0, len(rows), batch_size):
+        chunk = rows[start:start + batch_size]
+        papers = [PaperForScreening(label=f"P{n}", title=title, year=year, abstract=abstract)
+                  for n, (_, title, year, abstract) in enumerate(chunk, start=1)]
+        batches.append(({paper.label: hit_id for paper, (hit_id, *_) in zip(papers, chunk)}, papers))
+
+    limiter = asyncio.Semaphore(concurrency)
+
+    async def run(papers) -> BatchScreening | LlmError:
+        async with limiter:
+            try:
+                return await screen_batch(view, papers, settings=settings, model=model)
+            except LlmError as error:
+                logger.warning("screening batch failed for evaluation %s: %s", evaluation_id, error)
+                return error
+
+    results = await asyncio.gather(*(run(papers) for _, papers in batches))
+
+    screened = not_screened = 0
+    async with sessions() as session:
+        for (hit_by_label, papers), result in zip(batches, results):
+            if isinstance(result, LlmError):
+                await record_llm_calls(session, getattr(result, "records", []), investigation_id=investigation_id,
+                                       evaluation_id=evaluation_id)
+                not_screened += len(papers)
+                continue
+            await record_llm_calls(session, result.records, investigation_id=investigation_id,
+                                   evaluation_id=evaluation_id)
+            not_screened += len(result.missing)
+            for label, judgement in result.judgements.items():
+                hit = await session.get(RetrievalHit, hit_by_label[label])
+                hit.llm_score, hit.llm_reason, hit.screened = judgement.score, judgement.reason, True
+                screened += 1
+        await session.flush()
+
+        if not_screened:
+            await note_degraded(session, evaluation_id, "screening",
+                                f"{not_screened} papers could not be screened (failed or skipped batches)")
+
+        # Selection over the whole evaluation (also papers screened by an earlier, interrupted run).
+        ranked = (await session.execute(
+            select(RetrievalHit).where(RetrievalHit.evaluation_id == evaluation_id,
+                                       RetrievalHit.llm_score >= READ_THRESHOLD)
+            .order_by(RetrievalHit.llm_score.desc(), _found_count().desc(),
+                      RetrievalHit.source_rank.asc().nulls_last())
+        )).scalars().all()
+        for position, hit in enumerate(ranked):
+            hit.selected_for_reading = position < limit
+        counts = dict((await session.execute(
+            select(RetrievalHit.llm_score, func.count()).where(RetrievalHit.evaluation_id == evaluation_id,
+                                                               RetrievalHit.screened.is_(True))
+            .group_by(RetrievalHit.llm_score)
+        )).all())
+        score_counts = {score: counts.get(score, 0) for score in (3, 2, 1, 0)}
+        selected = min(len(ranked), limit)
+
+        evaluation = await advance_evaluation(session, evaluation_id, to=EvaluationStep.READING,
+                                              expected_from=EvaluationStep.SCREENING)
+        evaluation.counters = {**evaluation.counters, "screened": sum(score_counts.values()),
+                               "score_counts": {str(k): v for k, v in score_counts.items()},
+                               "not_screened": not_screened, "max_read": limit, "selected_for_reading": selected,
+                               "relevant_not_selected": len(ranked) - selected}
+    return ScreeningOutcome(screened=screened, score_counts=score_counts, selected=selected,
+                            not_screened=not_screened, relevant_not_selected=len(ranked) - selected)
+
+
+# --- reading --------------------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ReadPaper:
+    paper: Paper
+    hit: RetrievalHit
+    outcome: LibraryOutcome
+
+
+@dataclass(frozen=True)
+class ReadingOutcome:
+    papers: list[ReadPaper]
+
+    @property
+    def read_now(self) -> int:
+        return sum(1 for p in self.papers if not p.outcome.error and not p.outcome.reused)
+
+    @property
+    def reused(self) -> int:
+        return sum(1 for p in self.papers if p.outcome.reused)
+
+    @property
+    def failed(self) -> int:
+        return sum(1 for p in self.papers if p.outcome.error)
+
+
+async def selected_papers(session: AsyncSession, evaluation_id: uuid.UUID) -> list[tuple[Paper, RetrievalHit]]:
+    """The papers selected for reading, most relevant first."""
+    rows = await session.execute(
+        select(Paper, RetrievalHit).join(RetrievalHit, RetrievalHit.paper_id == Paper.id)
+        .where(RetrievalHit.evaluation_id == evaluation_id, RetrievalHit.selected_for_reading.is_(True))
+        .order_by(RetrievalHit.llm_score.desc(), _found_count().desc(), RetrievalHit.source_rank.asc().nulls_last())
+    )
+    return [(paper, hit) for paper, hit in rows.all()]
+
+
+async def read_step(
+    sessions: Sessions,
+    evaluation_id: uuid.UUID,
+    *,
+    concurrency: int = 4,
+    settings: RoleLlmSettings | None = None,
+    model: Any | None = None,
+) -> ReadingOutcome:
+    async with sessions() as session:
+        evaluation = await _at_step(session, evaluation_id, EvaluationStep.READING)
+        investigation_id = (await session.get(Candidate, evaluation.candidate_id)).investigation_id
+        chosen = await selected_papers(session, evaluation_id)
+
+    outcomes = await read_into_library(sessions, [paper.id for paper, _ in chosen], investigation_id=investigation_id,
+                                       evaluation_id=evaluation_id, concurrency=concurrency, settings=settings,
+                                       model=model)
+    result = ReadingOutcome([ReadPaper(paper, hit, outcome) for (paper, hit), outcome in zip(chosen, outcomes)])
+
+    async with sessions() as session:
+        if chosen and result.failed == len(chosen):
+            await note_degraded(session, evaluation_id, "reading", "every selected paper failed to be read")
+        elif result.failed:
+            await note_degraded(session, evaluation_id, "reading", f"{result.failed} selected papers failed to be read")
+        evaluation = await advance_evaluation(session, evaluation_id, to=EvaluationStep.ASSESSING_NOVELTY,
+                                              expected_from=EvaluationStep.READING)
+        ok = [p.outcome for p in result.papers if not p.outcome.error]
+        evaluation.counters = {**evaluation.counters, "read_now": result.read_now, "read_reused": result.reused,
+                               "read_failed": result.failed, "quotes": sum(o.quotes or 0 for o in ok),
+                               "verified_quotes": sum(o.verified_quotes or 0 for o in ok)}
+    return result

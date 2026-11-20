@@ -20,6 +20,7 @@ from src.ai.workflows.transitions import (
     note_degraded,
     start_evaluation,
 )
+from src.config import RoleLlmSettings
 from src.db.models import Candidate, Evaluation, Investigation, LlmCall, RetrievalHit, SearchQuery
 from src.db.repositories.candidates import FacetToStore, create_root_candidate
 from src.db.repositories.runs import create_investigation
@@ -43,7 +44,7 @@ class FakeSearch:
         self.requests.append(request)
         titles = self.papers_by_query.get(request.query, [])
         records = tuple(PaperRecord(ids=ExternalIds(openalex_id=f"W{abs(hash(t)) % 10**8}"), title=t,
-                                    sources=("openalex",), tier=1) for t in titles)
+                                    sources=("openalex",), tier=1, abstract=f"We study {t}.") for t in titles)
         reports = tuple(SourceReport(source=s, ok=False, error="timed out") if s in self.fail
                         else SourceReport(source=s, ok=True, result_count=len(records) if s == "openalex" else 0)
                         for s in self.sources)
@@ -251,19 +252,38 @@ async def test_if_nothing_could_be_searched_the_investigation_fails(db_session):
 
 # --- the command ----------------------------------------------------------------------------------------
 
-async def test_the_command_runs_planning_and_retrieval(db_session, capsys):
+SCREEN_SETTINGS = RoleLlmSettings(role="relevance_screening", model="claude-haiku-5-5", effort="low",
+                                  max_tokens=16000)
+READ_SETTINGS = RoleLlmSettings(role="paper_reader", model="claude-opus-5-5", effort="low", max_tokens=16000)
+
+
+def screening_answer(*scores):
+    """A screener answer for P1, P2, ... with the given scores."""
+    return answer(json.dumps({"judgements": [
+        {"label": f"P{n}", "score": score, "reason": f"reason {n}"} for n, score in enumerate(scores, start=1)]}))
+
+
+async def test_the_command_runs_the_evaluation_up_to_the_novelty_assessment(db_session, capsys):
     investigation, _ = await confirmed(db_session)
-    llm = ScriptedLlm.with_answers(answer(json.dumps(full_plan())))
+    planner = ScriptedLlm.with_answers(answer(json.dumps(full_plan())))
+    screener = ScriptedLlm.with_answers(screening_answer(3, 1))  # Paper A direct prior work, Paper B tangential
+    reader = ScriptedLlm.with_answers(answer(json.dumps({"contribution_type": "empirical_study"})))
     search = FakeSearch({"rag hallucination georgian question answering": ["Paper A", "Paper B"]})
 
     code = await evaluate(sessions_on(db_session), investigation.id, search_factory=lambda: search,
-                          settings=SETTINGS, model=llm)
+                          settings=SETTINGS, model=planner, screen_settings=SCREEN_SETTINGS, screen_model=screener,
+                          read_settings=READ_SETTINGS, read_model=reader)
 
     assert code == 0
     output = capsys.readouterr().out
     assert "Search plan: 16 queries" in output and "terminology_variant" in output
     assert "16 searches -> 2 results -> 2 unique papers" in output
-    assert "1. Paper A" in output and "screening and reading" in output
+    assert "1. Paper A" in output
+    assert "scores: 3 (direct prior work) 1 | 2 (shares a key facet) 0 | 1 1 | 0 0" in output
+    assert "selected for reading: 1" in output
+    assert "[3] Paper A" in output and "reason 1 | read, quotes verified 0/0" in output
+    assert "1 read now, 0 reused, 0 failed" in output
+    assert "novelty assessment comes with step 4.6" in output
 
 
 async def test_the_command_resumes_where_the_evaluation_stopped(db_session, capsys):

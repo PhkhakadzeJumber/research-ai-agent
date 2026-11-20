@@ -14,13 +14,19 @@ So far (steps 4.2-4.4):
      confirm. Answers are applied by one more Idea Analyst call. Your idea becomes
      Candidate v1 and the investigation moves to full_evaluation;
   3. the full evaluation begins: the Idea Analyst plans 15-20 searches, which run on
-     arXiv and OpenAlex (responses cached 7 days); the papers found are stored.
+     arXiv and OpenAlex (responses cached 7 days); the papers found are stored;
+  4. screening: every paper found is scored 0-3 for relevance (by the model in
+     EUREKA_LLM_MODEL_RELEVANCE_SCREENING, e.g. Haiku: a few cents for ~600 papers);
+  5. reading: the most relevant papers (scores 3, then 2; at most --max-read, default
+     25) are read by the Paper Reader with quote verification (about 3.4 cents each on
+     Opus; papers already in the library are free).
 If Eureka had to propose a KEY facet, you must confirm the reading yourself: --yes is
 refused. Quitting at the confirmation keeps everything; resume with --continue.
 Later steps extend this until the whole evaluation runs (step 4.8).
 
 This calls the paid Anthropic API (one Opus call, plus one if you answer questions,
-plus one or two for the query plan; roughly 4-5 cents each) and the free arXiv and
+plus one or two for the query plan; roughly 4-5 cents each; screening and reading
+as above, so a first-time full evaluation costs up to about $1) and the free arXiv and
 OpenAlex APIs (a small share of OpenAlex's daily allowance).
 Exit code: 0 ok, 1 an Idea Analyst call failed, 2 invalid input, a confirmation that
 --yes can't give, or an unavailable database.
@@ -47,7 +53,14 @@ from src.ai.workflows.clarification import (
     load_pending,
 )
 from src.ai.schemas.query_plan import QueryPlanOutput
-from src.ai.workflows.evaluation import begin_evaluation, plan_step, retrieve_step
+from src.ai.workflows.evaluation import (
+    begin_evaluation,
+    plan_step,
+    read_step,
+    retrieve_step,
+    screen_step,
+    selected_papers,
+)
 from src.ai.workflows.states import EvaluationStep, Stage
 from src.ai.workflows.understanding import understand_idea
 from src.config import ConfigError
@@ -87,10 +100,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="a paper you already know: DOI, arXiv ID or title (repeatable)")
     parser.add_argument("--constraint", action="append", default=[], type=parse_constraint, metavar="NAME=VALUE",
                         help='a constraint, e.g. "available time=8 weeks" (repeatable)')
+    parser.add_argument("--max-read", type=int, default=None, metavar="N",
+                        help="papers the Paper Reader reads at most (default: 25 for a full evaluation)")
     parser.add_argument("--yes", action="store_true",
                         help="skip the questions and confirm (refused if Eureka proposed a key facet)")
     parser.add_argument("--verbose", action="store_true", help="show logs")
     return parser.parse_args(argv)
+
+
+def check_max_read(args: argparse.Namespace) -> None:
+    if args.max_read is not None and not 0 <= args.max_read <= 100:
+        raise InputError("--max-read must be between 0 and 100.")
 
 
 def investigation_input(args: argparse.Namespace) -> dict:
@@ -239,8 +259,9 @@ def _short(text: str, width: int = TITLE_WIDTH) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
 
 
-async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, search_factory=None, settings=None,
-                   model=None) -> int:
+async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read: int | None = None,
+                   search_factory=None, settings=None, model=None, screen_settings=None, screen_model=None,
+                   read_settings=None, read_model=None) -> int:
     """Runs the full evaluation of the investigation's confirmed idea, from wherever it stands."""
     async with sessions() as session:
         candidates = [c for c in await investigation_candidates(session, investigation_id)
@@ -293,14 +314,42 @@ async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, search_fa
             for number, (paper, hit) in enumerate(top, start=1):
                 found = len(hit.found_by_query_ids)
                 print(f"  {number:>2}. {_short(paper.title)} ({paper.year or 'n.d.'}) | found {found} times")
+        elif step == EvaluationStep.SCREENING:
+            print("\nScreening the papers for relevance (relevance screener, batches of 25)...")
+            outcome = await screen_step(sessions, evaluation_id, max_read=max_read, settings=screen_settings,
+                                        model=screen_model)
+            counts = outcome.score_counts
+            print(f"  scores: 3 (direct prior work) {counts[3]} | 2 (shares a key facet) {counts[2]} | "
+                  f"1 {counts[1]} | 0 {counts[0]}")
+            if outcome.not_screened:
+                print(f"  not screened (failed batches): {outcome.not_screened}")
+            more = (f" ({outcome.relevant_not_selected} more relevant papers over the limit; raise it with --max-read)"
+                    if outcome.relevant_not_selected else "")
+            print(f"  selected for reading: {outcome.selected}{more}")
+        elif step == EvaluationStep.READING:
+            async with sessions() as session:
+                chosen = await selected_papers(session, evaluation_id)
+            print(f"\nReading the {len(chosen)} selected papers (Paper Reader; papers already in the library are free)...")
+            outcome = await read_step(sessions, evaluation_id, settings=read_settings, model=read_model)
+            for number, item in enumerate(outcome.papers, start=1):
+                result = item.outcome
+                status = (f"FAILED: {result.error}" if result.error
+                          else f"{'reused' if result.reused else 'read'}, quotes verified {result.verified_quotes}/{result.quotes}")
+                print(f"  {number:>2}. [{item.hit.llm_score}] {_short(item.paper.title, 70)} ({item.paper.year or 'n.d.'})")
+                print(f"      {item.hit.llm_reason} | {status}")
+            async with sessions() as session:
+                cost = (await session.get(Investigation, investigation_id)).cost_usd
+            print(f"  {outcome.read_now} read now, {outcome.reused} reused, {outcome.failed} failed | "
+                  f"cost so far: ${cost:.4f}")
         else:
-            print(f"\nNext: screening and reading the most relevant papers comes with step 4.5 (now at {step}).")
+            print(f"\nNext: the novelty assessment comes with step 4.6 (now at {step}).")
             return 0
 
 
 # --- main -----------------------------------------------------------------------------------------------
 
 async def run(args: argparse.Namespace) -> int:
+    check_max_read(args)
     data = investigation_input(args) if args.continue_id is None else None
     try:
         database = Database.from_settings()
@@ -310,7 +359,7 @@ async def run(args: argparse.Namespace) -> int:
         if not await database.ping():
             raise InputError("The database isn't reachable: start it with `docker compose up -d db`.")
         if args.continue_id is not None:
-            return await resume(database.session, args.continue_id, yes=args.yes)
+            return await resume(database.session, args.continue_id, yes=args.yes, max_read=args.max_read)
 
         async with database.session() as session:
             investigation = await create_investigation(session, mode="evaluate", complexity=args.complexity,
@@ -331,20 +380,21 @@ async def run(args: argparse.Namespace) -> int:
         if outcome.error:
             return 1
         code = await clarify(database.session, investigation_id, yes=args.yes)
-        return await evaluate_if_confirmed(database.session, investigation_id, code)
+        return await evaluate_if_confirmed(database.session, investigation_id, code, max_read=args.max_read)
     finally:
         await database.dispose()
 
 
-async def evaluate_if_confirmed(sessions: Sessions, investigation_id: uuid.UUID, code: int) -> int:
+async def evaluate_if_confirmed(sessions: Sessions, investigation_id: uuid.UUID, code: int, *,
+                                max_read: int | None = None) -> int:
     async with sessions() as session:
         stage = (await session.get(Investigation, investigation_id)).stage
     if code != 0 or stage != Stage.FULL_EVALUATION:
         return code
-    return await evaluate(sessions, investigation_id)
+    return await evaluate(sessions, investigation_id, max_read=max_read)
 
 
-async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool) -> int:
+async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, max_read: int | None = None) -> int:
     """--continue: picks the investigation up where it stopped."""
     async with sessions() as session:
         investigation = await session.get(Investigation, investigation_id)
@@ -358,9 +408,9 @@ async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool) 
             raise InputError(str(error)) from None
         print(f"\n{format_reading(pending.reading)}")
         code = await clarify(sessions, investigation_id, yes=yes)
-        return await evaluate_if_confirmed(sessions, investigation_id, code)
+        return await evaluate_if_confirmed(sessions, investigation_id, code, max_read=max_read)
     if investigation.stage == Stage.FULL_EVALUATION and investigation.status == "running":
-        return await evaluate(sessions, investigation_id)
+        return await evaluate(sessions, investigation_id, max_read=max_read)
     raise InputError(f"Investigation {investigation_id} can't be continued from stage {investigation.stage} "
                      f"({investigation.status}).")
 

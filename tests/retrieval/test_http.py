@@ -282,3 +282,37 @@ def test_get_parsed_does_not_cache_when_the_parser_rejects_the_response():
     with pytest.raises(SourceRequestError, match="error entry"):
         run(go())
     assert cache.entries == {}
+
+
+# --- 429 without Retry-After (step 4.5: arXiv throttles longer than the normal backoff) -------------------
+
+def test_rate_limit_without_retry_after_waits_the_sources_minimum():
+    sleep = FakeSleep()
+    policy = RetryPolicy(base_delay=1.0, jitter=False, rate_limited_delay=10.0)
+    client, _ = make_client([httpx.Response(429), httpx.Response(429), httpx.Response(200, json={})],
+                            retry=policy, sleep=sleep)
+    run(get_json_and_close(client, "/x"))
+    assert sleep.delays == [10.0, 10.0]  # instead of 1 and 2 seconds
+
+
+def test_the_minimum_applies_only_to_429_and_only_without_retry_after():
+    policy = RetryPolicy(base_delay=1.0, jitter=False, rate_limited_delay=10.0)
+    sleep = FakeSleep()
+    client, _ = make_client([httpx.Response(503), httpx.Response(200, json={})], retry=policy, sleep=sleep)
+    run(get_json_and_close(client, "/x"))
+    assert sleep.delays == [1.0]
+    sleep = FakeSleep()
+    client, _ = make_client([httpx.Response(429, headers={"Retry-After": "3"}), httpx.Response(200, json={})],
+                            retry=policy, sleep=sleep)
+    run(get_json_and_close(client, "/x"))
+    assert sleep.delays == [3.0]  # the server's own hint wins
+
+
+def test_arxiv_waits_ten_seconds_after_an_unexplained_429():
+    from src.retrieval.sources.arxiv import RATE_LIMITED_WAIT_SECONDS, ArxivSource
+
+    source = ArxivSource()
+    try:
+        assert source._http.retry.rate_limited_delay == RATE_LIMITED_WAIT_SECONDS == 10.0
+    finally:
+        run(source.aclose())

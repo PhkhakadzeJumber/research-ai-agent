@@ -28,7 +28,7 @@ python -m scripts.search "your query" --limit 10 --from 2022  # all sources: use
 python -m scripts.search "your query" --sources arxiv --save  # store as an investigation (needs the database)
 python -m scripts.search "your query" --sources arxiv --save --rank  # + rank by embeddings (needs Vertex AI setup)
 python -m scripts.read_papers --latest --top 5 [--details]  # Paper Reader on a saved search: paid API, ask first
-python -m scripts.evaluate "your idea" [--field NLP] [--complexity beginner]  # Workflow A (so far: reading, clarification, query plan, search): paid API, ask first
+python -m scripts.evaluate "your idea" [--field NLP] [--complexity beginner]  # Workflow A (so far: up to reading the relevant papers; --max-read N, default 25): paid API, ask first
 python -m scripts.evaluate --continue <investigation id>   # resume where it stopped (clarification or evaluation)
 
 # Backend
@@ -63,7 +63,7 @@ cd frontend && npm run lint && npm run build # (planned)
 - **Trust fields are code-only:** an LLM never sets quote verification, claim status, verdicts, tiers or source levels.
 - **Papers are referenced by internal ID only.** Titles/DOIs in output are rendered from the database, never written by an LLM.
 - **External APIs** go through adapters with timeouts, retries with backoff, rate limits and the API cache. Tools return errors as data (`status` + `error_message`).
-- **Tests:** the default `pytest` run uses recorded fixtures (no network). Tests that hit real APIs are marked `live`.
+- **Tests:** the default `pytest` run uses recorded fixtures (no network). Tests that hit real APIs are marked `live`. Outside `live` tests, `tests/conftest.py` refuses to build a real Claude client: pass a fake model (`tests/fakes.py`) to anything that calls Claude.
 - **Docs stay true:** if code changes the design, update the relevant doc in the same change.
 - **Commits:** in the user's name only. A short subject line, a blank line, then a description: what changed and why (key files, decisions, test status). No `Co-Authored-By`, no mention of Claude. Commit only when asked.
 
