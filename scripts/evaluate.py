@@ -74,15 +74,20 @@ def investigation_input(args: argparse.Namespace) -> dict:
 # --- output -------------------------------------------------------------------------------------------
 
 def format_reading(reading: StructuredIdeaOutput) -> str:
-    lines = [f"Title:  {reading.title}", f"RQ:     {reading.research_question}", "", "Facets (* = key):"]
+    lines = [f"Title:  {reading.title}", f"RQ:     {reading.research_question}", "",
+             "Facets (* = key, [proposed] = Eureka's suggestion, not in your idea):"]
     for kind in FACET_KINDS:
         for facet in reading.facets_of(kind):
-            lines.append(f"  {kind.replace('_', '-'):<13}{'*' if facet.is_key else ' '} {facet.text}")
+            proposed = "" if facet.stated_by_user else "  [proposed]"
+            lines.append(f"  {kind.replace('_', '-'):<13}{'*' if facet.is_key else ' '} {facet.text}{proposed}")
     for title, items in (("Assumed", reading.assumptions), ("Vague", reading.vagueness_flags)):
         if items:
             lines.append("")
             lines.append(f"{title}:")
             lines.extend(f"  - {item}" for item in items)
+    if reading.proposed_key_facets():
+        lines.append("")
+        lines.append("Key facets Eureka proposed: you'll be asked to confirm these before the search.")
     lines.append("")
     if reading.clarifying_questions:
         lines.append("Questions (Eureka uses the assumption after → if you skip):")

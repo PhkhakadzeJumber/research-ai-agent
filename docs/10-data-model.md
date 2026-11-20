@@ -218,7 +218,7 @@ Deferred: ConversationMessage, ToolCall (section 8)
 |---|---|---|---|
 | title | A short name for the idea | Display; later the proposal title | "RAG for hallucination reduction in low-resource QA with small LMs" |
 | research question | One answerable question | Everything is judged against this question | "Does RAG reduce hallucination rates of small LMs in low-resource-language QA?" |
-| facets | The idea broken into problem / method / data-setting / evaluation / contribution | Copied into Facet rows of Candidate v1; novelty is judged per facet | method: "retrieval-augmented generation" |
+| facets | The idea broken into problem / method / data-setting / evaluation / contribution, each marked stated by the user or proposed by A1 | Copied into Facet rows of Candidate v1; novelty is judged per facet. A proposed key facet must be confirmed before the run continues | method: "retrieval-augmented generation" |
 | vagueness flags | Specific weaknesses in the idea | Helps the user sharpen it; feeds the questions | "How hallucination is measured is unspecified" |
 
 **Mode-specific content: Mode 2 (field brief)**

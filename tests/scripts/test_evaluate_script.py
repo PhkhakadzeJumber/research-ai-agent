@@ -37,10 +37,18 @@ def test_format_reading():
     text = format_reading(StructuredIdeaOutput.model_validate(VALID))
     assert "RQ:     Does RAG reduce" in text
     assert "  method       * retrieval-augmented generation" in text
-    assert "  evaluation     hallucination rate vs closed-book baseline" in text  # not key
+    assert "  evaluation     hallucination rate vs closed-book baseline  [proposed]" in text  # not key, proposed
+    assert "Key facets Eureka proposed" not in text  # the only proposal isn't key
     assert "Assumed:\n  - small means under 3B parameters" in text
     assert "Vague:\n  - how hallucination is measured is unspecified" in text
     assert "  1. Which hallucination measure?\n     → an automatic measure" in text
+
+
+def test_proposed_key_facets_are_pointed_out():
+    facets = [{**f, "stated_by_user": f["kind"] == "problem"} for f in VALID["facets"]]
+    text = format_reading(StructuredIdeaOutput.model_validate({**VALID, "facets": facets}))
+    assert "  method       * retrieval-augmented generation  [proposed]" in text
+    assert "Key facets Eureka proposed: you'll be asked to confirm these" in text
 
 
 def test_format_reading_without_questions():

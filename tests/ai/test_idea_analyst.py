@@ -55,8 +55,9 @@ def test_an_empty_idea_is_refused():
 
 def test_the_system_prompt_is_preamble_plus_idea_analyst():
     system = system_prompt("idea_analyst")
-    assert system.version_id == "shared_preamble@1+idea_analyst@1"
+    assert system.version_id == "shared_preamble@1+idea_analyst@2"
     assert "Your role: the Idea Analyst" in system.text and "if_skipped" in system.text
+    assert "keep the user's idea the user's idea" in system.text and "stated_by_user" in system.text
 
 
 # --- the agent -------------------------------------------------------------------------------------------
@@ -66,8 +67,8 @@ def test_a_reading_is_returned_with_its_versions_and_cost():
     reading = analyse(llm)
 
     assert reading.output.research_question == VALID["research_question"]
-    assert (reading.schema_version, reading.prompt_version) == ("structured-idea-v1",
-                                                                "shared_preamble@1+idea_analyst@1")
+    assert (reading.schema_version, reading.prompt_version) == ("structured-idea-v2",
+                                                                "shared_preamble@1+idea_analyst@2")
     assert len(reading.records) == 1 and reading.records[0].role == "idea_analyst"
     assert reading.cost_usd is not None
     assert "<idea>" in llm.requests[0].contents[-1].parts[0].text

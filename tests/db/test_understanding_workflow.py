@@ -56,8 +56,8 @@ async def test_the_reading_is_stored_and_the_run_waits_for_clarification(db_sess
     intake = await find_intake(db_session, investigation.id)
     assert intake.id == outcome.intake_id
     assert intake.agent_reading == VALID  # stored unchanged
-    assert (intake.mode, intake.schema_version) == ("evaluate", "structured-idea-v1")
-    assert intake.prompt_version == "shared_preamble@1+idea_analyst@1"
+    assert (intake.mode, intake.schema_version) == ("evaluate", "structured-idea-v2")
+    assert intake.prompt_version == "shared_preamble@1+idea_analyst@2"
     assert (intake.user_edits, intake.answers, intake.confirmed_at) == ({}, [], None)  # step 4.3
 
     [call] = (await db_session.execute(select(LlmCall))).scalars().all()

@@ -5,6 +5,11 @@ facets (problem / method / data_setting / evaluation / contribution), what it ha
 assume, specific vagueness flags, and at most 3 clarifying questions, each with the
 assumption Eureka uses if the user skips it.
 
+Every facet says whether the user stated it or A1 proposed it to fill a gap
+(stated_by_user). The title and research question stay in the user's terms; A1's
+proposals live only in facets and assumptions, so they're visible and can be corrected.
+Step 4.3 uses this: a key facet the user didn't state must be confirmed, not skipped.
+
 Stored unchanged as the Intake's agent reading. When the user confirms (step 4.3), the
 title, question and facets become Candidate v1 and its Facet rows.
 
@@ -20,7 +25,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-SCHEMA_VERSION = "structured-idea-v1"
+SCHEMA_VERSION = "structured-idea-v2"  # v2: facets say whether the user stated them
 
 FACET_KINDS = ("problem", "method", "data_setting", "evaluation", "contribution")
 MAX_FACETS_PER_KIND = 2
@@ -45,6 +50,12 @@ class Facet(_Strict):
         )
     )
     text: Text = Field(description="The facet, specific enough to search for and compare with papers.")
+    stated_by_user: bool = Field(
+        description=(
+            "True if the user's text states this component (in any wording). False if you proposed it to "
+            "fill a gap; then also record the choice in assumptions."
+        )
+    )
     is_key: bool = Field(
         description=(
             "True if this facet is essential to what would make the idea new: changing it would make it a "
@@ -64,10 +75,13 @@ class StructuredIdeaOutput(_Strict):
     """A precise, searchable reading of the user's research idea."""
 
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)] = Field(
-        description="A short, specific name for the idea."
+        description="A short name for the idea in the user's own terms: never name a method or setting they didn't state."
     )
     research_question: Text = Field(
-        description="ONE answerable research question that everything will be judged against."
+        description=(
+            "ONE answerable research question, built only from what the user stated. Components you proposed "
+            "go into facets and assumptions, not into the question."
+        )
     )
     facets: list[Facet] = Field(
         max_length=len(FACET_KINDS) * MAX_FACETS_PER_KIND,  # "every kind" is checked below, with a clearer error
@@ -114,3 +128,7 @@ class StructuredIdeaOutput(_Strict):
 
     def facets_of(self, kind: str) -> list[Facet]:
         return [facet for facet in self.facets if facet.kind == kind]
+
+    def proposed_key_facets(self) -> list[Facet]:
+        """Key facets A1 proposed rather than read: the user must confirm these (step 4.3)."""
+        return [facet for facet in self.facets if facet.is_key and not facet.stated_by_user]

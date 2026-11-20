@@ -44,6 +44,10 @@ def test_real_idea_readings():
     # the vague idea gets more flags and questions than the clear one
     assert vague.output.vagueness_flags and vague.output.clarifying_questions
     assert len(vague.output.vagueness_flags) >= len(clear.output.vagueness_flags)
-    # the clear idea's stated facets come through
+    # the clear idea's stated facets come through, as the user's own
     clear_text = " ".join(f.text.lower() for f in clear.output.facets)
     assert "georgian" in clear_text and "retrieval" in clear_text
+    assert clear.output.proposed_key_facets() == []
+    # the vague idea's gaps are filled as proposals, never as the user's: the user named no method
+    assert not any(f.stated_by_user for f in vague.output.facets_of("method"))
+    assert vague.output.proposed_key_facets()

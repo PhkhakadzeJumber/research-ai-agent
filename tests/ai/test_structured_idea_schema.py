@@ -11,11 +11,11 @@ VALID = {
     "title": "RAG for hallucination reduction in Georgian QA with small LMs",
     "research_question": "Does RAG reduce hallucination of sub-3B LMs in Georgian open-domain QA?",
     "facets": [
-        {"kind": "problem", "text": "hallucination of small LMs in low-resource QA", "is_key": True},
-        {"kind": "method", "text": "retrieval-augmented generation", "is_key": True},
-        {"kind": "data_setting", "text": "Georgian open-domain QA", "is_key": True},
-        {"kind": "evaluation", "text": "hallucination rate vs closed-book baseline", "is_key": False},
-        {"kind": "contribution", "text": "first evaluation of RAG for sub-3B models in Georgian", "is_key": False},
+        {"kind": "problem", "text": "hallucination of small LMs in low-resource QA", "stated_by_user": True, "is_key": True},
+        {"kind": "method", "text": "retrieval-augmented generation", "stated_by_user": True, "is_key": True},
+        {"kind": "data_setting", "text": "Georgian open-domain QA", "stated_by_user": True, "is_key": True},
+        {"kind": "evaluation", "text": "hallucination rate vs closed-book baseline", "stated_by_user": False, "is_key": False},
+        {"kind": "contribution", "text": "first evaluation of RAG for sub-3B models in Georgian", "stated_by_user": True, "is_key": False},
     ],
     "assumptions": ["small means under 3B parameters"],
     "vagueness_flags": ["how hallucination is measured is unspecified"],
@@ -42,13 +42,13 @@ def test_lists_may_be_empty_for_a_clear_idea():
 
 def test_every_facet_kind_is_required():
     facets = [f for f in VALID["facets"] if f["kind"] != "evaluation"]
-    facets.append({"kind": "method", "text": "dense retrieval", "is_key": False})
+    facets.append({"kind": "method", "text": "dense retrieval", "stated_by_user": True, "is_key": False})
     with pytest.raises(ValidationError, match="missing evaluation"):
         StructuredIdeaOutput.model_validate(changed(facets=facets))
 
 
 def test_at_most_two_facets_per_kind():
-    extra = [{"kind": "method", "text": f"method {n}", "is_key": False} for n in range(2)]
+    extra = [{"kind": "method", "text": f"method {n}", "stated_by_user": True, "is_key": False} for n in range(2)]
     with pytest.raises(ValidationError, match="too many method"):
         StructuredIdeaOutput.model_validate(changed(facets=VALID["facets"] + extra))
 
@@ -60,9 +60,22 @@ def test_at_least_one_key_facet():
 
 
 def test_duplicate_facets_are_refused():
-    facets = VALID["facets"] + [{"kind": "problem", "text": "Retrieval-Augmented Generation", "is_key": False}]
+    facets = VALID["facets"] + [{"kind": "problem", "text": "Retrieval-Augmented Generation", "stated_by_user": True, "is_key": False}]
     with pytest.raises(ValidationError, match="each facet must be different"):
         StructuredIdeaOutput.model_validate(changed(facets=facets))
+
+
+def test_every_facet_says_whether_the_user_stated_it():
+    facets = [{k: v for k, v in f.items() if k != "stated_by_user"} for f in VALID["facets"]]
+    with pytest.raises(ValidationError, match="stated_by_user"):
+        StructuredIdeaOutput.model_validate(changed(facets=facets))
+
+
+def test_proposed_key_facets_are_found():
+    assert StructuredIdeaOutput.model_validate(VALID).proposed_key_facets() == []  # the evaluation isn't key
+    facets = [{**f, "stated_by_user": f["kind"] == "problem"} for f in VALID["facets"]]
+    proposed = StructuredIdeaOutput.model_validate(changed(facets=facets)).proposed_key_facets()
+    assert [f.kind for f in proposed] == ["method", "data_setting"]
 
 
 def test_at_most_three_questions():
@@ -77,7 +90,7 @@ def test_every_question_needs_its_skip_assumption():
 
 
 @pytest.mark.parametrize("bad", [
-    {"facets": [{"kind": "dataset", "text": "x", "is_key": True}]},  # unknown kind
+    {"facets": [{"kind": "dataset", "text": "x", "stated_by_user": True, "is_key": True}]},  # unknown kind
     {"title": "   "},  # empty after stripping
     {"title": "x" * 121},
     {"verdict": "novel"},  # unknown field: the model can't add judgements

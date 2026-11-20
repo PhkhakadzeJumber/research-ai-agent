@@ -34,7 +34,7 @@ Model settings use Claude through ADK (doc 08). *Effort* is the model's reasonin
 
 | Task | Input | Output |
 |---|---|---|
-| Structure idea (Mode 1) | Idea text, field, seed papers, complexity, constraints | **StructuredIdea:** title, research question, facets (problem, method, data/setting, evaluation, contribution), assumptions, vagueness flags, ≤3 clarifying questions, each with the assumption used if the user skips it |
+| Structure idea (Mode 1) | Idea text, field, seed papers, complexity, constraints | **StructuredIdea:** title, research question, facets (problem, method, data/setting, evaluation, contribution; each marked as stated by the user or proposed by A1), assumptions, vagueness flags, ≤3 clarifying questions, each with the assumption used if the user skips it |
 | Field brief (Mode 2) | Field, interests, technologies, exclusions, domain, complexity, constraints | **FieldBrief:** 4–8 subtopics to explore, why each fits the user, landscape query plan, signal-source queries, ≤3 clarifying questions |
 | Query plan | StructuredIdea or candidate facets | **QueryPlan:** 10–20 queries of different kinds: synonyms and older terminology, facet-only, facet pairs, method-in-other-domain, plus date ranges |
 | Normalize candidate | A Scout candidate | Facets in the same format as StructuredIdea |
@@ -45,7 +45,8 @@ Model settings use Claude through ADK (doc 08). *Effort* is the model's reasonin
 
 **Rules:**
 
-- Every facet kind must be present (at most 2 per kind, at least one key facet; enforced by the schema, so a violation triggers the repair attempt). A component the idea doesn't state is proposed and recorded as an assumption.
+- Every facet kind must be present (at most 2 per kind, at least one key facet; enforced by the schema, so a violation triggers the repair attempt). A component the idea doesn't state is proposed, marked `stated_by_user: false` and recorded as an assumption.
+- The title and research question use only what the user stated; A1's proposals appear only in facets and assumptions (prompt v2, after the step 4.2 live run showed A1 turning a vague idea into a concrete idea of its own). A key facet A1 proposed must be confirmed by the user at clarification and can't be skipped (step 4.3).
 - Vagueness flags must be specific, e.g. "the evaluation is undefined" rather than "too vague".
 - Query plans must include at least 3 terminology variants per key concept and at least 2 queries that leave out the method (to find the same problem solved differently).
 - The field brief must respect exclusions and the complexity level. For Beginner, prefer subtopics with public datasets and established baselines.
