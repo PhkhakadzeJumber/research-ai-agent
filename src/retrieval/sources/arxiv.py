@@ -7,6 +7,10 @@ rate limiter enforces. Notes on its behavior that this module handles:
 - Query syntax: a plain multi-word query is treated as OR ("any word"), which returns
   mostly irrelevant results. Words are therefore joined with AND ("all words").
   Quoted phrases in the query are kept as phrases.
+- The price of AND: a long query easily matches nothing (in the step 4.4 live run,
+  14 of 19 queries of 5-8 words found nothing on arXiv). So when a query of more than
+  FALLBACK_TERMS terms finds nothing, it is retried once with its first FALLBACK_TERMS
+  terms (the planner puts the most important words first).
 - Responses are Atom XML. They're parsed with Python's built-in parser, which is
   protected against malicious entity expansion in Python 3.11.
 - Errors come back as HTTP 400 (handled by the HTTP layer) with an entry titled
@@ -18,6 +22,8 @@ rate limiter enforces. Notes on its behavior that this module handles:
 """
 
 from __future__ import annotations
+
+from dataclasses import replace
 
 import logging
 import re
@@ -50,6 +56,24 @@ STOPWORDS = frozenset({
 
 _PHRASE_OR_WORD = re.compile(r'"([^"]+)"|(\w+)')
 _NON_WORD = re.compile(r"[^\w\s]")
+
+
+FALLBACK_TERMS = 4
+
+
+def shortened_request(request: SearchRequest) -> SearchRequest | None:
+    """The request with only its first FALLBACK_TERMS meaningful terms (words or quoted
+    phrases), or None if it isn't longer than that."""
+    terms: list[str] = []
+    for phrase, word in _PHRASE_OR_WORD.findall(request.query):
+        if phrase:
+            terms.append(f'"{collapse_whitespace(phrase).lower()}"')
+        elif word.lower() not in STOPWORDS:
+            terms.append(word.lower())
+    terms = list(dict.fromkeys(terms))
+    if len(terms) <= FALLBACK_TERMS:
+        return None
+    return replace(request, query=" ".join(terms[:FALLBACK_TERMS]))
 
 
 def build_search_query(request: SearchRequest) -> str:
@@ -174,5 +198,8 @@ class ArxivSource:
         """
         # get_parsed caches the response only if parse_feed accepts it (no cached error pages).
         papers = await self._http.get_parsed(QUERY_PATH, build_params(request), parse_feed)
+        if not papers and (shorter := shortened_request(request)) is not None:
+            logger.info("arxiv: nothing for %r; retrying with %r", request.query, shorter.query)
+            papers = await self._http.get_parsed(QUERY_PATH, build_params(shorter), parse_feed)
         logger.info("arxiv: %d papers", len(papers))
         return papers

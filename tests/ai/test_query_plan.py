@@ -100,6 +100,18 @@ def test_without_method_queries_must_really_leave_the_method_out():
     assert any("without_method" in p for p in check_quotas(plan(data), FACETS, "full"))
 
 
+def test_long_queries_are_a_quota_miss():
+    data = full_plan()
+    data["queries"][0]["text"] = "retrieval augmented generation georgian open domain question answering"  # 8 words
+    problems = check_quotas(plan(data), FACETS, "full")
+    assert problems == ["queries must have at most 6 words; shorten: "
+                        "'retrieval augmented generation georgian open domain question answering'"]
+
+
+def test_every_query_of_the_example_plan_is_short_enough():
+    assert all(len(query.text.split()) <= 6 for query in plan(full_plan()).queries)
+
+
 def test_unknown_facet_numbers_are_reported():
     data = full_plan()
     data["queries"][0]["facets"] = [1, 9]
@@ -136,8 +148,9 @@ def test_candidate_text_cannot_break_out():
 
 def test_the_query_plan_prompt():
     system = system_prompt("idea_analyst", task="query_plan")
-    assert system.version_id == "shared_preamble@1+idea_analyst_query_plan@1"
-    assert "3-8 keywords" in system.text and "without_method" in system.text
+    assert system.version_id == "shared_preamble@1+idea_analyst_query_plan@2"
+    assert "2-5 keywords" in system.text and "requires EVERY word" in system.text
+    assert "without_method" in system.text and "first 4 words" in system.text
 
 
 # --- plan_queries -----------------------------------------------------------------------------------------

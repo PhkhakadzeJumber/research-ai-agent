@@ -54,7 +54,9 @@ logger = logging.getLogger(__name__)
 
 Sessions = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
-PER_SOURCE_LIMIT = {"light": 15, "full": 20}  # results per query per source
+# Results per query per source. In the step 4.4 live run OpenAlex returned the full 20
+# for every query, so the cap, not the source, decided how much was seen.
+PER_SOURCE_LIMIT = {"light": 20, "full": 30}
 SEARCH_CONCURRENCY = 4
 FALLBACK_WORDS = 8
 

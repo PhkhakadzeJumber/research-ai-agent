@@ -1,7 +1,7 @@
 """The Idea Analyst's query plan (agent A1, task "query plan"; doc 04): the searches that
 look for prior work on one candidate.
 
-What the model fills: 8-20 short keyword queries, each with its kind and the facets
+What the model fills: 8-20 short keyword queries (2-5 words), each with its kind and the facets
 (by number) it covers, and optionally a first year.
 
 The schema enforces what one plan can check on its own (unique queries, sensible
@@ -23,6 +23,9 @@ QueryKind = Literal["core", "terminology_variant", "facet_only", "facet_pair", "
                     "method_other_domain"]
 
 QUERY_COUNTS = {"light": (8, 10), "full": (15, 20)}  # doc 05 §11.4: (minimum, maximum) per depth
+# arXiv requires every word of a query to match: in the step 4.4 live run, queries of
+# 5-8 words found nothing there 14 times out of 19. Longer queries are a quota miss.
+MAX_QUERY_WORDS = 6
 MIN_WITHOUT_METHOD = 2
 MAX_VARIANTS_PER_KEY_FACET = 3
 
@@ -34,9 +37,9 @@ class _Strict(BaseModel):
 class PlannedQuery(_Strict):
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=120)] = Field(
         description=(
-            "3-8 keywords as a paper would phrase them, e.g. 'retrieval augmented generation low-resource "
-            "question answering'. No boolean operators, quotes or parentheses: some sources require every word "
-            "to appear, so extra words lose results."
+            "2-5 keywords as a paper would phrase them, most important first, e.g. 'retrieval augmented "
+            "generation hallucination'. No boolean operators, quotes or parentheses: some sources require every "
+            "word to appear, so every extra word loses results."
         )
     )
     kind: QueryKind = Field(
@@ -92,6 +95,11 @@ def check_quotas(plan: QueryPlanOutput, facets: list[FacetRef], depth: str) -> l
     unknown = sorted({n for query in plan.queries for n in query.facets if n not in known})
     if unknown:
         problems.append(f"queries refer to facet numbers that don't exist: {unknown}")
+
+    too_long = [q.text for q in plan.queries if len(q.text.split()) > MAX_QUERY_WORDS]
+    if too_long:
+        problems.append(f"queries must have at most {MAX_QUERY_WORDS} words; shorten: "
+                        + "; ".join(repr(text) for text in too_long))
 
     low, high = QUERY_COUNTS[depth]
     if not low <= len(plan.queries) <= high:

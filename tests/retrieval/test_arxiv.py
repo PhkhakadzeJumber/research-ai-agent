@@ -12,6 +12,7 @@ from src.retrieval.records import SearchRequest
 from src.retrieval.sources.arxiv import (
     ArxivSource,
     build_search_query,
+    shortened_request,
     parse_entry,
     parse_feed,
 )
@@ -151,3 +152,60 @@ def test_broken_entry_is_skipped():
         '<entry xmlns="http://www.w3.org/2005/Atom"><id>not-an-arxiv-id</id><title>Something</title></entry>'
     )
     assert parse_entry(entry) is None
+
+
+
+# --- the fallback for long queries (step 4.4b) ----------------------------------------------------------
+
+EMPTY_FEED = '<feed xmlns="http://www.w3.org/2005/Atom"><title>arXiv Query</title></feed>'
+
+
+@pytest.mark.parametrize(("query", "shorter"), [
+    ("retrieval augmented generation Georgian question answering", "retrieval augmented generation georgian"),
+    ('"open domain" qa for the Georgian language models', '"open domain" qa georgian language'),
+    ("rag for the georgian language", None),  # 4 meaningful terms: not shortened
+])
+def test_shortened_request(query, shorter):
+    result = shortened_request(SearchRequest(query=query, limit=9, year_from=2020))
+    assert (result.query if result else None) == shorter
+    if result:
+        assert (result.limit, result.year_from) == (9, 2020)  # everything else kept
+
+
+def responses(*bodies):
+    """A transport handler answering with the given feeds in order."""
+    bodies = list(bodies)
+    return lambda request: httpx.Response(200, text=bodies.pop(0))
+
+
+def search_sequence(request, *bodies):
+    sent = []
+    answer = responses(*bodies)
+
+    def handler(http_request):
+        sent.append(http_request)
+        return answer(http_request)
+
+    async def go():
+        http = SourceHttpClient("arxiv", base_url="https://export.arxiv.org", transport=httpx.MockTransport(handler),
+                                retry=RetryPolicy(max_attempts=1), min_interval=0)
+        async with ArxivSource(http=http) as source:
+            return await source.search(request)
+
+    return asyncio.run(go()), sent
+
+
+def test_a_long_query_that_finds_nothing_is_retried_shorter():
+    request = SearchRequest(query="retrieval augmented generation Georgian question answering hallucination")
+    papers, sent = search_sequence(request, EMPTY_FEED, fixture("search.xml"))
+    assert len(papers) == 5 and len(sent) == 2
+    assert sent[1].url.params["search_query"] == (
+        "all:retrieval AND all:augmented AND all:generation AND all:georgian")
+
+
+def test_no_retry_when_results_were_found_or_the_query_is_short():
+    long_query = SearchRequest(query="retrieval augmented generation Georgian question answering")
+    _, sent = search_sequence(long_query, fixture("search.xml"))
+    assert len(sent) == 1
+    papers, sent = search_sequence(SearchRequest(query="rag georgian"), EMPTY_FEED)
+    assert papers == [] and len(sent) == 1

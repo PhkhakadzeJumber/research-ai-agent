@@ -176,7 +176,7 @@ async def test_the_plan_is_stored_with_its_cost_and_the_step_moves_on(db_session
     assert evaluation.query_plan == full_plan() and evaluation.counters["queries_planned"] == 16
     [call] = await rows(db_session, LlmCall, evaluation_id=evaluation_id)
     assert (call.investigation_id, call.prompt_version) == (investigation.id,
-                                                            "shared_preamble@1+idea_analyst_query_plan@1")
+                                                            "shared_preamble@1+idea_analyst_query_plan@2")
 
 
 async def test_a_failed_plan_falls_back_and_degrades_the_evaluation(db_session):
@@ -213,7 +213,7 @@ async def test_searches_are_stored_with_their_kind_and_papers_deduplicated(db_se
     outcome = await retrieve_step(sessions_on(db_session), evaluation_id, search)
 
     assert (outcome.searches, outcome.retrieved, outcome.unique_papers) == (16, 4, 3)
-    assert {request.limit for request in search.requests} == {20}  # full depth
+    assert {request.limit for request in search.requests} == {30}  # full depth
     queries = await rows(db_session, SearchQuery, evaluation_id=evaluation_id)
     assert len(queries) == 32  # 16 searches x 2 sources
     assert {(q.origin, q.query_type) for q in queries if q.query_text == "retrieval augmented generation"} == {

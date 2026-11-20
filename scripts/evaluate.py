@@ -35,7 +35,7 @@ import sys
 import uuid
 from collections.abc import Callable
 
-from src.ai.schemas.structured_idea import FACET_KINDS, StructuredIdeaOutput
+from src.ai.schemas.structured_idea import StructuredIdeaOutput
 from src.ai.workflows.clarification import (
     ConfirmationRequired,
     NotWaitingForClarification,
@@ -112,11 +112,7 @@ def investigation_input(args: argparse.Namespace) -> dict:
 def format_reading(reading: StructuredIdeaOutput, *, questions: bool = True) -> str:
     """The reading as text. questions=False for a revised reading (the user has already answered)."""
     lines = [f"Title:  {reading.title}", f"RQ:     {reading.research_question}", "",
-             "Facets (* = key, [proposed] = Eureka's suggestion, not in your idea):"]
-    for kind in FACET_KINDS:
-        for facet in reading.facets_of(kind):
-            proposed = "" if facet.stated_by_user else "  [proposed]"
-            lines.append(f"  {kind.replace('_', '-'):<13}{'*' if facet.is_key else ' '} {facet.text}{proposed}")
+             "Facets (* = key, [proposed] = Eureka's suggestion, not in your idea):", format_facet_list(reading)]
     for title, items in (("Assumed", reading.assumptions), ("Vague", reading.vagueness_flags)):
         if items:
             lines.append("")
