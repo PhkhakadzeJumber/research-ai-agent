@@ -34,7 +34,7 @@ Model settings use Claude through ADK (doc 08). *Effort* is the model's reasonin
 
 | Task | Input | Output |
 |---|---|---|
-| Structure idea (Mode 1) | Idea text, field, seed papers, complexity, constraints | **StructuredIdea:** title, research question, facets (problem, method, data/setting, evaluation, contribution), assumptions, vagueness flags, ≤3 clarifying questions |
+| Structure idea (Mode 1) | Idea text, field, seed papers, complexity, constraints | **StructuredIdea:** title, research question, facets (problem, method, data/setting, evaluation, contribution), assumptions, vagueness flags, ≤3 clarifying questions, each with the assumption used if the user skips it |
 | Field brief (Mode 2) | Field, interests, technologies, exclusions, domain, complexity, constraints | **FieldBrief:** 4–8 subtopics to explore, why each fits the user, landscape query plan, signal-source queries, ≤3 clarifying questions |
 | Query plan | StructuredIdea or candidate facets | **QueryPlan:** 10–20 queries of different kinds: synonyms and older terminology, facet-only, facet pairs, method-in-other-domain, plus date ranges |
 | Normalize candidate | A Scout candidate | Facets in the same format as StructuredIdea |
@@ -45,6 +45,7 @@ Model settings use Claude through ADK (doc 08). *Effort* is the model's reasonin
 
 **Rules:**
 
+- Every facet kind must be present (at most 2 per kind, at least one key facet; enforced by the schema, so a violation triggers the repair attempt). A component the idea doesn't state is proposed and recorded as an assumption.
 - Vagueness flags must be specific, e.g. "the evaluation is undefined" rather than "too vague".
 - Query plans must include at least 3 terminology variants per key concept and at least 2 queries that leave out the method (to find the same problem solved differently).
 - The field brief must respect exclusions and the complexity level. For Beginner, prefer subtopics with public datasets and established baselines.

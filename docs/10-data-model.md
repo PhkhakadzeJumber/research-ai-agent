@@ -208,7 +208,7 @@ Deferred: ConversationMessage, ToolCall (section 8)
 | investigation id | Owner (exactly one Intake per investigation) | — | `inv_204` |
 | agent reading | A1's output, unchanged | Kept to compare with the user's edits | (see the mode-specific content below) |
 | user edits | What the user changed at clarification | The corrected version is what the run uses | "Languages: Georgian and Armenian" |
-| clarifying questions + answers | ≤3 questions and the user's answers (or "skipped") | The human-in-the-loop checkpoint | Q: "Which languages?" A: "Georgian and Armenian" |
+| clarifying questions + answers | ≤3 questions, each with the assumption used if skipped, and the user's answers (or "skipped") | The human-in-the-loop checkpoint | Q: "Which languages?" A: "Georgian and Armenian" |
 | assumptions | What A1 had to assume | Shown to the user; copied to the investigation if clarification is skipped | "Small = under 3B parameters" |
 | confirmed at | When the user confirmed or skipped | The run starts only after this | — |
 

@@ -1,7 +1,7 @@
 """Request & run control (ER region 1; field meanings in doc 10 §2–§3). Minimal for now.
 
-Only the fields needed so far. Intake, ProgressEvent and the remaining investigation
-columns arrive with the code that fills them. LlmCall arrived with step 3.4.
+Only the fields needed so far. ProgressEvent and the remaining investigation columns
+arrive with the code that fills them. LlmCall arrived with step 3.4, Intake with 4.2.
 
 The exact status and stage names of the formal state graph (doc 05 §11) are defined
 here and enforced by CHECK constraints, so an investigation can never be in a state
@@ -12,6 +12,7 @@ the graph doesn't know. src/ai/workflows (step 4) imports these values from here
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -20,7 +21,7 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.db.base import Base, Timestamps, UUIDPrimaryKey
+from src.db.base import AwareDateTime, Base, Timestamps, UUIDPrimaryKey
 
 MODES = ("evaluate", "discover")
 COMPLEXITY_LEVELS = ("beginner", "intermediate", "advanced")
@@ -125,6 +126,30 @@ class Investigation(UUIDPrimaryKey, Timestamps, Base):
     assumptions: Mapped[list[Any]] = mapped_column(JSONB, default=list, server_default=sql_text("'[]'::jsonb"))
     config_version: Mapped[str | None] = mapped_column(String(64))
 
+
+
+class Intake(UUIDPrimaryKey, Timestamps, Base):
+    """A1's reading of the request, side by side with the user's corrections (doc 10 §3.2).
+
+    Mode 1: a StructuredIdeaOutput (src/ai/schemas/structured_idea.py). Mode 2: the field
+    brief (step 5). agent_reading is never changed after it is stored; what the user
+    corrects goes into user_edits and answers (step 4.3), so the two can be compared.
+    """
+
+    __tablename__ = "intakes"
+    __table_args__ = (
+        UniqueConstraint("investigation_id"),  # exactly one Intake per investigation
+        CheckConstraint(one_of("mode", MODES), name="mode_valid"),
+    )
+
+    investigation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"))
+    mode: Mapped[str] = mapped_column(String(16))
+    agent_reading: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    schema_version: Mapped[str] = mapped_column(String(64))
+    prompt_version: Mapped[str] = mapped_column(String(128))
+    user_edits: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default=sql_text("'{}'::jsonb"))
+    answers: Mapped[list[Any]] = mapped_column(JSONB, default=list, server_default=sql_text("'[]'::jsonb"))
+    confirmed_at: Mapped[datetime | None] = mapped_column(AwareDateTime())  # empty until the user confirms or skips
 
 class LlmCall(UUIDPrimaryKey, Timestamps, Base):
     """One call to Claude (doc 10 §8): cost accounting, budgets, debugging, and tying

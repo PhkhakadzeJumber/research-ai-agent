@@ -28,6 +28,7 @@ python -m scripts.search "your query" --limit 10 --from 2022  # all sources: use
 python -m scripts.search "your query" --sources arxiv --save  # store as an investigation (needs the database)
 python -m scripts.search "your query" --sources arxiv --save --rank  # + rank by embeddings (needs Vertex AI setup)
 python -m scripts.read_papers --latest --top 5 [--details]  # Paper Reader on a saved search: paid API, ask first
+python -m scripts.evaluate "your idea" [--field NLP] [--complexity beginner]  # Workflow A (so far: A1 reading): paid API, ask first
 
 # Backend
 uvicorn src.api.main:app --reload            # (planned) API on http://127.0.0.1:8000

@@ -1,4 +1,5 @@
-"""Context packets: exactly what an agent sees, built by code (doc 08 §5).
+"""Context packets: exactly what an agent sees, built by code (doc 08 §5). Papers for the
+Paper Reader (render_paper) and ideas for the Idea Analyst (render_idea).
 
 Agents never read the database themselves. The orchestrator gives each one a curated
 packet, rendered as clearly labelled blocks so the model knows what it may cite:
@@ -88,4 +89,59 @@ def render_paper(paper: PaperForReading, *, max_authors: int = 10) -> str:
         section = f' section="{_attribute(chunk.section_title)}"' if chunk.section_title else ""
         lines.append(f'<chunk id="{_attribute(chunk.chunk_id)}"{section}>\n{_contain(chunk.text)}\n</chunk>')
     lines.append("</paper>")
+    return "\n".join(lines)
+
+
+# --- the Idea Analyst's packet ---------------------------------------------------------------------------
+#
+#     <idea>the user's text</idea>
+#     <field>NLP</field>
+#     <seed_papers>
+#     - 2401.12345
+#     </seed_papers>
+#     <complexity>beginner: ...</complexity>
+#     <constraints>
+#     - available time: 8 weeks
+#     </constraints>
+
+_IDEA_TAGS = re.compile(r"<(/?)(idea|field|seed_papers|complexity|constraints)\b", re.IGNORECASE)
+
+COMPLEXITY_NOTES = {
+    "beginner": "beginner: a well-scoped empirical question; existing models and public datasets used as-is",
+    "intermediate": "intermediate: comparisons or adaptations with independent design choices and several baselines",
+    "advanced": "advanced: a new method, problem formulation or substantial system",
+}
+
+
+@dataclass(frozen=True)
+class IdeaForAnalysis:
+    """What the Idea Analyst is shown for a Mode 1 request (doc 02 §2.1)."""
+
+    idea: str
+    complexity: str
+    field: str | None = None
+    seed_papers: tuple[str, ...] = ()
+    constraints: tuple[tuple[str, str], ...] = ()
+    """(name, value) pairs from the constraints profile, e.g. ('available time', '8 weeks')."""
+
+
+def _contain_user_text(text: str) -> str:
+    return _IDEA_TAGS.sub(lambda match: f"&lt;{match.group(1)}{match.group(2)}", text.strip())
+
+
+def render_idea(request: IdeaForAnalysis) -> str:
+    """The Idea Analyst's input. Raises ValueError for an empty idea."""
+    if not request.idea.strip():
+        raise ValueError("The idea is empty.")
+    lines = [f"<idea>\n{_contain_user_text(request.idea)}\n</idea>"]
+    if request.field:
+        lines.append(f"<field>{_contain_user_text(request.field)}</field>")
+    if request.seed_papers:
+        seeds = "\n".join(f"- {_contain_user_text(seed)}" for seed in request.seed_papers)
+        lines.append(f"<seed_papers>\n{seeds}\n</seed_papers>")
+    lines.append(f"<complexity>{COMPLEXITY_NOTES.get(request.complexity, request.complexity)}</complexity>")
+    if request.constraints:
+        items = "\n".join(f"- {_contain_user_text(name)}: {_contain_user_text(value)}"
+                          for name, value in request.constraints)
+        lines.append(f"<constraints>\n{items}\n</constraints>")
     return "\n".join(lines)
