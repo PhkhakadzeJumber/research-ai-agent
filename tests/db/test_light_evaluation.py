@@ -156,6 +156,10 @@ async def test_light_evaluation_needs_its_stage(db_session):
 
 async def test_the_command_shows_each_evaluation_and_the_triage(db_session, capsys):
     investigation = await prescreened(db_session)
+    # a cap of 2 light evaluations (like --max-light 2): both are used here, so the router has no room to
+    # replenish (5.5b) and this test stays about the light evaluations' output
+    investigation.budget = {**investigation.budget, "light_evaluations": 2}
+    await db_session.flush()
     code = await evaluate_light(sessions_on(db_session), investigation.id, models=fake_models(),
                                 search_factory=search)
     output = capsys.readouterr().out

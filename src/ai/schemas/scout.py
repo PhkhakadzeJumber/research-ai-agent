@@ -1,7 +1,8 @@
 """The Research Opportunity Scout's output (agent A2, task discover; doc 04, doc 10 §6.3-6.4).
 
 ScoutOutput (task discover): a CandidateSet of 8-12 research ideas grounded in the mined landscape.
-RefineOutput (task refine, step 5.5a): the next version of one candidate, with a change note. The input labels
+RefineOutput (task refine, step 5.5a): the next version of one candidate, with a change note.
+ReplenishOutput (Mode 2) and AlternativesOutput (Mode 1), step 5.5b: 3-6 / 3-5 more candidates. The input labels
 the material: opportunity items O1, O2, ... (recurring problems, contradictions,
 subtopics, datasets), verified statements Q1, Q2, ... and papers P1, P2, ... Every
 candidate links to what inspired it by those labels; code maps them back to IDs, so the
@@ -143,6 +144,16 @@ class RefineOutput(_Strict):
     candidate: RefinedCandidate
 
 
+def _set_rules(candidates, min_strategies: int) -> None:
+    strategies = {candidate.origin_strategy for candidate in candidates}
+    if len(strategies) < min_strategies:
+        raise ValueError(f"candidates: use at least {min_strategies} different origin strategies; "
+                         f"only {', '.join(sorted(strategies))} used")
+    titles = [candidate.title.casefold() for candidate in candidates]
+    if len(set(titles)) != len(titles):
+        raise ValueError("candidates: each candidate needs a different title")
+
+
 class ScoutOutput(_Strict):
     candidates: list[ScoutCandidate] = Field(
         min_length=MIN_CANDIDATES, max_length=MAX_CANDIDATES,
@@ -151,12 +162,34 @@ class ScoutOutput(_Strict):
     )
 
     @model_validator(mode="after")
-    def _set_rules(self) -> ScoutOutput:
-        strategies = {candidate.origin_strategy for candidate in self.candidates}
-        if len(strategies) < MIN_STRATEGIES:
-            raise ValueError(f"candidates: use at least {MIN_STRATEGIES} different origin strategies; "
-                             f"only {', '.join(sorted(strategies))} used")
-        titles = [candidate.title.casefold() for candidate in self.candidates]
-        if len(set(titles)) != len(titles):
-            raise ValueError("candidates: each candidate needs a different title")
+    def _rules(self) -> ScoutOutput:
+        _set_rules(self.candidates, MIN_STRATEGIES)
+        return self
+
+
+class ReplenishOutput(_Strict):
+    """Task replenish (Mode 2, step 5.5b): a few more ideas when too few survived."""
+
+    candidates: list[ScoutCandidate] = Field(
+        min_length=3, max_length=6,
+        description="3-6 new research ideas, different from those already tried, covering at least 2 strategies.",
+    )
+
+    @model_validator(mode="after")
+    def _rules(self) -> ReplenishOutput:
+        _set_rules(self.candidates, 2)
+        return self
+
+
+class AlternativesOutput(_Strict):
+    """Task alternatives (Mode 1, step 5.5b): other ideas when the user's own idea was rejected."""
+
+    candidates: list[ScoutCandidate] = Field(
+        min_length=3, max_length=5,
+        description="3-5 alternative research ideas grounded in the evidence gathered for the user's idea.",
+    )
+
+    @model_validator(mode="after")
+    def _rules(self) -> AlternativesOutput:
+        _set_rules(self.candidates, 1)
         return self

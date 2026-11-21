@@ -14,11 +14,13 @@ pytestmark = [pytest.mark.anyio, pytest.mark.db]
 FACETS = [FacetToStore("problem", "p", True, False)]
 
 
-async def at_triage(db_session, mode="discover", count=3, budget=12.0, cost=0):
+async def at_triage(db_session, mode="discover", count=3, budget=12.0, cost=0, light_room=0):
+    """light_room: light evaluations still allowed. 0 by default, so replenish (line 3) stays out of the way of
+    the other lines; the replenish tests give it room."""
     investigation = await create_investigation(db_session, mode=mode, complexity="beginner",
                                                input={"field": "NLP", "count": count})
     investigation.stage, investigation.status = "triage", "running"
-    investigation.budget, investigation.cost_usd = {"cost_usd": budget}, cost
+    investigation.budget, investigation.cost_usd = {"cost_usd": budget, "light_evaluations": light_room}, cost
     await db_session.flush()
     return investigation
 
@@ -91,16 +93,52 @@ async def test_advanced_candidates_go_to_full_evaluation_otherwise_ranking(db_se
     assert (decision.stage, decision.reason) == ("ranking", "nothing left to evaluate")
 
 
-async def test_replenish_and_alternatives_wait_for_their_scout_tasks(db_session):
-    # too few survivors (Mode 2) and a rejected user idea (Mode 1) would go to generating_candidates once
-    # step 5.5b adds those tasks; until then the router goes on to the next line
-    investigation = await at_triage(db_session, count=3)
+async def test_too_few_survivors_replenish_from_the_reserve_first(db_session):
+    investigation = await at_triage(db_session, count=3, light_room=2)
     await idea(db_session, investigation, "A", "advanced")
+    await idea(db_session, investigation, "Waiting", "proposed")  # in reserve
+    decision = await route(db_session, investigation)
+    assert (decision.stage, decision.task) == ("generating_candidates", "replenish")
+    assert decision.reason == "1 of 3 ideas survived: replenishing (1 in reserve)"
+
+
+async def test_without_a_reserve_the_scout_is_asked_once(db_session):
+    investigation = await at_triage(db_session, count=3, light_room=2)
+    await idea(db_session, investigation, "A", "advanced")
+    decision = await route(db_session, investigation)
+    assert decision.reason == "1 of 3 ideas survived: replenishing (asking the Scout for more)"
+
+    used = await at_triage(db_session, count=3, light_room=2)
+    await idea(db_session, used, "A", "advanced")
+    await idea(db_session, used, "From the Scout's round", "rejected", origin="replenish")
+    assert (await route(db_session, used)).stage == "full_evaluation"  # the one round is used
+
+
+async def test_no_replenish_without_room_for_light_evaluations(db_session):
+    investigation = await at_triage(db_session, count=3, light_room=0)
+    await idea(db_session, investigation, "A", "advanced")
+    await idea(db_session, investigation, "Waiting", "proposed")
     assert (await route(db_session, investigation)).stage == "full_evaluation"
 
+
+async def test_a_rejected_user_idea_gets_alternatives_once(db_session):
     mode1 = await at_triage(db_session, mode="evaluate")
     await idea(db_session, mode1, "Mine", "rejected", origin="user")
-    assert (await route(db_session, mode1)).stage == "ranking"
+    decision = await route(db_session, mode1)
+    assert (decision.stage, decision.task) == ("generating_candidates", "alternatives")
+
+    after = await at_triage(db_session, mode="evaluate")
+    mine = await idea(db_session, after, "Mine", "rejected", origin="user")
+    await idea(db_session, after, "An alternative", "rejected", origin="alternative")
+    assert (await route(db_session, after)).stage == "ranking"  # alternatives were generated already
+    assert mine.status == "rejected"
+
+
+async def test_a_rejected_refinement_of_the_user_idea_also_gets_alternatives(db_session):
+    mode1 = await at_triage(db_session, mode="evaluate")
+    v1 = await idea(db_session, mode1, "Mine", "needs_refinement", origin="user")
+    await refined(db_session, v1, "Mine v2", "rejected")
+    assert (await route(db_session, mode1)).task == "alternatives"
 
 
 async def test_a_used_up_budget_goes_to_ranking(db_session):

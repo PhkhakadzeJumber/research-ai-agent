@@ -12,14 +12,16 @@ spent on evaluations:
   3. quick feasibility (A6 task, one batched call): not feasible, or a conflict with one of the
      user's exclusions, screens the candidate out. Feasible with adjustments and unclear pass:
      the light evaluation's full Value & Feasibility check decides;
-  4. choosing: at most `max_light` candidates (default: the investigation's light-evaluation cap,
-     src/ai/workflows/budget.py) go to light evaluation (`light_evaluating`),
+  4. choosing: the light-evaluation cap (src/ai/workflows/budget.py) counts the whole investigation
+     (step 5.5b), so at most the cap minus the light evaluations already done go to light evaluation (`light_evaluating`),
      ordered by quick-feasibility level and grounding (distinct papers behind the idea), taken
      in turn from each origin strategy so the evaluated set stays varied. The others stay
      `proposed`, in reserve (step 5.5's replenish uses them first).
 
 Every check's result and the decision are stored on the candidate (`prescreen`); a screened-out
-candidate also keeps its reason. The stage then moves to `light_evaluation`.
+candidate also keeps its reason. Pre-screening runs again after a replenish (step 5.5b): reserve
+ideas keep their stored quick feasibility result (no new call), and new ideas are also compared
+with the ideas already evaluated for near-duplicates. The stage then moves to `light_evaluation`.
 """
 
 from __future__ import annotations
@@ -28,18 +30,18 @@ import re
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.ai.agents.quick_feasibility import check_candidates
 from src.ai.context import CandidateForQuickCheck
 from src.ai.workflows.budget import light_cap
 from src.ai.workflows.evaluation import Sessions
-from src.ai.workflows.field import field_request
+from src.ai.workflows.field import user_request
 from src.ai.workflows.states import CandidateStatus, Stage
 from src.ai.workflows.transitions import StaleState, advance_investigation, set_candidate_status
 from src.ai.workflows.value_feasibility import available_weeks
 from src.config import RoleLlmSettings
-from src.db.models import Candidate, CandidateInspiration, Investigation, Quote
+from src.db.models import Candidate, CandidateInspiration, Evaluation, Investigation, Quote
 from src.db.repositories.candidates import candidate_facets
 from src.db.repositories.llm_calls import record_llm_calls
 
@@ -60,6 +62,10 @@ class PrescreenOutcome:
     reserve: list[Candidate] = field(default_factory=list)
     quick: dict[uuid.UUID, dict] = field(default_factory=dict)
     """candidate id -> its quick feasibility result."""
+    room: int = 0
+    """Light evaluations still allowed in this investigation (the cap minus those done)."""
+    reused_quick: int = 0
+    """Reserve ideas whose earlier quick feasibility result was reused (no new call)."""
 
 
 def _words(text: str) -> set[str]:
@@ -75,6 +81,13 @@ def _has_compute_constraint(constraints: dict) -> str | None:
         if any(word in str(name).lower() for word in ("compute", "gpu", "hardware")) and value:
             return str(value)
     return None
+
+
+async def light_evaluations_done(session, investigation_id: uuid.UUID) -> int:
+    """Light evaluations of this investigation so far (refined versions included): the cap counts them all."""
+    return (await session.execute(
+        select(func.count()).select_from(Evaluation).join(Candidate, Candidate.id == Evaluation.candidate_id)
+        .where(Candidate.investigation_id == investigation_id, Evaluation.depth == "light"))).scalar_one()
 
 
 def hard_constraints(scout_notes: dict | None, constraints: dict, complexity: str) -> tuple[str | None, dict]:
@@ -128,7 +141,9 @@ async def prescreen_step(
         max_light = max_light if max_light is not None else light_cap(investigation)
         if max_light < 1:
             raise ValueError("max_light must be at least 1.")
-        request = field_request(investigation)
+        done = await light_evaluations_done(session, investigation_id)
+        room = max(0, max_light - done)
+        request = user_request(investigation)
         constraints = investigation.constraints_snapshot or {}
         complexity = investigation.complexity
         candidates = list((await session.execute(
@@ -140,13 +155,20 @@ async def prescreen_step(
             select(Quote.paper_id).join(CandidateInspiration, CandidateInspiration.quote_id == Quote.id)
             .where(CandidateInspiration.candidate_id == c.id, Quote.verified.is_(True)))).scalars()))
             for c in candidates}
+        # ideas already beyond pre-screening: a new idea mustn't duplicate them either (replenish, step 5.5b)
+        earlier = list((await session.execute(
+            select(Candidate).where(Candidate.investigation_id == investigation_id,
+                                    Candidate.status.not_in((CandidateStatus.PROPOSED, CandidateStatus.SCREENED_OUT)))
+        )).scalars())
+        earlier_words = [(c, _words(" ".join([c.title, *(f.text for f in await candidate_facets(session, c.id)
+                                                          if f.is_key)]))) for c in earlier]
 
-    outcome = PrescreenOutcome(considered=len(candidates))
+    outcome = PrescreenOutcome(considered=len(candidates), room=room)
     records = {c.id: {"checks": {}} for c in candidates}
     out: dict[uuid.UUID, str] = {}
 
     # 1. near-duplicates: the better-grounded candidate is kept
-    kept: list[tuple[Candidate, set[str]]] = []
+    kept: list[tuple[Candidate, set[str]]] = list(earlier_words)
     for c in sorted(candidates, key=lambda c: -papers[c.id]):
         words = _words(" ".join([c.title, *(f.text for f in facets[c.id] if f.is_key)]))
         twin = next(((k, overlap(words, w)) for k, w in kept if overlap(words, w) >= DUPLICATE_OVERLAP), None)
@@ -164,9 +186,20 @@ async def prescreen_step(
         if c.id not in out and reason:
             out[c.id] = reason
 
-    # 3. quick feasibility, one call for everyone still in
-    remaining = [c for c in candidates if c.id not in out]
+    # 3. quick feasibility, one call for everyone still in; a reserve idea keeps its earlier result
     passing: list[tuple[Candidate, int, str]] = []
+    remaining = []
+    for c in candidates:
+        if c.id in out:
+            continue
+        stored = ((c.prescreen or {}).get("checks") or {}).get("quick_feasibility")
+        if stored:
+            records[c.id]["checks"]["quick_feasibility"] = stored
+            outcome.quick[c.id] = {k: stored.get(k) for k in ("level", "blocking", "exclusion_conflict", "note")}
+            outcome.reused_quick += 1
+            passing.append((c, papers[c.id], stored.get("level", "unclear")))
+        else:
+            remaining.append(c)
     records_llm = []
     if remaining:
         labels = {f"C{n}": c for n, c in enumerate(remaining, start=1)}
@@ -194,7 +227,7 @@ async def prescreen_step(
                 passing.append((c, papers[c.id], result["level"]))
 
     # 4. choosing
-    light = choose_for_light(passing, max_light)
+    light = choose_for_light(passing, room) if room else []
     light_ids = {c.id for c in light}
     async with sessions() as session:
         for c in candidates:

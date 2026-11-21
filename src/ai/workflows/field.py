@@ -56,6 +56,19 @@ def field_request(investigation: Investigation) -> FieldRequest:
                         constraints=constraints, count=int(data.get("count") or 3))
 
 
+def user_request(investigation: Investigation) -> FieldRequest:
+    """The user's request as the Scout and the quick feasibility check see it, in both workflows: Mode 2's
+    field request, or for Mode 1 the field (if given) and the user's limits (steps 5.4-5.5b)."""
+    if investigation.mode == Mode.DISCOVER:
+        return field_request(investigation)
+    data = investigation.input or {}
+    constraints = tuple((str(k).replace("_", " "), str(v))
+                        for k, v in (investigation.constraints_snapshot or {}).items() if v not in (None, "", []))
+    return FieldRequest(field=(data.get("field") or "").strip() or "(the user's own research idea)",
+                        complexity=investigation.complexity, exclusions=tuple(data.get("exclusions") or ()),
+                        constraints=constraints, count=1)
+
+
 @dataclass(frozen=True)
 class FieldOutcome:
     investigation_id: uuid.UUID

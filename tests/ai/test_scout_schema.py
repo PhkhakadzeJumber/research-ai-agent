@@ -49,3 +49,21 @@ def test_a_valid_set():
 def test_broken_sets_are_refused(data, message):
     with pytest.raises(ValidationError, match=message):
         ScoutOutput.model_validate(data)
+
+
+def test_replenish_and_alternatives_sets():
+    from src.ai.schemas.scout import AlternativesOutput, ReplenishOutput
+
+    two = {"candidates": [candidate(f"Idea {i}", ("limitation", "future_work")[i % 2]) for i in range(4)]}
+    assert len(ReplenishOutput.model_validate(two).candidates) == 4
+    one_strategy = {"candidates": [candidate(f"Idea {i}", "limitation") for i in range(3)]}
+    with pytest.raises(ValidationError, match="at least 2 different origin strategies"):
+        ReplenishOutput.model_validate(one_strategy)
+    with pytest.raises(ValidationError, match="at most 6"):
+        ReplenishOutput.model_validate({"candidates": [candidate(f"I{i}", ("limitation", "future_work")[i % 2])
+                                                       for i in range(7)]})
+    assert len(AlternativesOutput.model_validate(one_strategy).candidates) == 3  # no diversity rule
+    with pytest.raises(ValidationError, match="at most 5"):
+        AlternativesOutput.model_validate({"candidates": [candidate(f"I{i}") for i in range(6)]})
+    with pytest.raises(ValidationError, match="at least 3"):
+        AlternativesOutput.model_validate({"candidates": [candidate(f"I{i}") for i in range(2)]})

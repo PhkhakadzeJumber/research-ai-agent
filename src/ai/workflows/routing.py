@@ -11,9 +11,9 @@ finished has its TriageDecision. The first matching line decides the next stage:
 Before that, candidates in `needs_refinement` whose lineage is out of refinements (doc 05 §6:
 2 per idea, 4 per investigation) become `rejected`, with the reason.
 
-Lines 2 and 3 need the Scout's alternatives and replenish tasks (step 5.5b); until they exist
-(TASKS_AVAILABLE) they are skipped, so the run goes on to the next line instead of stopping at a
-stage nothing can carry out yet.
+As built (step 5.5b): line 2 fires when the user's lineage ends rejected or screened out (v1 or a
+refinement). Line 3 needs room under the light-evaluation cap (it counts the whole investigation)
+and either ideas waiting in reserve or the one Scout replenish round unused (doc 05 §6).
 """
 
 from __future__ import annotations
@@ -23,15 +23,16 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import select
 
-from src.ai.workflows.budget import budget_left
+from src.ai.workflows.budget import budget_left, light_cap
 from src.ai.workflows.evaluation import Sessions
+from src.ai.workflows.prescreening import light_evaluations_done
 from src.ai.workflows.states import CandidateStatus, Mode, Stage
 from src.ai.workflows.transitions import StaleState, advance_investigation, set_candidate_status
 from src.db.models import Candidate, Investigation
 
 MAX_REFINEMENTS_PER_LINEAGE = 2  # doc 05 §6
 MAX_REFINEMENTS_PER_INVESTIGATION = 4  # doc 05 §6 (Mode 2; Mode 1 has one lineage, so 2 bind first)
-TASKS_AVAILABLE = {"alternatives": False, "replenish": False}  # step 5.5b
+ENDED = (CandidateStatus.REJECTED, CandidateStatus.SCREENED_OUT)
 
 
 @dataclass
@@ -83,19 +84,23 @@ async def route_after_triage(sessions: Sessions, investigation_id: uuid.UUID) ->
         count = int((investigation.input or {}).get("count") or 1)
         survivors = len(by_status.get(CandidateStatus.ADVANCED, [])) + len(by_status.get(CandidateStatus.FINALIST, []))
         user_idea = next((c for c in candidates if c.origin == "user" and c.version == 1), None)
+        user_latest = max((c for c in candidates if user_idea is not None and c.root_id == user_idea.id),
+                          key=lambda c: c.version, default=None)
+        room = light_cap(investigation) - await light_evaluations_done(session, investigation_id)
+        reserve = by_status.get(CandidateStatus.PROPOSED, [])
         if not budget_left(investigation):
             route = Route(Stage.RANKING, "the budget is used up: finishing with what exists")
         elif refinable:
             route = Route(Stage.REFINING, f"{len(refinable)} candidate(s) to refine")
-        elif (investigation.mode == Mode.EVALUATE and TASKS_AVAILABLE["alternatives"] and user_idea is not None
-              and user_idea.status == CandidateStatus.REJECTED
+        elif (investigation.mode == Mode.EVALUATE and user_latest is not None and user_latest.status in ENDED
               and not any(c.origin == "alternative" for c in candidates)):
             route = Route(Stage.GENERATING_CANDIDATES, "your idea was rejected: looking for alternatives",
                           task="alternatives")
-        elif (investigation.mode == Mode.DISCOVER and TASKS_AVAILABLE["replenish"] and survivors < count
-              and not any(c.origin == "replenish" for c in candidates)):
-            route = Route(Stage.GENERATING_CANDIDATES, f"{survivors} of {count} ideas survived: replenishing",
-                          task="replenish")
+        elif (investigation.mode == Mode.DISCOVER and survivors < count and room > 0
+              and (reserve or not any(c.origin == "replenish" for c in candidates))):
+            source = f"{len(reserve)} in reserve" if reserve else "asking the Scout for more"
+            route = Route(Stage.GENERATING_CANDIDATES, f"{survivors} of {count} ideas survived: replenishing "
+                          f"({source})", task="replenish")
         elif by_status.get(CandidateStatus.ADVANCED):
             route = Route(Stage.FULL_EVALUATION,
                           f"{len(by_status[CandidateStatus.ADVANCED])} advanced candidate(s) to evaluate fully")

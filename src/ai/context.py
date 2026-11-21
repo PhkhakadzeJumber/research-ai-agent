@@ -32,7 +32,7 @@ ABSTRACT_ONLY_NOTE = (
 )
 FULL_TEXT_NOTE = "Passages from the full text are included as chunks, each with its ID and section."
 
-_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints|field_brief|subtopic|items|item|pairs|pair|finding|setting|statement|statements|quote|material|candidates|candidate|research_question|facets|data|fit|limits|triage|verdicts|closest_works|work|facet_matrix|cell|feasibility|blocking|simplification|skill_gap|motivation|contribution)\b",
+_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints|field_brief|subtopic|items|item|pairs|pair|finding|setting|statement|statements|quote|material|candidates|candidate|research_question|facets|data|fit|limits|triage|verdicts|closest_works|work|facet_matrix|cell|feasibility|blocking|simplification|skill_gap|motivation|contribution|already_tried|idea)\b",
                    re.IGNORECASE)
 _QUOTE_IN_ATTRIBUTE = re.compile(r'["<>]')
 
@@ -723,8 +723,10 @@ class PaperForScout:
 
 
 def render_scout_discover(request: FieldRequest, items: tuple[ItemForScout, ...],
-                          statements: tuple[StatementForScout, ...], papers: tuple[PaperForScout, ...]) -> str:
-    """The Scout's input for the discover task. Raises ValueError without statements to ground ideas in."""
+                          statements: tuple[StatementForScout, ...], papers: tuple[PaperForScout, ...],
+                          tried: tuple[tuple[str, str, str], ...] = ()) -> str:
+    """The Scout's input for the discover task, and for replenish with `tried`: (title, status, why) of
+    every idea proposed so far (step 5.5b). Raises ValueError without statements to ground ideas in."""
     if not statements:
         raise ValueError("The Scout needs verified statements to ground its ideas in.")
     lines = [render_field_request(request), "<material>"]
@@ -743,6 +745,11 @@ def render_scout_discover(request: FieldRequest, items: tuple[ItemForScout, ...]
         year = f' year="{paper.year}"' if paper.year else ""
         lines.append(f'<paper label="{_attribute(paper.label)}"{year}>{_contain(paper.title)}</paper>')
     lines.append("</papers>")
+    if tried:
+        lines.append("<already_tried>")
+        lines.extend(f'<idea status="{_attribute(status)}">{_contain(title)}' + (f": {_contain(why)}" if why else "")
+                     + "</idea>" for title, status, why in tried)
+        lines.append("</already_tried>")
     return "\n".join(lines)
 
 

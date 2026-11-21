@@ -28,18 +28,27 @@ _STATEMENT = re.compile(r'<statement label="(Q\d+)"[^>]*>([^<]*)<quote>')
 _ITEM = re.compile(r'<item label="(O\d+)" type="([a-z_]+)"')
 
 
+def more(statements, items):
+    """The fake Scout's replenish answer (step 5.5b): three new grounded ideas."""
+    first, second = list(statements.values())[:2]
+    return [candidate(f"More idea {n}", strategy, (first, second))
+            for n, strategy in enumerate(("limitation", "future_work", "practical_problem"), start=1)]
+
+
 class FakeScout(BaseLlm):
     """A fake Scout: `build(statements, items)` returns the candidate list, where statements maps
-    statement text -> Q label and items maps type -> [O labels]."""
+    statement text -> Q label and items maps type -> [O labels]. A replenish request (it lists what was
+    already tried, step 5.5b) is answered with `more` instead."""
 
     model: str = "claude-opus-5-5"
     _build: object = PrivateAttr()
+    _more: object = PrivateAttr(default=None)
     _requests: list = PrivateAttr(default_factory=list)
 
     @classmethod
-    def proposing(cls, build):
+    def proposing(cls, build, replenish=None):
         llm = cls()
-        llm._build = build
+        llm._build, llm._more = build, replenish or more
         return llm
 
     @property
@@ -53,7 +62,8 @@ class FakeScout(BaseLlm):
         items: dict[str, list[str]] = {}
         for label, kind in _ITEM.findall(text):
             items.setdefault(kind, []).append(label)
-        yield model_response(json.dumps({"candidates": self._build(statements, items)}))
+        build = self._more if "<already_tried>" in text else self._build
+        yield model_response(json.dumps({"candidates": build(statements, items)}))
 
 
 def eight(statements, items):
@@ -164,10 +174,12 @@ async def test_the_command_lists_the_candidates(db_session, capsys):
     assert "8 candidates, 6 grounded" in output and "unknown labels ignored: 1" in output
     assert "1. Calibrating judges  [limitation; T1, ~8 weeks]" in output
     assert "SCREENED OUT: Grounding: 1 verified quote(s)" in output and "Pre-screening:" in output
+    # everything ruled out, so nothing survived: one replenish round (5.5b) asks the Scout for more; those are
+    # ruled out too, the round is used, and the router goes to ranking
+    assert "Replenishing: too few ideas survived" in output and "More idea 1" in output
     stored = (await db_session.execute(select(Candidate).where(Candidate.investigation_id == investigation.id))
               ).scalars().all()
-    assert len(stored) == 8
-    # everything ruled out: the router (5.5a) finds nothing to evaluate and goes to ranking
+    assert len(stored) == 8 + 3 and sum(c.origin == "replenish" for c in stored) == 3
     assert (await db_session.get(Investigation, investigation.id)).stage == "ranking"
 
 

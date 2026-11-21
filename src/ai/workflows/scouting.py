@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import select
 
-from src.ai.agents.scout import discover
+from src.ai.agents.scout import discover, replenish
 from src.ai.context import ItemForScout, PaperForScout, StatementForScout, name_papers
 from src.ai.workflows.evaluation import Sessions
 from src.ai.workflows.field import field_request
@@ -53,6 +53,8 @@ class ScoutingOutcome:
     unknown_labels: int = 0
     items: int = 0
     statements: int = 0
+    from_reserve: int = 0
+    """Replenish only: candidates waiting in reserve, sent back to pre-screening without a Scout call."""
 
 
 def _item_views(items: list[OpportunityItem], q_labels: dict[uuid.UUID, list[str]],
@@ -83,23 +85,13 @@ def _item_views(items: list[OpportunityItem], q_labels: dict[uuid.UUID, list[str
     return views
 
 
-async def scouting_step(
-    sessions: Sessions,
-    investigation_id: uuid.UUID,
-    *,
-    settings: RoleLlmSettings | None = None,
-    model=None,
-) -> ScoutingOutcome:
-    async with sessions() as session:
-        investigation = await session.get(Investigation, investigation_id)
-        if investigation is None or investigation.stage != Stage.GENERATING_CANDIDATES:
-            raise StaleState(f"Investigation {investigation_id} isn't at generating_candidates.")
-        request = field_request(investigation)
-        brief = await confirmed_brief(session, investigation_id)
-        loaded = await load_read_landscape(session, investigation_id, brief)
-        items = list((await session.execute(select(OpportunityItem).where(
-            OpportunityItem.investigation_id == investigation_id))).scalars())
-
+async def _landscape_packet(session, investigation: Investigation):
+    """The mined landscape as the Scout sees it: request, items, statements, papers and the label maps."""
+    request = field_request(investigation)
+    brief = await confirmed_brief(session, investigation.id)
+    loaded = await load_read_landscape(session, investigation.id, brief)
+    items = list((await session.execute(select(OpportunityItem).where(
+        OpportunityItem.investigation_id == investigation.id))).scalars())
     papers = {f"P{n}": paper for n, (paper, _) in enumerate(loaded.read, start=1)}
     paper_labels = {paper.id: label for label, paper in papers.items()}
     statements = mining_statements(loaded.read, loaded.quotes)
@@ -114,48 +106,116 @@ async def scouting_step(
         raise NothingToGround("The papers read have no verified future-work statements or findings to ground "
                               "ideas in.")
     item_views = _item_views(items, q_labels, paper_labels)
+    return request, item_views, q_views, q_quote, papers
+
+
+async def store_candidates(session, investigation_id: uuid.UUID, proposed_list, *, origin: str,
+                           q_quote: dict, o_item: dict, papers: dict, outcome: ScoutingOutcome,
+                           spawned_from_id: uuid.UUID | None = None) -> None:
+    """Stores the Scout's candidates as Candidate v1 rows with facets and inspirations (unknown labels
+    ignored), and screens out those with fewer than MIN_GROUNDING_QUOTES verified quotes."""
+    for proposed in proposed_list:
+        links = []
+        for inspiration in proposed.inspirations:
+            note = name_papers(inspiration.note, papers)
+            if inspiration.source in q_quote:
+                links.append(("quote", q_quote[inspiration.source], None, inspiration.role, note))
+            elif inspiration.source in o_item:
+                links.append(("opportunity_item", None, o_item[inspiration.source].id, inspiration.role, note))
+            else:
+                outcome.unknown_labels += 1
+        candidate = await create_root_candidate(
+            session, investigation_id=investigation_id, origin=origin, spawned_from_id=spawned_from_id,
+            title=name_papers(proposed.title, papers),
+            research_question=name_papers(proposed.research_question, papers),
+            facets=[FacetToStore(f.kind, name_papers(f.text, papers), f.is_key, stated_by_user=False)
+                    for f in proposed.facets],
+        )
+        candidate.origin_strategy = proposed.origin_strategy
+        candidate.hypothesis = name_papers(proposed.hypothesis, papers)
+        candidate.motivation = name_papers(proposed.motivation, papers)
+        candidate.potential_contribution = name_papers(proposed.potential_contribution, papers)
+        candidate.scout_notes = name_papers({**proposed.fit.model_dump(), "risks": proposed.risks}, papers)
+        session.add_all(CandidateInspiration(candidate_id=candidate.id, kind=kind, quote_id=quote_id,
+                                             opportunity_item_id=item_id, role=role, note=note)
+                        for kind, quote_id, item_id, role, note in links)
+        await session.flush()
+        outcome.candidates.append(candidate)
+        grounding = len({quote_id for kind, quote_id, *_ in links if kind == "quote"})
+        if grounding < MIN_GROUNDING_QUOTES:
+            await set_candidate_status(
+                session, candidate.id, to=CandidateStatus.SCREENED_OUT, expected_from=CandidateStatus.PROPOSED,
+                reason=f"Grounding: {grounding} verified quote(s) behind it; at least {MIN_GROUNDING_QUOTES} "
+                       "are needed.")
+            outcome.screened_out.append(candidate)
+
+
+async def at_generating(session, investigation_id: uuid.UUID) -> Investigation:
+    investigation = await session.get(Investigation, investigation_id)
+    if investigation is None or investigation.stage != Stage.GENERATING_CANDIDATES:
+        raise StaleState(f"Investigation {investigation_id} isn't at generating_candidates.")
+    return investigation
+
+
+async def scouting_step(
+    sessions: Sessions,
+    investigation_id: uuid.UUID,
+    *,
+    settings: RoleLlmSettings | None = None,
+    model=None,
+) -> ScoutingOutcome:
+    """Task discover: the first 8-12 candidates of a Mode 2 investigation."""
+    async with sessions() as session:
+        investigation = await at_generating(session, investigation_id)
+        request, item_views, q_views, q_quote, papers = await _landscape_packet(session, investigation)
     o_item = {label: item for label, item, _ in item_views}
     outcome = ScoutingOutcome(items=len(item_views), statements=len(q_views))
-
     result = await discover(request, [view for _, _, view in item_views], q_views,
                             [PaperForScout(label, paper.title, paper.year) for label, paper in papers.items()],
                             settings=settings, model=model)
-
     async with sessions() as session:
-        for proposed in result.output.candidates:
-            links = []
-            for inspiration in proposed.inspirations:
-                note = name_papers(inspiration.note, papers)
-                if inspiration.source in q_quote:
-                    links.append(("quote", q_quote[inspiration.source], None, inspiration.role, note))
-                elif inspiration.source in o_item:
-                    links.append(("opportunity_item", None, o_item[inspiration.source].id, inspiration.role, note))
-                else:
-                    outcome.unknown_labels += 1
-            candidate = await create_root_candidate(
-                session, investigation_id=investigation_id, origin="discover",
-                title=name_papers(proposed.title, papers),
-                research_question=name_papers(proposed.research_question, papers),
-                facets=[FacetToStore(f.kind, name_papers(f.text, papers), f.is_key, stated_by_user=False)
-                        for f in proposed.facets],
-            )
-            candidate.origin_strategy = proposed.origin_strategy
-            candidate.hypothesis = name_papers(proposed.hypothesis, papers)
-            candidate.motivation = name_papers(proposed.motivation, papers)
-            candidate.potential_contribution = name_papers(proposed.potential_contribution, papers)
-            candidate.scout_notes = name_papers({**proposed.fit.model_dump(), "risks": proposed.risks}, papers)
-            session.add_all(CandidateInspiration(candidate_id=candidate.id, kind=kind, quote_id=quote_id,
-                                                 opportunity_item_id=item_id, role=role, note=note)
-                            for kind, quote_id, item_id, role, note in links)
-            await session.flush()
-            outcome.candidates.append(candidate)
-            grounding = len({quote_id for kind, quote_id, *_ in links if kind == "quote"})
-            if grounding < MIN_GROUNDING_QUOTES:
-                await set_candidate_status(
-                    session, candidate.id, to=CandidateStatus.SCREENED_OUT, expected_from=CandidateStatus.PROPOSED,
-                    reason=f"Grounding: {grounding} verified quote(s) behind it; at least {MIN_GROUNDING_QUOTES} "
-                           "are needed.")
-                outcome.screened_out.append(candidate)
+        await store_candidates(session, investigation_id, result.output.candidates, origin="discover",
+                               q_quote=q_quote, o_item=o_item, papers=papers, outcome=outcome)
+        await record_llm_calls(session, result.records, investigation_id=investigation_id)
+        await advance_investigation(session, investigation_id, to=Stage.PRESCREENING,
+                                    expected_from=Stage.GENERATING_CANDIDATES)
+    return outcome
+
+
+def _why(candidate: Candidate) -> str:
+    if candidate.rejection_reason:
+        return candidate.rejection_reason
+    return (candidate.change_note or "") if candidate.status == CandidateStatus.REFINED else ""
+
+
+async def replenish_step(
+    sessions: Sessions,
+    investigation_id: uuid.UUID,
+    *,
+    settings: RoleLlmSettings | None = None,
+    model=None,
+) -> ScoutingOutcome:
+    """Task replenish (Mode 2, step 5.5b): the reserve first (no call: pre-screening picks from it again);
+    only when the reserve is empty, one Scout call for 3-6 new ideas that avoid what was tried."""
+    async with sessions() as session:
+        investigation = await at_generating(session, investigation_id)
+        candidates = list((await session.execute(select(Candidate).where(
+            Candidate.investigation_id == investigation_id).order_by(Candidate.created_at))).scalars())
+        reserve = [c for c in candidates if c.status == CandidateStatus.PROPOSED]
+        if reserve:
+            await advance_investigation(session, investigation_id, to=Stage.PRESCREENING,
+                                        expected_from=Stage.GENERATING_CANDIDATES)
+            return ScoutingOutcome(from_reserve=len(reserve))
+        request, item_views, q_views, q_quote, papers = await _landscape_packet(session, investigation)
+    tried = [(c.title, c.status.replace("_", " "), _why(c)) for c in candidates]
+    o_item = {label: item for label, item, _ in item_views}
+    outcome = ScoutingOutcome(items=len(item_views), statements=len(q_views))
+    result = await replenish(request, [view for _, _, view in item_views], q_views,
+                             [PaperForScout(label, paper.title, paper.year) for label, paper in papers.items()],
+                             tried, settings=settings, model=model)
+    async with sessions() as session:
+        await store_candidates(session, investigation_id, result.output.candidates, origin="replenish",
+                               q_quote=q_quote, o_item=o_item, papers=papers, outcome=outcome)
         await record_llm_calls(session, result.records, investigation_id=investigation_id)
         await advance_investigation(session, investigation_id, to=Stage.PRESCREENING,
                                     expected_from=Stage.GENERATING_CANDIDATES)

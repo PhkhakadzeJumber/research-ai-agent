@@ -681,7 +681,7 @@ async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, 
         print(f"Completed. Full report: python -m scripts.report {investigation_id}")
         return 0
     if investigation.stage in (Stage.TRIAGE, Stage.REFINING, Stage.LIGHT_EVALUATION, Stage.RANKING,
-                               Stage.FULL_EVALUATION):
+                               Stage.FULL_EVALUATION, Stage.GENERATING_CANDIDATES, Stage.PRESCREENING):
         return await continue_at(sessions, investigation_id, command="evaluate")
     raise InputError(f"Investigation {investigation_id} can't be continued from stage {investigation.stage} "
                      f"({investigation.status}).")

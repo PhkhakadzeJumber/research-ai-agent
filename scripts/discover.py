@@ -57,10 +57,8 @@ from src.ai.workflows.clarification import NotWaitingForClarification, answers_f
 from src.ai.workflows.evaluation import Sessions
 from src.ai.workflows.landscape import LandscapeOutcome, LandscapeReading, landscape_reading_step, landscape_step
 from src.ai.workflows.mining import MiningOutcome, mining_step
-from src.ai.workflows.scouting import NothingToGround, ScoutingOutcome, scouting_step
-from src.ai.workflows.prescreening import PrescreenOutcome, prescreen_step
 from src.ai.workflows.runner import EvaluationModels
-from scripts.candidate_loop import continue_at, evaluate_light
+from scripts.candidate_loop import LoopModels, continue_at, evaluate_light, generate
 from src.ai.workflows.field import (
     apply_brief_answers,
     confirm_brief,
@@ -336,68 +334,12 @@ async def mine(sessions: Sessions, investigation_id: uuid.UUID, *, model=None, s
 
 # --- generating candidates ------------------------------------------------------------------------------
 
-def format_scouting(outcome: ScoutingOutcome) -> str:
-    screened = {candidate.id for candidate in outcome.screened_out}
-    lines = [f"  From {outcome.items} mined items and {outcome.statements} statements: "
-             f"{len(outcome.candidates)} candidates, {len(outcome.candidates) - len(screened)} grounded"
-             + (f" | unknown labels ignored: {outcome.unknown_labels}" if outcome.unknown_labels else "")]
-    for n, candidate in enumerate(outcome.candidates, start=1):
-        notes = candidate.scout_notes or {}
-        lines.append(f"\n  {n}. {candidate.title}  [{candidate.origin_strategy}; {notes.get('compute_tier')}, "
-                     f"~{notes.get('timeline_weeks')} weeks]")
-        lines.append(f"     RQ: {candidate.research_question}")
-        if candidate.id in screened:
-            lines.append(f"     SCREENED OUT: {candidate.rejection_reason}")
-    return "\n".join(lines)
-
-
 async def scout(sessions: Sessions, investigation_id: uuid.UUID, *, model=None, quick_model=None,
                 evaluation_models: EvaluationModels | None = None, search_factory=None) -> int:
-    if await over_budget(sessions, investigation_id, "generating candidates"):
-        return 3
-    print("\nGenerating candidate ideas (the Scout, one call)...")
-    try:
-        outcome = await scouting_step(sessions, investigation_id, model=model)
-    except NothingToGround as error:
-        print(f"  {error} Nothing was generated.")
-        return 1
-    except LlmError as error:
-        print(f"  The Scout failed: {error}. Nothing was stored; run --continue to try again.")
-        return 1
-    print(format_scouting(outcome))
-    return await prescreen(sessions, investigation_id, model=quick_model, evaluation_models=evaluation_models,
-                           search_factory=search_factory, scout_model=model)
-
-
-# --- pre-screening and light evaluation -----------------------------------------------------------------
-
-def format_prescreen(outcome: PrescreenOutcome) -> str:
-    lines = [f"  {outcome.considered} candidates: {len(outcome.light)} to light evaluation, "
-             f"{len(outcome.reserve)} in reserve, {len(outcome.screened_out)} screened out"]
-    for candidate, reason in outcome.screened_out:
-        lines.append(f"    out: {candidate.title}\n         {reason}")
-    for n, candidate in enumerate(outcome.light, start=1):
-        level = outcome.quick.get(candidate.id, {}).get("level", "?").replace("_", " ")
-        lines.append(f"    {n}. {candidate.title}  [{candidate.origin_strategy}; quick feasibility: {level}]")
-    for candidate in outcome.reserve:
-        level = outcome.quick.get(candidate.id, {}).get("level", "?").replace("_", " ")
-        lines.append(f"    reserve: {candidate.title}  [{candidate.origin_strategy}; {level}]")
-    return "\n".join(lines)
-
-
-async def prescreen(sessions: Sessions, investigation_id: uuid.UUID, *, model=None,
-                    evaluation_models: EvaluationModels | None = None, search_factory=None, scout_model=None) -> int:
-    if await over_budget(sessions, investigation_id, "pre-screening"):
-        return 3
-    print("\nPre-screening: duplicates, your constraints, a quick feasibility check (one call)...")
-    try:
-        outcome = await prescreen_step(sessions, investigation_id, model=model)
-    except LlmError as error:
-        print(f"  The quick feasibility check failed: {error}. Nothing was stored; run --continue to try again.")
-        return 1
-    print(format_prescreen(outcome))
-    return await evaluate_light(sessions, investigation_id, models=evaluation_models, search_factory=search_factory,
-                                scout_model=scout_model, command="discover")
+    """The Scout's first ideas, then pre-screening and the candidate loop (scripts/candidate_loop.py)."""
+    return await generate(sessions, investigation_id,
+                          LoopModels(evaluation_models, scout_model=model, search_factory=search_factory,
+                                     quick_model=quick_model), command="discover")
 
 
 async def continue_after_brief(sessions: Sessions, investigation_id: uuid.UUID, code: int, *, search_for=None) -> int:
@@ -437,11 +379,7 @@ async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, 
         return await read_landscape(sessions, investigation_id)
     if investigation.stage == Stage.OPPORTUNITY_MINING:
         return await mine(sessions, investigation_id)
-    if investigation.stage == Stage.GENERATING_CANDIDATES:
-        return await scout(sessions, investigation_id)
-    if investigation.stage == Stage.PRESCREENING:
-        return await prescreen(sessions, investigation_id)
-    if investigation.stage in (Stage.LIGHT_EVALUATION, Stage.TRIAGE, Stage.REFINING, Stage.FULL_EVALUATION,
+    if investigation.stage in (Stage.GENERATING_CANDIDATES, Stage.PRESCREENING, Stage.LIGHT_EVALUATION, Stage.TRIAGE, Stage.REFINING, Stage.FULL_EVALUATION,
                                Stage.RANKING):
         return await continue_at(sessions, investigation_id, command="discover")
     raise InputError(f"Investigation {investigation_id} can't be continued from stage {investigation.stage}.")

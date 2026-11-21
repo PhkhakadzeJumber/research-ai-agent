@@ -8,7 +8,8 @@ three origin strategies; a broken answer goes back to the model once (run_struct
 The Scout only proposes. Mapping its labels to quotes and opportunity items, the grounding
 rule and storing the candidates are code (src/ai/workflows/scouting.py). refine() writes the next
 version of one candidate that triage sent back (step 5.5a; stored by src/ai/workflows/refining.py).
-The tasks alternatives and replenish come with step 5.5b.
+replenish() (Mode 2) and alternatives() (Mode 1) write a few more candidates (step 5.5b; stored
+by src/ai/workflows/scouting.py).
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from src.ai.context import (
     render_scout_refine,
 )
 from src.ai.prompts import system_prompt
-from src.ai.schemas.scout import RefineOutput, ScoutOutput
+from src.ai.schemas.scout import AlternativesOutput, RefineOutput, ReplenishOutput, ScoutOutput
 from src.config import RoleLlmSettings
 from src.llm import LlmCallRecord, run_structured
 
@@ -80,3 +81,46 @@ async def refine(
         user_message=render_scout_refine(request), output_schema=RefineOutput, settings=settings, model=model,
     )
     return RefineResult(output=result.output, records=result.records, prompt_version=system.version_id)
+
+
+@dataclass(frozen=True)
+class SetResult:
+    output: ReplenishOutput | AlternativesOutput
+    records: list[LlmCallRecord]
+    prompt_version: str
+
+
+async def replenish(
+    request: FieldRequest,
+    items: list[ItemForScout],
+    statements: list[StatementForScout],
+    papers: list[PaperForScout],
+    tried: list[tuple[str, str, str]],
+    *,
+    settings: RoleLlmSettings | None = None,
+    model: Any | None = None,
+) -> SetResult:
+    """3-6 new ideas from the same material, avoiding what was tried (Mode 2, step 5.5b). Raises LlmError."""
+    system = system_prompt(ROLE, task="replenish")
+    result = await run_structured(
+        ROLE, system=system.text, prompt_version=system.version_id,
+        user_message=render_scout_discover(request, tuple(items), tuple(statements), tuple(papers), tuple(tried)),
+        output_schema=ReplenishOutput, settings=settings, model=model,
+    )
+    return SetResult(output=result.output, records=result.records, prompt_version=system.version_id)
+
+
+async def alternatives(
+    request: RefineRequest,
+    *,
+    settings: RoleLlmSettings | None = None,
+    model: Any | None = None,
+) -> SetResult:
+    """3-5 alternatives to the user's rejected idea, from its evaluation's evidence (Mode 1, step 5.5b).
+    The packet has the refine task's layout. Raises LlmError."""
+    system = system_prompt(ROLE, task="alternatives")
+    result = await run_structured(
+        ROLE, system=system.text, prompt_version=system.version_id,
+        user_message=render_scout_refine(request), output_schema=AlternativesOutput, settings=settings, model=model,
+    )
+    return SetResult(output=result.output, records=result.records, prompt_version=system.version_id)

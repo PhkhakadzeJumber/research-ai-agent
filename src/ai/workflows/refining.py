@@ -66,8 +66,10 @@ class RefiningOutcome:
     refinements: list[Refinement] = field(default_factory=list)
 
 
-async def _request(session, investigation: Investigation, parent: Candidate):
-    """The Scout's packet, plus label -> quote id and label -> paper for mapping its answer."""
+async def build_request(session, investigation: Investigation, parent: Candidate, *, extra_quotes=(),
+                        max_statements: int = MAX_STATEMENTS):
+    """The Scout's packet about one evaluated candidate (refine; also alternatives, step 5.5b, with the
+    evaluation's statements as extra quotes), plus label -> quote id and label -> paper for mapping its answer."""
     facets = await candidate_facets(session, parent.id)
     facet_number = {f.id: f.position + 1 for f in facets}
     decision = (await session.execute(
@@ -91,10 +93,10 @@ async def _request(session, investigation: Investigation, parent: Candidate):
     quote_ids = list(dict.fromkeys([
         *(await session.execute(select(CandidateInspiration.quote_id).where(
             CandidateInspiration.candidate_id == parent.id, CandidateInspiration.quote_id.is_not(None)))).scalars(),
-        *(m.quote_id for m in matches if m.quote_id)]))
+        *(m.quote_id for m in matches if m.quote_id), *extra_quotes]))
     quotes = {q.id: q for q in (await session.execute(
         select(Quote).where(Quote.id.in_(quote_ids), Quote.verified.is_(True)))).scalars()} if quote_ids else {}
-    quote_ids = [q for q in quote_ids if q in quotes][:MAX_STATEMENTS]
+    quote_ids = [q for q in quote_ids if q in quotes][:max_statements]
 
     paper_ids = list(dict.fromkeys([*(uuid.UUID(w["paper_id"]) for w in works), *(m.paper_id for m in matches),
                                     *(quotes[q].paper_id for q in quote_ids)]))
@@ -157,7 +159,7 @@ async def refine_step(
     for parent in parents:
         async with sessions() as session:
             investigation = await session.get(Investigation, investigation_id)
-            request, q_quote, papers = await _request(session, investigation, parent)
+            request, q_quote, papers = await build_request(session, investigation, parent)
             root = await session.get(Candidate, parent.root_id)
         result = await refine(request, settings=settings, model=model)
         proposed = result.output.candidate
