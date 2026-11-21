@@ -12,6 +12,10 @@ answer in code:
     supporting or qualifying quote is verified; unverified_quote if quotes were given but
     none verified; no_evidence if none were given.
 
+revise_novelty() (step 4.7b) answers a Skeptic round: cells for the papers the Skeptic
+found, and per challenge accept or rebut. A rebuttal is a claim checked like any other:
+it only counts (code makes the challenge `rebutted`) if it has a verified quote.
+
 The verdict is not decided here: src/ai/evidence/verdicts.py does that from the matrix
 and the coverage.
 """
@@ -22,10 +26,17 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
-from src.ai.context import CandidateForPlanning, PaperForNovelty, render_novelty_task
+from src.ai.context import (
+    CandidateForPlanning,
+    ChallengeForRevision,
+    ClaimForSkeptic,
+    PaperForNovelty,
+    render_novelty_revision,
+    render_novelty_task,
+)
 from src.ai.evidence.verifier import QuoteMatch, match_quote
 from src.ai.prompts import system_prompt
-from src.ai.schemas.novelty import NoveltyAssessmentOutput
+from src.ai.schemas.novelty import ClaimOut, FacetMatchOut, NoveltyAssessmentOutput, NoveltyRevisionOutput
 from src.config import RoleLlmSettings
 from src.llm import LlmCallRecord, run_structured
 
@@ -108,31 +119,36 @@ def claim_status(evidence: list[CheckedEvidence]) -> str:
     return "unverified_quote" if evidence else "no_evidence"
 
 
-def check_assessment(
-    output: NoveltyAssessmentOutput, candidate: CandidateForPlanning, papers: tuple[PaperForNovelty, ...]
-) -> tuple[list[CheckedMatch], list[CheckedClaim], list[str]]:
-    by_label = {paper.label: paper for paper in papers}
+def check_cells(cells: list[FacetMatchOut], candidate: CandidateForPlanning, by_label: dict[str, PaperForNovelty],
+                dropped: list[str]) -> list[CheckedMatch]:
     facet_numbers = {facet.number for facet in candidate.facets}
-    dropped: list[str] = []
-
     matches = []
-    for cell in output.facet_matches:
+    for cell in cells:
         if cell.paper not in by_label or cell.facet not in facet_numbers:
             dropped.append(f"matrix cell {cell.paper}/facet {cell.facet}")
             continue
         quote = check_quote(cell.quote, by_label[cell.paper]) if cell.quote else None
         matches.append(CheckedMatch(cell.paper, cell.facet, cell.overlap, cell.rationale, quote))
+    return matches
 
-    claims = []
-    for claim in output.claims:
-        evidence = []
-        for item in claim.evidence:
-            if item.paper not in by_label:
-                dropped.append(f"evidence from unknown paper {item.paper}")
-                continue
-            evidence.append(CheckedEvidence(item.paper, check_quote(item.quote, by_label[item.paper]), item.stance))
-        claims.append(CheckedClaim(claim.kind, claim.text, claim.statement_type, claim.inferred, evidence,
-                                   claim_status(evidence)))
+
+def check_claim(claim: ClaimOut, by_label: dict[str, PaperForNovelty], dropped: list[str]) -> CheckedClaim:
+    evidence = []
+    for item in claim.evidence:
+        if item.paper not in by_label:
+            dropped.append(f"evidence from unknown paper {item.paper}")
+            continue
+        evidence.append(CheckedEvidence(item.paper, check_quote(item.quote, by_label[item.paper]), item.stance))
+    return CheckedClaim(claim.kind, claim.text, claim.statement_type, claim.inferred, evidence, claim_status(evidence))
+
+
+def check_assessment(
+    output: NoveltyAssessmentOutput, candidate: CandidateForPlanning, papers: tuple[PaperForNovelty, ...]
+) -> tuple[list[CheckedMatch], list[CheckedClaim], list[str]]:
+    by_label = {paper.label: paper for paper in papers}
+    dropped: list[str] = []
+    matches = check_cells(output.facet_matches, candidate, by_label, dropped)
+    claims = [check_claim(claim, by_label, dropped) for claim in output.claims]
     return matches, claims, dropped
 
 
@@ -157,3 +173,65 @@ async def assess_novelty(
     matches, claims, dropped = check_assessment(result.output, candidate, papers)
     return NoveltyReading(output=result.output, matches=matches, claims=claims, dropped=dropped,
                           records=result.records, prompt_version=system.version_id)
+
+
+
+# --- revision after a Skeptic round (step 4.7b) -----------------------------------------------------------
+
+@dataclass(frozen=True)
+class CheckedResponse:
+    challenge: str
+    response: str
+    """accept / rebut, as the model said."""
+    rebuttal: CheckedClaim | None
+
+    @property
+    def rebuttal_holds(self) -> bool:
+        return self.response == "rebut" and self.rebuttal is not None and self.rebuttal.status == "verified"
+
+
+@dataclass(frozen=True)
+class RevisionReading:
+    output: NoveltyRevisionOutput
+    matches: list[CheckedMatch]
+    responses: list[CheckedResponse]
+    dropped: list[str] = field(default_factory=list)
+    records: list[LlmCallRecord] = field(default_factory=list)
+    prompt_version: str = ""
+
+
+def check_revision(output: NoveltyRevisionOutput, candidate: CandidateForPlanning,
+                   challenges: tuple[ChallengeForRevision, ...],
+                   papers: tuple[PaperForNovelty, ...]) -> tuple[list[CheckedMatch], list[CheckedResponse], list[str]]:
+    by_label = {paper.label: paper for paper in papers}
+    known = {challenge.label for challenge in challenges}
+    dropped: list[str] = []
+    matches = check_cells(output.facet_matches, candidate, by_label, dropped)
+    responses = []
+    for response in output.responses:
+        if response.challenge not in known:
+            dropped.append(f"response to unknown challenge {response.challenge}")
+            continue
+        rebuttal = check_claim(response.rebuttal, by_label, dropped) if response.rebuttal else None
+        responses.append(CheckedResponse(response.challenge, response.response, rebuttal))
+    return matches, responses, dropped
+
+
+async def revise_novelty(
+    candidate: CandidateForPlanning,
+    claims: tuple[ClaimForSkeptic, ...],
+    challenges: tuple[ChallengeForRevision, ...],
+    papers: tuple[PaperForNovelty, ...],
+    *,
+    settings: RoleLlmSettings | None = None,
+    model: Any | None = None,
+) -> RevisionReading:
+    """Answers a Skeptic round. Raises ValueError (nothing to revise) or LlmError subclasses."""
+    system = system_prompt(ROLE, task="revise")
+    result = await run_structured(
+        ROLE, system=system.text, prompt_version=system.version_id,
+        user_message=render_novelty_revision(candidate, claims, challenges, papers),
+        output_schema=NoveltyRevisionOutput, settings=settings, model=model, cache=PROMPT_CACHE,
+    )
+    matches, responses, dropped = check_revision(result.output, candidate, challenges, papers)
+    return RevisionReading(result.output, matches, responses, dropped, result.records, system.version_id)

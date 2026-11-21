@@ -23,9 +23,11 @@ So far (steps 4.2-4.4):
   6. novelty: the Novelty Investigator compares the idea with the 12 closest read papers
      facet by facet (one Opus call, about 25 cents); code verifies its quotes and the
      verdict engine gives a preliminary novelty verdict with the coverage snapshot;
-  7. Skeptic round: the Skeptic plans adversarial searches, code runs them, screens and
+  7. Skeptic rounds: the Skeptic plans adversarial searches, code runs them, screens and
      reads up to 5 new relevant papers, and the Skeptic challenges the analysis with
-     quotes from them (2 Opus calls + up to 5 readings, about 50-70 cents).
+     quotes from them (about 35 cents a round); the Novelty Investigator then accepts or
+     rebuts each challenge with quoted evidence (about 30 cents). Rounds repeat until one
+     finds no new relevant papers (saturation) or 3 rounds are done.
 If Eureka had to propose a KEY facet, you must confirm the reading yourself: --yes is
 refused. Quitting at the confirmation keeps everything; resume with --continue.
 Later steps extend this until the whole evaluation runs (step 4.8).
@@ -71,7 +73,7 @@ from src.ai.workflows.evaluation import (
     novelty_verdict_for,
     selected_papers,
 )
-from src.ai.workflows.skeptic_round import skeptic_round_step
+from src.ai.workflows.skeptic_round import revision_step, skeptic_round_step
 from src.ai.workflows.states import EvaluationStep, Stage
 from src.ai.workflows.understanding import understand_idea
 from src.config import ConfigError
@@ -379,16 +381,21 @@ async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read:
                     screen_settings=screen_settings, screen_model=screen_model, read_settings=read_settings,
                     read_model=read_model)
             print(format_round(outcome))
+        elif step == EvaluationStep.REVISING_NOVELTY:
+            print("\nThe Novelty Investigator answers the challenges...")
+            outcome = await revision_step(sessions, evaluation_id, settings=novelty_settings, model=novelty_model)
+            print(format_revision(outcome))
+            if outcome.next_step == EvaluationStep.SKEPTIC_REVIEW:  # otherwise the final summary shows it
+                async with sessions() as session:
+                    verdict, coverage = await novelty_verdict_for(session, evaluation_id)
+                print("\n" + format_verdict(verdict, coverage))
         else:
             async with sessions() as session:
                 verdict, coverage = await novelty_verdict_for(session, evaluation_id)
                 cost = (await session.get(Investigation, investigation_id)).cost_usd
             print("\n" + format_verdict(verdict, coverage))
             print(f"\nCost so far: ${cost:.4f}")
-            if step == EvaluationStep.REVISING_NOVELTY:
-                print("Next: the Novelty Investigator answers the challenges with step 4.7b (now at revising_novelty).")
-            else:
-                print(f"Next: value and feasibility come with step 4.8 (now at {step}).")
+            print(f"Next: value and feasibility come with step 4.8 (now at {step}).")
             return 0
 
 
@@ -460,6 +467,25 @@ def format_round(outcome) -> str:
         lines.append(f"  {outcome.error}")
     lines.append(f"  Saturation statistic: {outcome.new_relevant} new relevant papers"
                  + (" (saturated)" if outcome.saturated else ""))
+    return "\n".join(lines)
+
+
+def format_revision(outcome) -> str:
+    lines = []
+    if outcome.error:
+        lines.append(f"  {outcome.error}")
+    if outcome.new_cells:
+        lines.append(f"  {outcome.new_cells} matrix cells added for the papers the Skeptic found")
+    responses = {r.challenge: r for r in (outcome.reading.responses if outcome.reading else [])}
+    for label, challenge in outcome.challenges.items():
+        resolution = outcome.resolutions.get(label, "unresolved")
+        lines.append(f"  {label} [{challenge.type}] -> {resolution}: {_short(challenge.argument, 90)}")
+        response = responses.get(label)
+        if response is not None and response.rebuttal is not None:
+            holds = "verified" if response.rebuttal_holds else "NOT verified: the challenge stays open"
+            lines.append(f"      rebuttal ({holds}): {response.rebuttal.text}")
+    next_label = "another Skeptic round" if outcome.next_step == "skeptic_review" else "value and feasibility"
+    lines.append(f"  Next: {next_label}")
     return "\n".join(lines)
 
 

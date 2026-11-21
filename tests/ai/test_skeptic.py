@@ -28,7 +28,7 @@ def test_attack_plans_need_4_to_8_short_distinct_queries():
     assert len(SkepticQueriesOutput.model_validate(queries("a b c", "d e f", "g h i", "j k l")).queries) == 4
     for bad in (queries("a b c", "d e f", "g h i"),                                       # too few
                 queries("a b c", "A  b c", "g h i", "j k l"),                              # repeated
-                queries("one two three four five six seven", "d e f", "g h i", "j k l")):  # 7 words
+                queries("one two three four five six seven eight nine", "d e f", "g h i", "j k l")):  # 9 words
         with pytest.raises(ValidationError):
             SkepticQueriesOutput.model_validate(bad)
 
@@ -67,7 +67,7 @@ def test_the_challenge_packet_shows_the_new_papers_and_keeps_their_text_inside()
 
 def test_the_skeptic_prompts():
     queries_prompt, challenges_prompt = system_prompt("skeptic", task="queries"), system_prompt("skeptic", task="challenges")
-    assert queries_prompt.version_id == "shared_preamble@1+skeptic_queries@1"
+    assert queries_prompt.version_id == "shared_preamble@1+skeptic_queries@2"
     assert challenges_prompt.version_id == "shared_preamble@1+skeptic_challenges@1"
     assert "would NOT have written" in queries_prompt.text
     assert "Never soften a challenge" in challenges_prompt.text and "never from what you remember" in challenges_prompt.text
@@ -93,3 +93,15 @@ def test_challenges_are_checked_by_code():
     assert (second.target_claim, second.statement_type) == (None, "interpretation")  # no evidence: interpretation
     assert third.statement_type == "interpretation"  # its only quote changed a number: not verified
     assert dropped == ["evidence from unknown paper P9", "unknown claim C7"]
+
+
+
+def test_limits_fit_what_the_skeptic_writes_well():
+    # step 4.7b live run: 7-word queries and 600-1000 character arguments forced paid rewrites
+    plan = SkepticQueriesOutput.model_validate(queries("small language models retrieval augmentation multilingual "
+                                                       "factuality", "d e f", "g h i", "j k l"))
+    assert len(plan.queries[0].text.split()) == 7
+    long_argument = "x " * 450  # 900 characters
+    assert ChallengeSetOutput.model_validate(challenge(argument=long_argument)).challenges[0].argument
+    with pytest.raises(ValidationError):
+        ChallengeSetOutput.model_validate(challenge(argument="x" * 1001))

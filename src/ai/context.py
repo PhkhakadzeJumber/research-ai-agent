@@ -3,7 +3,8 @@ Paper Reader (render_paper); ideas, revisions and query-planning tasks for the I
 Analyst (render_idea, render_revision, render_query_task); batches of papers for the
 relevance screener (render_screening_batch); the closest papers with their readings for
 the Novelty Investigator (render_novelty_task); the analysis's claims and verdict for the
-Skeptic (render_skeptic_queries, render_skeptic_challenges).
+Skeptic (render_skeptic_queries, render_skeptic_challenges); the challenges for the
+Novelty Investigator's revision (render_novelty_revision).
 
 Agents never read the database themselves. The orchestrator gives each one a curated
 packet, rendered as clearly labelled blocks so the model knows what it may cite:
@@ -31,7 +32,7 @@ ABSTRACT_ONLY_NOTE = (
 )
 FULL_TEXT_NOTE = "Passages from the full text are included as chunks, each with its ID and section."
 
-_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined)\b",
+_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge)\b",
                    re.IGNORECASE)
 _QUOTE_IN_ATTRIBUTE = re.compile(r'["<>]')
 
@@ -304,6 +305,8 @@ class PaperForNovelty:
     chunks: tuple[ChunkForReading, ...] = ()
     reading: dict | None = None
     """The stored Paper Reader analysis content (doc 10 §5.3), if any."""
+    is_new: bool = False
+    """Found by the Skeptic and not yet in the facet matrix (the revision fills its cells)."""
 
 
 def summarize_reading(content: dict | None) -> str:
@@ -333,7 +336,8 @@ def render_novelty_task(candidate: CandidateForPlanning, papers: tuple[PaperForN
         year = f' year="{paper.year}"' if paper.year else ""
         kind = "peer-reviewed" if paper.tier == 1 else "preprint"
         level = "full text" if paper.chunks else "abstract only"
-        lines.append(f'<paper label="{_attribute(paper.label)}"{year} type="{kind}" text="{level}">')
+        new = ' new="yes"' if paper.is_new else ""
+        lines.append(f'<paper label="{_attribute(paper.label)}"{year} type="{kind}" text="{level}"{new}>')
         lines.append(f"<title>{_contain(paper.title)}</title>")
         if paper.abstract:
             lines.append(f"<abstract>\n{_contain(paper.abstract)}\n</abstract>")
@@ -396,4 +400,55 @@ def render_skeptic_challenges(candidate: CandidateForPlanning, claims: tuple[Cla
     lines = _skeptic_context(candidate, claims, verdict, "Challenge the analysis using the new papers below.")
     novelty = render_novelty_task(candidate, papers, coverage="")
     lines.append(novelty[novelty.index("<papers>"):novelty.index("</papers>") + len("</papers>")])
+    return "\n".join(lines)
+
+
+
+# --- the Novelty Investigator's revision packet -----------------------------------------------------------
+#
+#     (the candidate block and the claims, as for the Skeptic)
+#     <challenges>
+#     <challenge label="K1" type="prior_work_found" target="C2" round="1">
+#     argument ...
+#     quote from P14: "..."
+#     </challenge>
+#     </challenges>
+#     <papers>... (examined papers, then the Skeptic's with new="yes") ...</papers>
+
+
+@dataclass(frozen=True)
+class ChallengeForRevision:
+    label: str
+    type: str
+    target: str | None
+    round: int
+    argument: str
+    evidence: tuple[tuple[str, str], ...] = ()
+    """(paper label, quote text)."""
+
+
+def render_novelty_revision(candidate: CandidateForPlanning, claims: tuple[ClaimForSkeptic, ...],
+                            challenges: tuple[ChallengeForRevision, ...],
+                            papers: tuple[PaperForNovelty, ...]) -> str:
+    """The Novelty Investigator's input for answering a Skeptic round."""
+    if not challenges and not any(paper.is_new for paper in papers):
+        raise ValueError("Nothing to revise: no challenges and no new papers.")
+    lines = [render_query_task(candidate, task="Answer the challenges and add the new papers to the matrix."),
+             "<claims>"]
+    for claim in claims:
+        lines.append(f'<claim label="{_attribute(claim.label)}" kind="{claim.kind}" status="{claim.status}">'
+                     f"{_contain(claim.text)}</claim>")
+    lines.append("</claims>")
+    lines.append("<challenges>")
+    for item in challenges:
+        target = f' target="{_attribute(item.target)}"' if item.target else ""
+        lines.append(f'<challenge label="{_attribute(item.label)}" type="{item.type}"{target} round="{item.round}">')
+        lines.append(_contain(item.argument))
+        for paper, quote in item.evidence:
+            lines.append(f'quote from {_attribute(paper)}: "{_contain(quote)}"')
+        lines.append("</challenge>")
+    lines.append("</challenges>")
+    if papers:
+        novelty = render_novelty_task(candidate, papers, coverage="")
+        lines.append(novelty[novelty.index("<papers>"):novelty.index("</papers>") + len("</papers>")])
     return "\n".join(lines)

@@ -76,8 +76,13 @@ async def compute_coverage(session: AsyncSession, evaluation_id: uuid.UUID) -> d
                     for name, entry in sorted(sources.items()) if entry["failed"]]
     if read and not full_text:
         blind_spots.append("Every paper was read from its abstract only (no full text).")
-    if counters.get("relevant_not_selected"):
-        blind_spots.append(f"{counters['relevant_not_selected']} relevant papers were not read (reading limit).")
+    not_read = (await session.execute(
+        select(func.count()).select_from(RetrievalHit).join(Paper, Paper.id == RetrievalHit.paper_id)
+        .where(in_scope, RetrievalHit.llm_score >= 2, RetrievalHit.selected_for_reading.is_(False),
+               Paper.abstract.is_not(None))
+    )).scalar_one()
+    if not_read:
+        blind_spots.append(f"{not_read} relevant papers were not read (reading limits).")
     if counters.get("relevant_unreadable"):
         blind_spots.append(f"{counters['relevant_unreadable']} relevant papers had no abstract or full text.")
     blind_spots += list(ALWAYS_BLIND)

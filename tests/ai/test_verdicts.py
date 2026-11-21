@@ -46,7 +46,7 @@ def inputs(*matches, depth="full", minor=(), gaps=(), skeptic_saturated=True, sk
 def test_novelty_rules(case, expected_category, expected_rule):
     verdict = novelty_verdict(case)
     assert (verdict.category, verdict.rule) == (expected_category, expected_rule)
-    assert verdict.rules_version == "novelty-rules-v1" and verdict.trace
+    assert verdict.rules_version == "novelty-rules-v2" and verdict.trace
 
 
 def test_previously_investigated_names_its_papers():
@@ -83,3 +83,15 @@ def test_incremental_notes_that_the_skeptic_has_not_looked():
 def test_a_candidate_needs_key_facets():
     with pytest.raises(ValueError):
         novelty_verdict(NoveltyInputs(depth="full", key_facets=(), matches=()))
+
+
+
+def test_the_skeptic_override_wins_over_the_matrix():
+    verdict = novelty_verdict(inputs(row("p1", "different", "different", "different"),
+                                     skeptic_override_papers=frozenset({"p9"})))
+    assert (verdict.category, verdict.rule, verdict.papers) == ("previously_investigated", "N1S", ["p9"])
+
+
+def test_too_little_evidence_still_comes_first():
+    verdict = novelty_verdict(inputs(relevant=3, skeptic_override_papers=frozenset({"p9"})))
+    assert verdict.rule == "N0"

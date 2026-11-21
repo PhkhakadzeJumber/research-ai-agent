@@ -328,6 +328,8 @@ stateDiagram-v2
 
 **As built (step 4.7a):** each `skeptic_review` round stores its searches (origin `skeptic`, round n), screens and reads up to 5 new relevant papers, stores the challenges (claims they target become `challenged`), and records its saturation statistic (new relevant papers). With challenges or new relevant papers it moves to `revising_novelty`; with neither it is saturated and moves to `assessing_value_feasibility`. A failed Skeptic call degrades the step.
 
+**As built (step 4.7b):** `revising_novelty` gives A4 its claims, the open challenges and the papers (the Skeptic's new ones marked), and stores the new matrix cells (existing cells are never overwritten). Code resolves each challenge: accepted (its claim becomes refuted), rebutted only with a verified quote (its claim becomes defended), otherwise unresolved and reported as a limitation. The loop returns to `skeptic_review` while rounds are left (light 1, full 3) and the last round wasn't saturated; otherwise it moves to `assessing_value_feasibility`.
+
 The evaluation's separate **status** (`running` / `done` / `partial` / `failed`) records *how* it ended. A failed step degrades the evaluation to `partial` instead of stopping the investigation. Example: all sources fail → novelty becomes "insufficient evidence".
 
 ### 11.5 Candidate statuses

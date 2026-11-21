@@ -26,8 +26,12 @@ ChallengeType = Literal["prior_work_found", "weak_assumption", "methodological_f
                         "alternative_explanation", "feasibility_risk"]
 EVIDENCE_REQUIRED = ("prior_work_found", "overstated_contribution")
 Label = Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^P\d{1,3}$")]
-# 600: a precise argument often needs it (step 4.7a live run: a 400 limit forced a costly rewrite)
-Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=600)]
+# 1000: the Skeptic's precise, quoted arguments run long (step 4.7b live run: 600 forced a rewrite
+# in all 3 rounds, each a paid repeat call)
+Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+# Up to 8 words: since step 4.4b an arXiv query that finds nothing is retried with its first 4 words,
+# so a longer attack query loses nothing (step 4.7b live run: a 6-word limit forced a rewrite each round)
+MAX_ATTACK_QUERY_WORDS = 8
 
 
 class _Strict(BaseModel):
@@ -36,7 +40,8 @@ class _Strict(BaseModel):
 
 class AttackQuery(_Strict):
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=120)] = Field(
-        description="2-5 keywords, most important first, as a paper would phrase them. No boolean operators or quotes."
+        description=("2-6 keywords, most important first, as a paper would phrase them (never more than 8). "
+                     "No boolean operators or quotes.")
     )
     angle: Angle
     why: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
@@ -52,9 +57,9 @@ class SkepticQueriesOutput(_Strict):
         texts = [" ".join(q.text.casefold().split()) for q in self.queries]
         if len(set(texts)) != len(texts):
             raise ValueError("queries: each query must be different")
-        too_long = [q.text for q in self.queries if len(q.text.split()) > 6]
+        too_long = [q.text for q in self.queries if len(q.text.split()) > MAX_ATTACK_QUERY_WORDS]
         if too_long:
-            raise ValueError(f"queries must have at most 6 words; shorten: {too_long}")
+            raise ValueError(f"queries must have at most {MAX_ATTACK_QUERY_WORDS} words; shorten: {too_long}")
         return self
 
 

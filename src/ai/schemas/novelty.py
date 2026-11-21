@@ -102,3 +102,46 @@ class NoveltyAssessmentOutput(_Strict):
         if repeated:
             raise ValueError(f"facet_matches: one cell per (paper, facet); repeated: {', '.join(repeated)}")
         return self
+
+
+# --- the revision after a Skeptic round (step 4.7b) -------------------------------------------------------
+
+class ChallengeResponse(_Strict):
+    challenge: Annotated[str, StringConstraints(pattern=r"^K\d{1,2}$")] = Field(description="e.g. 'K1'")
+    response: Literal["accept", "rebut"]
+    rebuttal: ClaimOut | None = Field(
+        default=None,
+        description=("For rebut: a claim that answers the challenge, backed by quotes from the papers in the input. "
+                     "An opinion without a verified quote doesn't count: the challenge then stays unresolved."),
+    )
+
+    @model_validator(mode="after")
+    def _rebuttal_for_rebut(self) -> ChallengeResponse:
+        if self.response == "rebut" and (self.rebuttal is None or not self.rebuttal.evidence):
+            raise ValueError(f"{self.challenge}: a rebuttal needs a claim with quoted evidence")
+        if self.response == "accept" and self.rebuttal is not None:
+            raise ValueError(f"{self.challenge}: an accepted challenge has no rebuttal")
+        return self
+
+
+class NoveltyRevisionOutput(_Strict):
+    """The Novelty Investigator's answer to a Skeptic round."""
+
+    facet_matches: list[FacetMatchOut] = Field(
+        default_factory=list, max_length=100,
+        description="Cells for the papers marked new in the input (the ones the Skeptic found).",
+    )
+    responses: list[ChallengeResponse] = Field(default_factory=list, max_length=20)
+    closest_works: list[ClosestWork] = Field(default_factory=list, max_length=5)
+    proposed_verdict: NoveltyCategory
+    uncertainties: list[Text] = Field(default_factory=list, max_length=5)
+
+    @model_validator(mode="after")
+    def _one_each(self) -> NoveltyRevisionOutput:
+        pairs = [(m.paper, m.facet) for m in self.facet_matches]
+        if len(set(pairs)) != len(pairs):
+            raise ValueError("facet_matches: one cell per (paper, facet)")
+        answered = [r.challenge for r in self.responses]
+        if len(set(answered)) != len(answered):
+            raise ValueError("responses: one response per challenge")
+        return self

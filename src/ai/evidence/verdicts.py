@@ -5,7 +5,10 @@ first that holds decides:
 
   N0 Insufficient evidence    the novelty assessment failed, retrieval failed, or fewer than
                               MIN_RELEVANT papers were judged relevant (score 2-3)
-  N1 Previously investigated  one paper is a verified "same" on EVERY key facet
+  N1 Previously investigated  one paper is a verified "same" on EVERY key facet; or (N1S, the
+                              Skeptic override, doc 07 §4.5) a prior_work_found challenge has a
+                              verified quote, names "same" on every key facet, and was not
+                              rebutted with verified evidence
   N2 Incremental variation    one paper is a verified "same" on all key facets but one, a
                               verified "similar" on that one, and the Novelty Investigator
                               marked the difference as minor
@@ -22,7 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-NOVELTY_RULES_VERSION = "novelty-rules-v1"
+NOVELTY_RULES_VERSION = "novelty-rules-v2"  # v2 (step 4.7b): the Skeptic override N1S
 
 MIN_RELEVANT = 20
 SUPPORTED_THRESHOLDS = {"screened": 150, "read": 25, "sources": 3}  # doc 07 §4.1 defaults
@@ -62,6 +65,8 @@ class NoveltyInputs:
     assessment_failed: bool = False
     skeptic_saturated: bool = False
     skeptic_ran: bool = False
+    skeptic_override_papers: frozenset[str] = frozenset()
+    """Papers cited by prior_work_found challenges that qualify for N1S (checked by the caller)."""
 
 
 @dataclass(frozen=True)
@@ -105,6 +110,13 @@ def novelty_verdict(inputs: NoveltyInputs) -> VerdictResult:
         return VerdictResult("insufficient_evidence", "N0", [f"N0: {'; '.join(reasons)}"])
 
     cells = _verified_cells(inputs)
+
+    # N1S: the Skeptic's override
+    if inputs.skeptic_override_papers:
+        return VerdictResult("previously_investigated", "N1S",
+                             ["N1S: a Skeptic challenge with verified quotes shows 'same' on every key facet "
+                              f"{list(keys)}, not rebutted with evidence"],
+                             papers=sorted(inputs.skeptic_override_papers))
 
     # N1: a verified "same" on every key facet
     same_on_all = sorted(paper for paper, row in cells.items() if all(row.get(k) == "same" for k in keys))

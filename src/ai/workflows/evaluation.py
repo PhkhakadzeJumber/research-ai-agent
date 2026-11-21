@@ -70,6 +70,7 @@ from src.ai.workflows.transitions import (
 from src.config import RoleLlmSettings
 from src.db.models import (
     Candidate,
+    Challenge,
     Chunk,
     Claim,
     ClaimEvidence,
@@ -656,11 +657,24 @@ async def novelty_verdict_for(session: AsyncSession, evaluation_id: uuid.UUID) -
                       if work.get("minor_difference_only"))
     coverage = await compute_coverage(session, evaluation_id)
     rounds = (evaluation.counters or {}).get("skeptic_rounds", [])
+    key_numbers = {f.position + 1 for f in facets if f.is_key}
+    override = set()
+    for challenge in (await session.execute(
+        select(Challenge).where(Challenge.evaluation_id == evaluation_id, Challenge.type == "prior_work_found",
+                                Challenge.resolution != "rebutted")
+    )).scalars():
+        verified = (await session.execute(
+            select(func.count()).select_from(Quote)
+            .where(Quote.id.in_(challenge.evidence_quote_ids or []), Quote.verified.is_(True))
+        )).scalar_one()
+        if verified and key_numbers <= set(challenge.same_on_facets or []):
+            override.update(str(paper_id) for paper_id in challenge.new_paper_ids or [])
     inputs = NoveltyInputs(
         depth=evaluation.depth, key_facets=tuple(f.position + 1 for f in facets if f.is_key), matches=matches,
         minor_difference_papers=minor, gap_claim_statuses=gap_statuses, relevant=coverage["funnel"]["relevant"],
         screened=coverage["funnel"]["screened"], read=coverage["funnel"]["read"], sources_ok=coverage["sources_ok"],
         retrieval_failed=evaluation.status == "failed", assessment_failed=not assessment or "error" in assessment,
         skeptic_ran=bool(rounds), skeptic_saturated=bool(rounds) and rounds[-1].get("saturated", False),
+        skeptic_override_papers=frozenset(override),
     )
     return novelty_verdict(inputs), coverage
