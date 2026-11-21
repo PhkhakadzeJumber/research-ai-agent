@@ -137,8 +137,8 @@ async def finish_investigation(sessions: Sessions, investigation_id: uuid.UUID) 
 
 
 async def wrap_up(sessions: Sessions, investigation_id: uuid.UUID) -> None:
-    """Mode 1 from `ranking`: one idea needs no ordering, and the report is built on demand, so
-    ranking -> reporting -> results_ready (completed)."""
+    """From `ranking`, both workflows: the ranking is computed from the stored verdicts and the report is built
+    on demand (src/ai/workflows/ranking.py, scripts/report.py), so ranking -> reporting -> results_ready (completed)."""
     async with sessions() as session:
         for current, target in ((Stage.RANKING, Stage.REPORTING), (Stage.REPORTING, Stage.RESULTS_READY)):
             await advance_investigation(session, investigation_id, to=target, expected_from=current)

@@ -30,8 +30,8 @@ python -m scripts.search "your query" --sources arxiv --save --rank  # + rank by
 python -m scripts.read_papers --latest --top 5 [--details]  # Paper Reader on a saved search: paid API, ask first
 python -m scripts.evaluate "your idea" [--field NLP] [--complexity beginner] [--budget 5]  # Workflow A, end to end (about $3-5; a refinement or alternatives add light evaluations, about $1.40 each): paid API, ask first
 python -m scripts.evaluate --continue <investigation id> [--budget N]  # resume where it stopped
-python -m scripts.report <investigation id> [--out report.md]  # the full report from stored data: free
-python -m scripts.discover "NLP" [--interests ...] [--exclude ...] [--complexity beginner] [--count 3] [--budget 12] [--max-light 5 (light evaluations in all)]  # Workflow B (so far: field brief, clarification, landscape search, reading, mining, the Scout's candidates, pre-screening, light evaluation (about $1-1.40 per candidate), refinements, replenishing and full evaluation of the best, about $1.60-2.20 each): paid API, ask first
+python -m scripts.report <investigation id> [--out report.md]  # the full report from stored data, both modes (Mode 2: ranked ideas): free
+python -m scripts.discover "NLP" [--interests ...] [--exclude ...] [--complexity beginner] [--count 3] [--budget 12] [--max-light 5 (light evaluations in all)]  # Workflow B, end to end: field brief, clarification, landscape, mining, the Scout's candidates, pre-screening, light evaluation (about $1-1.40 per candidate), refinements, replenishing, full evaluation of the best (about $1.60-2.20 each), ranking: paid API, ask first
 
 # Backend
 uvicorn src.api.main:app --reload            # (planned) API on http://127.0.0.1:8000

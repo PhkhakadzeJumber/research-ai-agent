@@ -180,7 +180,7 @@ async def test_the_command_lists_the_candidates(db_session, capsys):
     stored = (await db_session.execute(select(Candidate).where(Candidate.investigation_id == investigation.id))
               ).scalars().all()
     assert len(stored) == 8 + 3 and sum(c.origin == "replenish" for c in stored) == 3
-    assert (await db_session.get(Investigation, investigation.id)).stage == "ranking"
+    assert (await db_session.get(Investigation, investigation.id)).stage == "results_ready"  # completed (5.6b)
 
 
 async def test_a_failed_scout_stores_nothing(db_session, capsys):

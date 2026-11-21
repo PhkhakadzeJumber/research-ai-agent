@@ -7,7 +7,7 @@ Usage (from the repo root, venv active, database running, Anthropic key in .env)
     python -m scripts.evaluate --continue <investigation id>     resume at the clarification
     python -m scripts.evaluate "..." --yes                       skip the questions
 
-So far (steps 4.2-4.4):
+The whole workflow (steps 4.2-4.9, with 5.5-5.6 for what follows a verdict):
   1. understanding: the Idea Analyst's reading of the idea (facets, assumptions,
      vagueness flags, clarifying questions), stored as the investigation's Intake;
   2. clarification: you answer the questions (Enter skips one), may edit facets, and
@@ -33,14 +33,16 @@ So far (steps 4.2-4.4):
      against your available time, then shows every verdict, the recommendation and the
      triage rule;
   9. concluding: the coverage and the verdicts are frozen, triage decides (finalist,
-     rejected, or a refinement suggested for step 5), and the investigation completes.
+     rejected or refined), and then the candidate loop (scripts/candidate_loop.py): a refinement
+     gets its next version and a light re-evaluation; a rejected idea gets 3-5 alternatives, which
+     are pre-screened and light-evaluated; the best that advance get a full evaluation; then the
+     investigation completes.
      The full report: python -m scripts.report <investigation id> [--out report.md].
 Budget: --budget (default $5) caps the investigation's Claude cost. The Skeptic loop stops
 at the cap, and the command stops before any further paid step (resume with --continue and
 a higher --budget).
 If Eureka had to propose a KEY facet, you must confirm the reading yourself: --yes is
 refused. Quitting at the confirmation keeps everything; resume with --continue.
-Later steps extend this until the whole evaluation runs (step 4.8).
 
 This calls the paid Anthropic API (one Opus call, plus one if you answer questions,
 plus one or two for the query plan; roughly 4-5 cents each; screening and reading

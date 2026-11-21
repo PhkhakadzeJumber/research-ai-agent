@@ -7,7 +7,7 @@ out and prints what happens, until the investigation reaches a stage that isn't 
     triage -> generating_candidates -> prescreening -> light_evaluation -> triage -> ...
                                      (Mode 2 replenish: reserve first, then the Scout; Mode 1 alternatives)
     triage -> full_evaluation -> triage -> ...               (the best advanced candidates, step 5.6a)
-    triage -> ranking -> reporting -> results_ready          (Mode 1; Mode 2's ranking comes with 5.6)
+    triage -> ranking -> reporting -> results_ready          (the ranked results; the report: scripts/report.py)
 
 Exit codes as in the commands: 0 ok, 1 a step failed, 3 the budget is used up.
 """
@@ -18,13 +18,13 @@ import uuid
 from dataclasses import dataclass
 
 from src.ai.workflows.budget import budget_left, cost_cap
-from src.ai.workflows.concluding import wrap_up
 from src.ai.workflows.evaluation import Sessions
 from src.ai.workflows.alternatives import NoIdeaToReplace
 from src.ai.workflows.full_evaluation import full_evaluation_step
 from src.ai.workflows.generating import generate_step
 from src.ai.workflows.light_evaluation import LightOutcome, light_evaluation_step, short_step_line
 from src.ai.workflows.prescreening import PrescreenOutcome, prescreen_step
+from src.ai.workflows.ranking import RankedResults, complete_results, ranked_results
 from src.ai.workflows.refining import RefiningOutcome, refine_step
 from src.ai.workflows.routing import route_after_triage
 from src.ai.workflows.runner import EvaluationModels
@@ -241,6 +241,22 @@ async def refine(sessions: Sessions, investigation_id: uuid.UUID, models: LoopMo
                                 command=command, quick_model=models.quick_model)
 
 
+# --- ranking (step 5.6b) ---------------------------------------------------------------------------------
+
+def format_ranking(results: RankedResults) -> str:
+    lines = ["\nRanked ideas:" if results.finalists else "\nNo idea became a finalist."]
+    for n, r in enumerate(results.finalists, start=1):
+        s = r.standing
+        lines.append(f"  {n}. {r.candidate.title}")
+        lines.append(f"     {s.recommendation}, novelty {s.novelty}, feasibility {s.feasibility}, "
+                     f"significance {s.significance}".replace("_", " ")
+                     + (f" | above #{n + 1}: {r.ahead_because}" if r.ahead_because else ""))
+    if results.advanced:
+        lines.append("Passed screening, not fully evaluated: " + "; ".join(r.candidate.title for r in results.advanced))
+    lines.append(f"Other ideas set aside: {len(results.others)} (each with its reason in the report)")
+    return "\n".join(lines)
+
+
 # --- routing --------------------------------------------------------------------------------------------
 
 async def route(sessions: Sessions, investigation_id: uuid.UUID, models: LoopModels | None = None, *,
@@ -275,15 +291,16 @@ async def continue_at(sessions: Sessions, investigation_id: uuid.UUID, models: L
         return await prescreen(sessions, investigation_id, models, command=command)
     if stage == Stage.FULL_EVALUATION:
         return await evaluate_full(sessions, investigation_id, models, command=command)
-    if stage == Stage.RANKING and mode == Mode.EVALUATE:
-        await wrap_up(sessions, investigation_id)
+    if stage == Stage.RANKING:
+        async with sessions() as session:
+            results = await ranked_results(session, investigation_id)
+        await complete_results(sessions, investigation_id)
+        if mode == Mode.DISCOVER:
+            print(format_ranking(results))
         async with sessions() as session:
             cost = (await session.get(Investigation, investigation_id)).cost_usd
         print(f"\nDone. Total cost: ${cost:.2f}")
         print(f"Full report: python -m scripts.report {investigation_id} [--out report.md]")
-        return 0
-    if stage == Stage.RANKING:
-        print("Ranking the finalists and the Mode 2 report come with step 5.6.")
         return 0
     print(f"Nothing to continue at stage {stage}.")
     return 0

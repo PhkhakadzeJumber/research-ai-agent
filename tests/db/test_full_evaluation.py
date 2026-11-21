@@ -155,4 +155,6 @@ async def test_the_loop_runs_the_full_evaluation_and_routes_on(db_session, capsy
     assert "plan: 15 searches" in output and "Triage after full evaluation:" in output
     # the fake verdicts end in rule 7 (expand search: recorded, not carried out yet), so nothing is left to evaluate
     assert "rule 7: expand_search" in output and "Next: ranking (nothing left to evaluate)" in output
-    assert (await db_session.get(Investigation, investigation.id)).stage == "ranking"
+    # then the results (5.6b): no finalist; the flagged idea is listed with the others, and the run completes
+    assert "No idea became a finalist." in output and "Done. Total cost:" in output
+    assert (await db_session.get(Investigation, investigation.id)).stage == "results_ready"

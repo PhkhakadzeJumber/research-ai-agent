@@ -226,6 +226,13 @@ Each check and the decision are stored in `candidates.prescreen`. **Light evalua
 *As built (step 5.6a, `src/ai/workflows/full_evaluation.py`).* **Choosing:** the advanced candidates are ordered by the ranking rules (§3, `src/ai/evidence/ranking.py`) on their light verdicts. The best go to `full_evaluating`: Mode 2 ≤3, Mode 1 ≤2, and ≤3 full evaluations per investigation in all (Mode 1's own idea counts). The router's line 4 needs that room. **The upgrade:** the full evaluation extends the light one (`extends_id`) and starts at `planning_queries`. The light evaluation's searches and hits are copied in with their screening scores, so screening pays only for new papers, and papers already read come from the library. Its Skeptic round is carried over, so at most 2 more rounds run. Novelty and value are assessed afresh on the larger evidence. Each candidate is then triaged as usual. Mode 1's own idea keeps its original path (`scripts.evaluate`); later full evaluations (an advanced refinement or alternative) run in the candidate loop. Rule 7 (expand search) is still recorded, not carried out.
 | `triage` | both | code (rules §4) | Applies the triage rules to every evaluation just finished, then picks the next stage (§11.2–11.3) | running |
 | `ranking` | both | code | Orders finalists by the rules in §3; marks the rest | running |
+
+*As built (step 5.6b, `src/ai/workflows/ranking.py`, `scripts/report.py`).* The ranking is **computed, not stored**: it is a pure function of frozen verdicts, so it can't drift from them. It covers:
+- finalists, ordered by §3 on their latest full evaluation, each with the reason it comes before the next;
+- the advanced candidates that weren't fully evaluated, in the same order on their light verdicts;
+- every other candidate with what happened and why: rejected, screened out, refined ("refined into v2: …"), waiting in reserve, or flagged (rule 7).
+
+`ranking → reporting → results_ready` then completes the investigation in both workflows, and the report is built on demand. The Mode 2 report shows the request, the field brief with landscape counts, the mined open problems, the ranked finalists (each with the same per-idea section as Mode 1's report), the ideas that passed screening, the others with their reasons, and the cost. Mode 1's report adds the refined versions and alternatives.
 | `reporting` | both | code | Builds the report: verdicts, evidence, coverage, Skeptic log, rejected candidates with reasons | running |
 | `results_ready` | both | **human** | Results are shown. User actions start new work (§11.6) | completed |
 | `writing_proposal` | both | **A7** Proposal Designer | Research package for the selected candidate | running |

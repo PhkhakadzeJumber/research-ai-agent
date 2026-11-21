@@ -8,7 +8,7 @@ Usage (from the repo root, venv active, database running, Anthropic key in .env)
     python -m scripts.discover --continue <investigation id>      resume where it stopped
     python -m scripts.discover "NLP" --yes                        skip the questions
 
-So far (steps 5.1a-5.4):
+The whole workflow (steps 5.1a-5.6b):
   1. the Idea Analyst's field brief (4-8 subtopics of your field, each with why it fits
      you and its landscape searches); you answer its questions (Enter skips one), may
      remove subtopics, and confirm;
@@ -30,8 +30,10 @@ So far (steps 5.1a-5.4):
      $1-1.40 each), then triage: advanced, needs refinement or rejected;
   8. the candidate loop (scripts/candidate_loop.py): an idea sent back for refinement gets its
      next version from the Scout (about 10-20 cents) and a light re-evaluation, at most 2 per
-     idea and 4 in all.
-Replenishing comes with step 5.5b; full evaluation of the best and the ranking with step 5.6.
+     idea and 4 in all; too few survivors: the reserve first, then one more Scout round;
+  9. the best advanced ideas (at most 3) get a full evaluation that extends their light one
+     (about $1.60-2.20 each), then the finalists are ranked and the investigation completes.
+     The full report: python -m scripts.report <investigation id> [--out report.md].
 
 This calls the paid Anthropic API (the brief: a few cents per call; screening the landscape:
 a few cents; reading: about 3 cents per paper not already in the library; mining: a few
