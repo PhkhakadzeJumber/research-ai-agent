@@ -319,11 +319,29 @@ async def score_unscreened(
 ) -> tuple[int, int]:
     """Scores every not-yet-screened paper of the evaluation, in parallel batches.
     Returns (screened, not_screened). Used by screening and by each Skeptic round."""
+    return await score_hits(
+        sessions, investigation_id, evaluation_id,
+        lambda papers: screen_batch(view, papers, settings=settings, model=model),
+        batch_size=batch_size, concurrency=concurrency)
+
+
+async def score_hits(
+    sessions: Sessions,
+    investigation_id: uuid.UUID,
+    evaluation_id: uuid.UUID | None,
+    screen,
+    *,
+    batch_size: int = BATCH_SIZE,
+    concurrency: int = SCREEN_CONCURRENCY,
+) -> tuple[int, int]:
+    """Scores every not-yet-screened paper of one scope (an evaluation, or the landscape when
+    evaluation_id is None) with `screen(papers) -> BatchScreening`, in parallel batches."""
+    scope = RetrievalHit.evaluation_id.is_not_distinct_from(evaluation_id)
     async with sessions() as session:
         rows = (await session.execute(
             select(RetrievalHit.id, Paper.title, Paper.year, Paper.abstract)
             .join(Paper, Paper.id == RetrievalHit.paper_id)
-            .where(RetrievalHit.evaluation_id == evaluation_id, RetrievalHit.screened.is_(False))
+            .where(RetrievalHit.investigation_id == investigation_id, scope, RetrievalHit.screened.is_(False))
             .order_by(_found_count().desc(), RetrievalHit.source_rank.asc().nulls_last())
         )).all()
 
@@ -339,9 +357,9 @@ async def score_unscreened(
     async def run(papers) -> BatchScreening | LlmError:
         async with limiter:
             try:
-                return await screen_batch(view, papers, settings=settings, model=model)
+                return await screen(papers)
             except LlmError as error:
-                logger.warning("screening batch failed for evaluation %s: %s", evaluation_id, error)
+                logger.warning("screening batch failed for investigation %s: %s", investigation_id, error)
                 return error
 
     results = await asyncio.gather(*(run(papers) for _, papers in batches))

@@ -15,23 +15,36 @@ Every search is stored as the investigation's landscape scope: origin `landscape
 as the query type, hits outside any evaluation (the same papers found twice are one paper,
 dedup rules of steps 1.6 and 4.5b). If every search fails on every source, nothing could be
 looked at and the investigation fails (doc 05 §11.6); otherwise the stage moves to
-`landscape_reading` (step 5.2). No Claude calls.
+`landscape_reading`. No Claude calls.
+
+landscape_reading_step(sessions, investigation_id) (stage `landscape_reading`, step 5.2a):
+  1. the relevance screener (a small model) scores every landscape paper 0-3 against the
+     field brief's subtopics (3: central and useful for finding open problems);
+  2. code chooses what to read (about 45 papers, doc 05): at least PER_SUBTOPIC per subtopic,
+     surveys first, then by score and how often a paper was found. A paper's subtopics are
+     known from the searches that found it, not guessed;
+  3. the Paper Reader reads them into the library (stored analyses are reused for free),
+     and the stage moves to `opportunity_mining` (step 5.2b).
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
+from src.ai.agents.relevance_screener import screen_landscape_batch
 from src.ai.schemas.field_brief import FieldBriefOutput
-from src.ai.workflows.evaluation import SearchesLike, Sessions
+from src.ai.workflows.evaluation import READ_THRESHOLD, SearchesLike, Sessions, score_hits
+from src.ai.workflows.reading import LibraryOutcome, read_into_library
 from src.ai.workflows.states import Stage
 from src.ai.workflows.transitions import StaleState, advance_investigation, fail_investigation
-from src.db.models import Investigation, Paper, RetrievalHit
+from src.config import RoleLlmSettings
+from src.db.models import Chunk, Investigation, Paper, RetrievalHit, SearchQuery
 from src.db.repositories.intakes import find_intake
 from src.db.repositories.search_trail import save_search
 from src.retrieval.records import SearchRequest, SearchResult
@@ -150,4 +163,131 @@ async def landscape_step(
         else:
             await advance_investigation(session, investigation_id, to=Stage.LANDSCAPE_READING,
                                         expected_from=Stage.LANDSCAPE_RETRIEVAL)
+    return outcome
+
+
+
+# --- landscape_reading (step 5.2a) --------------------------------------------------------------------------
+
+MAX_LANDSCAPE_READ = 45  # doc 05 §3: ~40-50 papers
+PER_SUBTOPIC = 5
+_SURVEY = re.compile(r"\b(survey|review|overview|systematic|tutorial)\b", re.IGNORECASE)
+
+
+@dataclass
+class LandscapeReading:
+    screened: int = 0
+    not_screened: int = 0
+    score_counts: dict[int, int] = field(default_factory=dict)
+    selected: list[tuple[Paper, list[str], bool]] = field(default_factory=list)
+    """(paper, its subtopics, is a survey), in reading order."""
+    read: list[LibraryOutcome] = field(default_factory=list)
+
+    @property
+    def read_now(self) -> int:
+        return sum(1 for o in self.read if not o.error and not o.reused)
+
+    @property
+    def reused(self) -> int:
+        return sum(1 for o in self.read if o.reused)
+
+    @property
+    def failed(self) -> int:
+        return sum(1 for o in self.read if o.error)
+
+
+def is_survey(title: str) -> bool:
+    return bool(_SURVEY.search(title or ""))
+
+
+def choose_landscape_papers(rows, subtopic_names: list[str], *, limit: int = MAX_LANDSCAPE_READ,
+                            per_subtopic: int = PER_SUBTOPIC) -> list:
+    """rows: (paper, subtopics, score, found_count, source_rank). At least per_subtopic per subtopic
+    (surveys first, then score, then how often found), then the best of the rest, up to limit."""
+    def key(row):
+        paper, _, score, found, rank = row
+        return (not is_survey(paper.title), -score, -found, rank if rank is not None else 10**9)
+
+    ordered = sorted(rows, key=key)
+    chosen, seen = [], set()
+    for name in subtopic_names:
+        taken = 0
+        for row in ordered:
+            if taken == per_subtopic or len(chosen) == limit:
+                break
+            if name in row[1] and row[0].id not in seen:
+                chosen.append(row)
+                seen.add(row[0].id)
+                taken += 1
+    for row in ordered:
+        if len(chosen) == limit:
+            break
+        if row[0].id not in seen:
+            chosen.append(row)
+            seen.add(row[0].id)
+    return chosen
+
+
+async def landscape_reading_step(
+    sessions: Sessions,
+    investigation_id: uuid.UUID,
+    *,
+    limit: int = MAX_LANDSCAPE_READ,
+    per_subtopic: int = PER_SUBTOPIC,
+    screen_settings: RoleLlmSettings | None = None,
+    screen_model=None,
+    read_settings: RoleLlmSettings | None = None,
+    read_model=None,
+) -> LandscapeReading:
+    async with sessions() as session:
+        investigation = await session.get(Investigation, investigation_id)
+        if investigation is None or investigation.stage != Stage.LANDSCAPE_READING:
+            raise StaleState(f"Investigation {investigation_id} isn't at landscape_reading.")
+        brief = await confirmed_brief(session, investigation_id)
+    subtopics = tuple((n, s.name, s.why_it_fits_you) for n, s in enumerate(brief.subtopics, start=1))
+    outcome = LandscapeReading()
+
+    # 1. screening
+    outcome.screened, outcome.not_screened = await score_hits(
+        sessions, investigation_id, None,
+        lambda papers: screen_landscape_batch(subtopics, papers, settings=screen_settings, model=screen_model))
+
+    # 2. choosing: subtopics from the searches that found each paper
+    query_subtopic = {}
+    for subtopic in brief.subtopics:
+        for query in subtopic.queries:
+            for kind in KINDS:
+                query_subtopic[f"{query}{kind.suffix}"] = subtopic.name
+    in_scope = (RetrievalHit.investigation_id == investigation_id) & RetrievalHit.evaluation_id.is_(None)
+    async with sessions() as session:
+        texts = dict((await session.execute(
+            select(SearchQuery.id, SearchQuery.query_text).where(SearchQuery.investigation_id == investigation_id,
+                                                                 SearchQuery.origin == "landscape"))).all())
+        has_text = or_(Paper.abstract.is_not(None), select(Chunk.id).where(Chunk.paper_id == Paper.id).exists())
+        hits = (await session.execute(
+            select(RetrievalHit, Paper, has_text).join(Paper, Paper.id == RetrievalHit.paper_id).where(in_scope)
+        )).all()
+        counts = {}
+        rows = []
+        for hit, paper, readable in hits:
+            if hit.screened:
+                counts[hit.llm_score] = counts.get(hit.llm_score, 0) + 1
+            if (hit.llm_score or 0) >= READ_THRESHOLD and readable:
+                names = sorted({query_subtopic.get(texts.get(q), "") for q in hit.found_by_query_ids} - {""})
+                rows.append((paper, names, hit.llm_score, len(hit.found_by_query_ids), hit.source_rank))
+        outcome.score_counts = {score: counts.get(score, 0) for score in (3, 2, 1, 0)}
+        chosen = choose_landscape_papers(rows, [s.name for s in brief.subtopics], limit=limit,
+                                         per_subtopic=per_subtopic)
+        chosen_ids = {row[0].id for row in chosen}
+        for hit, paper, _ in hits:
+            hit.selected_for_reading = paper.id in chosen_ids
+        outcome.selected = [(paper, names, is_survey(paper.title)) for paper, names, *_ in chosen]
+
+    # 3. reading
+    outcome.read = await read_into_library(sessions, [paper.id for paper, _, _ in outcome.selected],
+                                           investigation_id=investigation_id, settings=read_settings,
+                                           model=read_model)
+    async with sessions() as session:
+        await advance_investigation(session, investigation_id, to=Stage.OPPORTUNITY_MINING,
+                                    expected_from=Stage.LANDSCAPE_READING)
     return outcome

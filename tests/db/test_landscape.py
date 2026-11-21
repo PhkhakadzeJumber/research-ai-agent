@@ -106,5 +106,5 @@ async def test_the_command_shows_the_landscape(db_session, capsys):
     output = capsys.readouterr().out
     assert code == 0
     assert "32 searches -> 3 results" in output and "1 unique papers" in output  # recent, cited, newest: one paper
-    assert "Papers per subtopic:" in output and "comes with step 5.2" in output
+    assert "Papers per subtopic:" in output  # the next-step note moved to reading (test_landscape_reading)
     assert (await db_session.get(Investigation, investigation.id)).stage == "landscape_reading"

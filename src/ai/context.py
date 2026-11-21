@@ -32,7 +32,7 @@ ABSTRACT_ONLY_NOTE = (
 )
 FULL_TEXT_NOTE = "Passages from the full text are included as chunks, each with its ID and section."
 
-_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints)\b",
+_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints|field_brief|subtopic)\b",
                    re.IGNORECASE)
 _QUOTE_IN_ATTRIBUTE = re.compile(r'["<>]')
 
@@ -267,8 +267,12 @@ def render_screening_batch(candidate: CandidateForPlanning, papers: tuple[PaperF
     """The relevance screener's input: the idea, then the batch of papers."""
     if not papers:
         raise ValueError("A screening batch needs papers.")
-    idea = render_query_task(candidate, task="Score every paper in the batch below.")
-    lines = [idea, "<papers>"]
+    return "\n".join([render_query_task(candidate, task="Score every paper in the batch below."),
+                      _screening_papers(papers)])
+
+
+def _screening_papers(papers: tuple[PaperForScreening, ...]) -> str:
+    lines = ["<papers>"]
     for paper in papers:
         year = f' year="{paper.year}"' if paper.year else ""
         abstract = (f"<abstract>{_contain(_shorten_abstract(paper.abstract))}</abstract>" if paper.abstract
@@ -277,7 +281,6 @@ def render_screening_batch(candidate: CandidateForPlanning, papers: tuple[PaperF
                      f"{abstract}</paper>")
     lines.append("</papers>")
     return "\n".join(lines)
-
 
 
 # --- the Novelty Investigator's packet ------------------------------------------------------------------
@@ -597,3 +600,26 @@ def render_field_revision(request: FieldRequest, brief_json: str, answers: tuple
     )
     return "\n".join([render_field_request(request), f"<reading>\n{_contain_revision_text(brief_json)}\n</reading>",
                       f"<answers>\n{items}\n</answers>"])
+
+
+
+# --- the landscape screening packet (Mode 2, step 5.2a) ------------------------------------------------------
+#
+#     <field_brief>
+#     <subtopic number="1">name: why it fits the user</subtopic>
+#     </field_brief>
+#     <papers>...</papers>                     (as for the candidate screening)
+
+
+def render_landscape_screening(subtopics: tuple[tuple[int, str, str], ...],
+                               papers: tuple[PaperForScreening, ...]) -> str:
+    """The relevance screener's input in discovery mode: the field brief instead of a candidate.
+    subtopics: (number, name, why it fits the user)."""
+    if not papers:
+        raise ValueError("A screening batch needs papers.")
+    lines = ["<field_brief>"]
+    lines.extend(f'<subtopic number="{number}">{_contain(name)}: {_contain(why)}</subtopic>'
+                 for number, name, why in subtopics)
+    lines.append("</field_brief>")
+    lines.append(_screening_papers(papers))
+    return "\n".join(lines)

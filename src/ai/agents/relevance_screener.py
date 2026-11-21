@@ -1,7 +1,9 @@
 """The relevance screener (role relevance_screening; doc 05 §11.4 step `screening`).
 
 screen_batch() judges one batch of papers (up to ~25) against one candidate in a single
-structured call. The model and effort come from the role's settings: by default the
+structured call; screen_landscape_batch() (Mode 2, step 5.2a) judges a batch against the
+field brief's subtopics instead (prompt relevance_screening_landscape), with the same
+output. The model and effort come from the role's settings: by default the
 project model at effort `low`, normally overridden with a small model
 (EUREKA_LLM_MODEL_RELEVANCE_SCREENING, e.g. claude-haiku-5-5), because screening is a
 simple judgement made hundreds of times per evaluation.
@@ -18,7 +20,12 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from src.ai.context import CandidateForPlanning, PaperForScreening, render_screening_batch
+from src.ai.context import (
+    CandidateForPlanning,
+    PaperForScreening,
+    render_landscape_screening,
+    render_screening_batch,
+)
 from src.ai.prompts import system_prompt
 from src.ai.schemas.screening import Judgement, ScreeningOutput
 from src.config import RoleLlmSettings
@@ -47,10 +54,10 @@ class BatchScreening:
         return None if any(cost is None for cost in costs) else sum(costs, Decimal(0))
 
 
-async def _judge(candidate, papers, system, settings, model) -> tuple[dict[str, Judgement], list[LlmCallRecord]]:
+async def _judge(render, papers, system, settings, model) -> tuple[dict[str, Judgement], list[LlmCallRecord]]:
     result = await run_structured(
         ROLE, system=system.text, prompt_version=system.version_id,
-        user_message=render_screening_batch(candidate, tuple(papers)),
+        user_message=render(tuple(papers)),
         output_schema=ScreeningOutput, settings=settings, model=model, cache=PROMPT_CACHE,
     )
     asked = {paper.label for paper in papers}
@@ -69,15 +76,31 @@ async def screen_batch(
     model: Any | None = None,
 ) -> BatchScreening:
     """Scores every paper in the batch (0-3, with a reason). Raises LlmError subclasses."""
+    return await _screen(lambda batch: render_screening_batch(candidate, batch), papers, system_prompt(ROLE),
+                         settings, model)
+
+
+async def screen_landscape_batch(
+    subtopics: tuple[tuple[int, str, str], ...],
+    papers: list[PaperForScreening],
+    *,
+    settings: RoleLlmSettings | None = None,
+    model: Any | None = None,
+) -> BatchScreening:
+    """Scores every paper against the field brief's subtopics (number, name, why it fits)."""
+    return await _screen(lambda batch: render_landscape_screening(subtopics, batch), papers,
+                         system_prompt(ROLE, task="landscape"), settings, model)
+
+
+async def _screen(render, papers, system, settings, model) -> BatchScreening:
     labels = [paper.label for paper in papers]
     if len(set(labels)) != len(labels):
         raise ValueError("Paper labels in a screening batch must be unique.")
-    system = system_prompt(ROLE)
-    judged, records = await _judge(candidate, papers, system, settings, model)
+    judged, records = await _judge(render, papers, system, settings, model)
 
     skipped = [paper for paper in papers if paper.label not in judged]
     if skipped:  # one more call for the papers the model left out
-        more, more_records = await _judge(candidate, skipped, system, settings, model)
+        more, more_records = await _judge(render, skipped, system, settings, model)
         judged.update(more)
         records = [*records, *more_records]
 

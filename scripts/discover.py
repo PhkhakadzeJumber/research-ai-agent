@@ -8,18 +8,23 @@ Usage (from the repo root, venv active, database running, Anthropic key in .env)
     python -m scripts.discover --continue <investigation id>      resume where it stopped
     python -m scripts.discover "NLP" --yes                        skip the questions
 
-So far (steps 5.1a-5.1b):
+So far (steps 5.1a-5.2a):
   1. the Idea Analyst's field brief (4-8 subtopics of your field, each with why it fits
      you and its landscape searches); you answer its questions (Enter skips one), may
      remove subtopics, and confirm;
   2. the landscape search: every search of the brief is run as recent work, surveys,
      highly cited work and newest preprints on OpenAlex and arXiv (no Claude calls;
-     responses cached 7 days); the papers found are stored.
-Reading and mining the landscape come with step 5.2.
+     responses cached 7 days); the papers found are stored;
+  3. reading the landscape: the relevance screener (a small model) scores every paper
+     against the subtopics, code picks about 45 to read (at least 5 per subtopic, surveys
+     first) and the Paper Reader reads them into the library.
+Mining the landscape for open problems comes with step 5.2b.
 
-This calls the paid Anthropic API (one Opus call for the brief, plus one if you answer
-questions; a few cents each) and the free OpenAlex and arXiv APIs.
-Exit code: 0 ok, 1 an Idea Analyst call failed, 2 invalid input or an unavailable database.
+This calls the paid Anthropic API (the brief: a few cents per call; screening the landscape:
+a few cents; reading: about 3 cents per paper not already in the library) and the free
+OpenAlex and arXiv APIs.
+Exit code: 0 ok, 1 a step failed, 2 invalid input or an unavailable database, 3 the budget
+is used up (resume with --continue and a higher --budget).
 """
 
 from __future__ import annotations
@@ -32,10 +37,10 @@ import uuid
 from collections.abc import Callable
 
 from src.ai.schemas.field_brief import FieldBriefOutput
-from src.ai.workflows.budget import set_cost_cap
+from src.ai.workflows.budget import budget_left, cost_cap, set_cost_cap
 from src.ai.workflows.clarification import NotWaitingForClarification, answers_for
 from src.ai.workflows.evaluation import Sessions
-from src.ai.workflows.landscape import LandscapeOutcome, landscape_step
+from src.ai.workflows.landscape import LandscapeOutcome, LandscapeReading, landscape_reading_step, landscape_step
 from src.ai.workflows.field import (
     apply_brief_answers,
     confirm_brief,
@@ -231,7 +236,45 @@ async def landscape(sessions: Sessions, investigation_id: uuid.UUID, *, search_f
     if outcome.failed:
         print("  Every search failed on every source: nothing could be looked at.")
         return 1
-    print("\nNext: reading the landscape and mining it for open problems comes with step 5.2.")
+    return 0
+
+
+# --- reading the landscape ------------------------------------------------------------------------------
+
+def format_reading(outcome: LandscapeReading) -> str:
+    scores = ", ".join(f"{score}: {count}" for score, count in outcome.score_counts.items())
+    lines = [f"  Screened {outcome.screened} papers (scores {scores})"
+             + (f" | not screened: {outcome.not_screened}" if outcome.not_screened else "")]
+    lines.append(f"  Chosen to read: {len(outcome.selected)} "
+                 f"({sum(1 for *_, survey in outcome.selected if survey)} surveys)")
+    per_subtopic: dict[str, int] = {}
+    for _, names, _ in outcome.selected:
+        for name in names:
+            per_subtopic[name] = per_subtopic.get(name, 0) + 1
+    lines.extend(f"    {count:>4}  {name}" for name, count in per_subtopic.items())
+    lines.append(f"  Read now: {outcome.read_now} | from the library: {outcome.reused} | failed: {outcome.failed}")
+    return "\n".join(lines)
+
+
+async def over_budget(sessions: Sessions, investigation_id: uuid.UUID, before: str) -> bool:
+    async with sessions() as session:
+        investigation = await session.get(Investigation, investigation_id)
+        if budget_left(investigation):
+            return False
+        print(f"\nBudget used up: ${investigation.cost_usd:.2f} of ${cost_cap(investigation)}. Stopped before "
+              f"{before}. Resume with: python -m scripts.discover --continue {investigation_id} --budget <more>")
+        return True
+
+
+async def read_landscape(sessions: Sessions, investigation_id: uuid.UUID, *, screen_model=None,
+                         read_model=None) -> int:
+    if await over_budget(sessions, investigation_id, "reading the landscape"):
+        return 3
+    print("\nReading the landscape: screening every paper, then reading the best ~45...")
+    outcome = await landscape_reading_step(sessions, investigation_id, screen_model=screen_model,
+                                           read_model=read_model)
+    print(format_reading(outcome))
+    print("\nNext: mining the landscape for open problems comes with step 5.2b.")
     return 0
 
 
@@ -240,7 +283,8 @@ async def continue_after_brief(sessions: Sessions, investigation_id: uuid.UUID, 
         stage = (await session.get(Investigation, investigation_id)).stage
     if code != 0 or stage != Stage.LANDSCAPE_RETRIEVAL:
         return code
-    return await landscape(sessions, investigation_id, search_for=search_for)
+    code = await landscape(sessions, investigation_id, search_for=search_for)
+    return code if code != 0 else await read_landscape(sessions, investigation_id)
 
 
 # --- main -----------------------------------------------------------------------------------------------
@@ -262,9 +306,12 @@ async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, 
         code = await clarify_brief(sessions, investigation_id, yes=yes)
         return await continue_after_brief(sessions, investigation_id, code)
     if investigation.stage == Stage.LANDSCAPE_RETRIEVAL:
-        return await landscape(sessions, investigation_id)
+        code = await landscape(sessions, investigation_id)
+        return code if code != 0 else await read_landscape(sessions, investigation_id)
     if investigation.stage == Stage.LANDSCAPE_READING:
-        print("The landscape is stored. Next: reading and mining it come with step 5.2.")
+        return await read_landscape(sessions, investigation_id)
+    if investigation.stage == Stage.OPPORTUNITY_MINING:
+        print("The landscape is read. Next: mining it for open problems comes with step 5.2b.")
         return 0
     raise InputError(f"Investigation {investigation_id} can't be continued from stage {investigation.stage}.")
 

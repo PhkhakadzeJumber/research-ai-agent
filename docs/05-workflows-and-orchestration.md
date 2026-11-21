@@ -207,7 +207,7 @@ Sections 2–5 explain the workflows in prose. This section defines them **exact
 | `understanding` | both | **A1** Idea Analyst | Mode 1: the idea's facets. Mode 2: the field brief. Plus ≤3 clarifying questions → Intake | running |
 | `awaiting_clarification` | both | **human** | The user confirms, edits or skips. Mode 1: Candidate v1 is created on confirmation | clarifying |
 | `landscape_retrieval` | 2 | code (C2, C3) | Landscape searches per subtopic + tier-3 signals | running |
-| `landscape_reading` | 2 | **A3** Paper Reader | Read ~40–50 landscape papers (cache reused) | running |
+| `landscape_reading` | 2 | relevance screener (small model) + code + **A3** Paper Reader | Score every landscape paper 0–3 against the subtopics; code picks ~45 (≥5 per subtopic, surveys first, then score and how often found; a paper's subtopics come from the searches that found it); read them (cache reused) | running |
 | `opportunity_mining` | 2 | code (miners) | Subtopics, limitation clusters, contradictions, combinations, dataset hints → OpportunityItems | running |
 | `generating_candidates` | both | **A2** Scout | One Scout task: *discover* (Mode 2 start), *alternatives* (Mode 1 after a reconsider), *replenish* (Mode 2, too few survivors, or user steering) | running |
 | `prescreening` | both | code + **A6** quick feasibility | Grounding check, dedup, hard-constraint filter, diversity → `screened_out` or `light_evaluating` | running |
