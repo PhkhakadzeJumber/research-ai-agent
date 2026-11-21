@@ -99,7 +99,43 @@ def author_groups(paper_ids, authors_by_paper: dict[uuid.UUID, list[str]]) -> in
     return len({root(paper) for paper in papers})
 
 
-def _statements(read: list[tuple[Paper, PaperAnalysis]], quotes: dict[uuid.UUID, Quote]) -> list[Statement]:
+@dataclass
+class ReadLandscape:
+    landscape: list[tuple[uuid.UUID, int | None, list[str]]]
+    """(paper id, year, subtopic names) of every landscape paper."""
+    read: list[tuple[Paper, PaperAnalysis]]
+    """The papers read in step 5.2a with their latest analysis; paper number n is read[n - 1]."""
+    quotes: dict[uuid.UUID, Quote]
+    """The quotes their future work and findings refer to."""
+
+
+async def load_read_landscape(session, investigation_id: uuid.UUID, brief) -> ReadLandscape:
+    subtopics_of = await subtopic_attribution(session, investigation_id, brief)
+    hits = (await session.execute(
+        select(RetrievalHit, Paper).join(Paper, Paper.id == RetrievalHit.paper_id)
+        .where(RetrievalHit.investigation_id == investigation_id, RetrievalHit.evaluation_id.is_(None))
+        .order_by(RetrievalHit.source_rank.nulls_last(), Paper.title)
+    )).all()
+    landscape = [(paper.id, paper.year, subtopics_of(hit)) for hit, paper in hits]
+    read: list[tuple[Paper, PaperAnalysis]] = []
+    for hit, paper in hits:
+        if not hit.selected_for_reading:
+            continue
+        analysis = (await session.execute(
+            select(PaperAnalysis).where(PaperAnalysis.paper_id == paper.id)
+            .order_by(PaperAnalysis.created_at.desc()).limit(1))).scalar_one_or_none()
+        if analysis is not None:
+            read.append((paper, analysis))
+    quote_ids = {uuid.UUID(item["quote"]["quote_id"])
+                 for _, analysis in read for name in ("future_work", "findings")
+                 for item in analysis.content.get(name, []) if (item.get("quote") or {}).get("quote_id")}
+    quotes = {quote.id: quote for quote in (await session.execute(
+        select(Quote).where(Quote.id.in_(quote_ids)))).scalars()} if quote_ids else {}
+    return ReadLandscape(landscape, read, quotes)
+
+
+def mining_statements(read: list[tuple[Paper, PaperAnalysis]], quotes: dict[uuid.UUID, Quote]) -> list[Statement]:
+    """The verified future-work statements and comparison findings, labelled M1, M2, ... in paper order."""
     statements = []
     for number, (paper, analysis) in enumerate(read, start=1):
         material = [("future_work", item, None, None) for item in analysis.content.get("future_work", [])]
@@ -167,30 +203,11 @@ async def mining_step(
         if investigation is None or investigation.stage != Stage.OPPORTUNITY_MINING:
             raise StaleState(f"Investigation {investigation_id} isn't at opportunity_mining.")
         brief = await confirmed_brief(session, investigation_id)
-        subtopics_of = await subtopic_attribution(session, investigation_id, brief)
-        hits = (await session.execute(
-            select(RetrievalHit, Paper).join(Paper, Paper.id == RetrievalHit.paper_id)
-            .where(RetrievalHit.investigation_id == investigation_id, RetrievalHit.evaluation_id.is_(None))
-            .order_by(RetrievalHit.source_rank.nulls_last(), Paper.title)
-        )).all()
-        landscape = [(paper.id, paper.year, subtopics_of(hit)) for hit, paper in hits]
-        read: list[tuple[Paper, PaperAnalysis]] = []
-        for hit, paper in hits:
-            if not hit.selected_for_reading:
-                continue
-            analysis = (await session.execute(
-                select(PaperAnalysis).where(PaperAnalysis.paper_id == paper.id)
-                .order_by(PaperAnalysis.created_at.desc()).limit(1))).scalar_one_or_none()
-            if analysis is not None:
-                read.append((paper, analysis))
-        quote_ids = {uuid.UUID(item["quote"]["quote_id"])
-                     for _, analysis in read for name in ("future_work", "findings")
-                     for item in analysis.content.get(name, []) if (item.get("quote") or {}).get("quote_id")}
-        quotes = {quote.id: quote for quote in (await session.execute(
-            select(Quote).where(Quote.id.in_(quote_ids)))).scalars()} if quote_ids else {}
+        loaded = await load_read_landscape(session, investigation_id, brief)
+    landscape, read, quotes = loaded.landscape, loaded.read, loaded.quotes
     authors = {paper.id: list(paper.authors or []) for paper, _ in read}
     outcome = MiningOutcome(papers=len(read))
-    statements = _statements(read, quotes)
+    statements = mining_statements(read, quotes)
     outcome.statements = len(statements)
     by_label = {statement.view.label: statement for statement in statements}
     records = []

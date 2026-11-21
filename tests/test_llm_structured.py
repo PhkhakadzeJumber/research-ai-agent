@@ -140,3 +140,11 @@ def test_role_overrides():
 def test_invalid_role_effort_is_rejected():
     with pytest.raises(ConfigError, match="EUREKA_LLM_EFFORT_PAPER_READER"):
         load_role_llm_settings("paper_reader", {**BASE, "EUREKA_LLM_EFFORT_PAPER_READER": "extreme"})
+
+
+def test_role_output_limits():
+    assert load_role_llm_settings("scout", BASE).max_tokens == 20000  # 8-12 candidates in one answer
+    assert load_role_llm_settings("scout", {**BASE, "EUREKA_LLM_MAX_TOKENS_SCOUT": "18000"}).max_tokens == 18000
+    assert load_role_llm_settings("novelty", {**BASE, "EUREKA_LLM_MAX_TOKENS": "12000"}).max_tokens == 12000
+    with pytest.raises(ConfigError, match="EUREKA_LLM_MAX_TOKENS_SCOUT"):
+        load_role_llm_settings("scout", {**BASE, "EUREKA_LLM_MAX_TOKENS_SCOUT": "lots"})

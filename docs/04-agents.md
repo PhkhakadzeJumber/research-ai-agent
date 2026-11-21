@@ -28,7 +28,7 @@ Model settings use Claude through ADK (doc 08). *Effort* is the model's reasonin
 
 **Purpose:** turn a user request into precise, searchable structure.
 
-**When:** first step of both workflows. Also normalizes each Scout candidate into facets before evaluation (light task).
+**When:** first step of both workflows. *(As built, step 5.3: the Scout writes each candidate's facets itself, in the same format and under the same rules, so the Normalize task below isn't used; it would cost one extra call per candidate.)*
 
 **Tasks and outputs:**
 
@@ -38,7 +38,7 @@ Model settings use Claude through ADK (doc 08). *Effort* is the model's reasonin
 | Field brief (Mode 2) | Field, interests, technologies, exclusions, domain, complexity, constraints | **FieldBrief:** 4–8 subtopics to explore, why each fits the user, landscape query plan, signal-source queries, ≤3 clarifying questions. *As built (step 5.1a): each subtopic has 2–3 keyword searches (≤6 words); code turns each into the landscape searches (recent, surveys, highly cited, newest); code checks the exclusions (one rewrite, then violating subtopics are removed at confirmation); questions carry their skip assumption; answers are applied by a revise call. Signal queries come with the signals service.* |
 | Query plan | StructuredIdea or candidate facets | **QueryPlan:** 10–20 queries of different kinds: synonyms and older terminology, facet-only, facet pairs, method-in-other-domain, plus date ranges |
 | Revise with answers | The user's request, A1's earlier StructuredIdea, the user's answers to its questions | The corrected StructuredIdea: answered facets marked as stated by the user, resolved assumptions and flags removed, no new questions. Called only if the user answered something |
-| Normalize candidate | A Scout candidate | Facets in the same format as StructuredIdea |
+| Normalize candidate | A Scout candidate | Facets in the same format as StructuredIdea. *Not used (step 5.3): the Scout writes the facets* |
 
 **Tools:** none. It is a single structured call.
 
@@ -143,6 +143,8 @@ Model settings use Claude through ADK (doc 08). *Effort* is the model's reasonin
 - Refinement actually addresses the reason (rubric).
 
 **Relation to other agents:** the Scout never assigns novelty, significance or feasibility verdicts. Its "fit" notes are hypotheses that A4, A5 and A6 check.
+
+*As built (step 5.3, task discover; `src/ai/agents/scout.py`, `src/ai/workflows/scouting.py`):* one structured call (effort `high`, up to 20k output tokens) with no tools yet. Its input is the field request plus the mined material: opportunity items (O1, ...), every verified future-work statement and comparison finding the miner saw (Q1, ..., with the quote) and the papers read (P1, ...). The CandidateSet schema enforces 8–12 candidates, the Mode 1 facet rules, ≥2 inspirations each, ≥3 origin strategies and distinct titles. Each candidate also states its fit (compute tier T0–T3, data source, weeks, a complexity note) and risks. Code maps labels to quotes and opportunity items (unknown labels are ignored), turns paper labels in its texts into titles, and stores each candidate as an ordinary Candidate v1 (origin `discover`) with its facets and CandidateInspiration rows. The grounding rule counts the distinct verified quotes among its inspirations: fewer than 2 means `screened_out`, with the reason stored. The tasks alternatives, refine and replenish come with step 5.5; the search and dataset tools may come later.
 
 ---
 

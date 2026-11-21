@@ -31,7 +31,7 @@ python -m scripts.read_papers --latest --top 5 [--details]  # Paper Reader on a 
 python -m scripts.evaluate "your idea" [--field NLP] [--complexity beginner] [--budget 5]  # Workflow A, end to end (about $3-5): paid API, ask first
 python -m scripts.evaluate --continue <investigation id> [--budget N]  # resume where it stopped
 python -m scripts.report <investigation id> [--out report.md]  # the full report from stored data: free
-python -m scripts.discover "NLP" [--interests ...] [--exclude ...] [--complexity beginner] [--count 3] [--budget 12]  # Workflow B (so far: field brief, clarification, landscape search, reading and mining): paid API, ask first
+python -m scripts.discover "NLP" [--interests ...] [--exclude ...] [--complexity beginner] [--count 3] [--budget 12]  # Workflow B (so far: field brief, clarification, landscape search, reading, mining and the Scout's candidates): paid API, ask first
 
 # Backend
 uvicorn src.api.main:app --reload            # (planned) API on http://127.0.0.1:8000

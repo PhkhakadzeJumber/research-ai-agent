@@ -64,6 +64,23 @@ class Facet(_Strict):
     )
 
 
+def check_facet_rules(facets, where: str = "facets") -> None:
+    """Every kind present, at most MAX_FACETS_PER_KIND per kind, at least one key facet, no duplicates.
+    Shared with the Scout's candidates (step 5.3). Raises ValueError."""
+    counts = Counter(facet.kind for facet in facets)
+    missing = [kind for kind in FACET_KINDS if not counts[kind]]
+    if missing:
+        raise ValueError(f"{where}: every kind is needed; missing {', '.join(missing)}")
+    too_many = [kind for kind, count in counts.items() if count > MAX_FACETS_PER_KIND]
+    if too_many:
+        raise ValueError(f"{where}: at most {MAX_FACETS_PER_KIND} per kind; too many {', '.join(too_many)}")
+    if not any(facet.is_key for facet in facets):
+        raise ValueError(f"{where}: mark at least one facet as key (is_key=true)")
+    texts = [facet.text.casefold() for facet in facets]
+    if len(set(texts)) != len(texts):
+        raise ValueError(f"{where}: each facet must be different")
+
+
 class ClarifyingQuestion(_Strict):
     question: Text = Field(description="One short question the user can answer in a sentence.")
     if_skipped: Text = Field(
@@ -112,18 +129,7 @@ class StructuredIdeaOutput(_Strict):
 
     @model_validator(mode="after")
     def _facet_rules(self) -> StructuredIdeaOutput:
-        counts = Counter(facet.kind for facet in self.facets)
-        missing = [kind for kind in FACET_KINDS if not counts[kind]]
-        if missing:
-            raise ValueError(f"facets: every kind is needed; missing {', '.join(missing)}")
-        too_many = [kind for kind, count in counts.items() if count > MAX_FACETS_PER_KIND]
-        if too_many:
-            raise ValueError(f"facets: at most {MAX_FACETS_PER_KIND} per kind; too many {', '.join(too_many)}")
-        if not any(facet.is_key for facet in self.facets):
-            raise ValueError("facets: mark at least one facet as key (is_key=true)")
-        texts = [facet.text.casefold() for facet in self.facets]
-        if len(set(texts)) != len(texts):
-            raise ValueError("facets: each facet must be different")
+        check_facet_rules(self.facets)
         return self
 
     def facets_of(self, kind: str) -> list[Facet]:

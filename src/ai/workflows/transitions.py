@@ -139,7 +139,7 @@ async def set_candidate_status(
     """Moves a candidate to status `to` if it's still in `expected_from` and the graph allows it.
 
     expected_from is required: parallel workers (Mode 2 evaluations) must never both move
-    one candidate (doc 10 §6.3). reason: the rejection reason, stored when `to` is rejected.
+    one candidate (doc 10 §6.3). reason: the rejection reason, stored when `to` is rejected or screened_out.
     Raises CandidateNotFound, IllegalTransition (StaleState included).
     """
     candidate = await lock_candidate(session, candidate_id)
@@ -149,7 +149,7 @@ async def set_candidate_status(
         raise StaleState(f"candidate {candidate_id} is {candidate.status}, not {expected_from}")
     target = check_candidate_status(candidate.status, to)
     candidate.status = target
-    if target == CandidateStatus.REJECTED:
+    if target in (CandidateStatus.REJECTED, CandidateStatus.SCREENED_OUT):
         candidate.rejection_reason = reason
     await session.flush()
     return candidate

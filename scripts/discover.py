@@ -8,7 +8,7 @@ Usage (from the repo root, venv active, database running, Anthropic key in .env)
     python -m scripts.discover --continue <investigation id>      resume where it stopped
     python -m scripts.discover "NLP" --yes                        skip the questions
 
-So far (steps 5.1a-5.2b):
+So far (steps 5.1a-5.3):
   1. the Idea Analyst's field brief (4-8 subtopics of your field, each with why it fits
      you and its landscape searches); you answer its questions (Enter skips one), may
      remove subtopics, and confirm;
@@ -20,12 +20,14 @@ So far (steps 5.1a-5.2b):
      first) and the Paper Reader reads them into the library;
   4. mining: recurring open problems (future work and negative or mixed findings, grouped
      by a small model, kept by code only if 3+ papers from 2+ author groups), confirmed
-     contradictions, subtopic summaries and datasets, stored for the Scout.
-Generating candidate ideas comes with step 5.3.
+     contradictions, subtopic summaries and datasets, stored for the Scout;
+  5. the Scout proposes 8-12 candidate ideas from that material; code keeps an idea only if
+     it is grounded in at least 2 verified quotes (others are screened out, with the reason).
+Pre-screening and evaluating the candidates come with step 5.4.
 
 This calls the paid Anthropic API (the brief: a few cents per call; screening the landscape:
 a few cents; reading: about 3 cents per paper not already in the library; mining: a few
-cents) and the free
+cents; the Scout: one call, roughly 20-40 cents) and the free
 OpenAlex and arXiv APIs.
 Exit code: 0 ok, 1 a step failed, 2 invalid input or an unavailable database, 3 the budget
 is used up (resume with --continue and a higher --budget).
@@ -46,6 +48,7 @@ from src.ai.workflows.clarification import NotWaitingForClarification, answers_f
 from src.ai.workflows.evaluation import Sessions
 from src.ai.workflows.landscape import LandscapeOutcome, LandscapeReading, landscape_reading_step, landscape_step
 from src.ai.workflows.mining import MiningOutcome, mining_step
+from src.ai.workflows.scouting import NothingToGround, ScoutingOutcome, scouting_step
 from src.ai.workflows.field import (
     apply_brief_answers,
     confirm_brief,
@@ -273,14 +276,14 @@ async def over_budget(sessions: Sessions, investigation_id: uuid.UUID, before: s
 
 
 async def read_landscape(sessions: Sessions, investigation_id: uuid.UUID, *, screen_model=None,
-                         read_model=None, mine_model=None) -> int:
+                         read_model=None, mine_model=None, scout_model=None) -> int:
     if await over_budget(sessions, investigation_id, "reading the landscape"):
         return 3
     print("\nReading the landscape: screening every paper, then reading the best ~45...")
     outcome = await landscape_reading_step(sessions, investigation_id, screen_model=screen_model,
                                            read_model=read_model)
     print(format_reading(outcome))
-    return await mine(sessions, investigation_id, model=mine_model)
+    return await mine(sessions, investigation_id, model=mine_model, scout_model=scout_model)
 
 
 # --- mining the landscape -------------------------------------------------------------------------------
@@ -303,7 +306,7 @@ def format_mining(outcome: MiningOutcome) -> str:
     return "\n".join(lines)
 
 
-async def mine(sessions: Sessions, investigation_id: uuid.UUID, *, model=None) -> int:
+async def mine(sessions: Sessions, investigation_id: uuid.UUID, *, model=None, scout_model=None) -> int:
     if await over_budget(sessions, investigation_id, "mining the landscape"):
         return 3
     print("\nMining the landscape: recurring problems, contradictions, subtopics, datasets...")
@@ -313,7 +316,40 @@ async def mine(sessions: Sessions, investigation_id: uuid.UUID, *, model=None) -
         print(f"  The opportunity miner failed: {error}. Nothing was stored; run --continue to try again.")
         return 1
     print(format_mining(outcome))
-    print("\nNext: generating candidate ideas from this material comes with step 5.3.")
+    return await scout(sessions, investigation_id, model=scout_model)
+
+
+# --- generating candidates ------------------------------------------------------------------------------
+
+def format_scouting(outcome: ScoutingOutcome) -> str:
+    screened = {candidate.id for candidate in outcome.screened_out}
+    lines = [f"  From {outcome.items} mined items and {outcome.statements} statements: "
+             f"{len(outcome.candidates)} candidates, {len(outcome.candidates) - len(screened)} grounded"
+             + (f" | unknown labels ignored: {outcome.unknown_labels}" if outcome.unknown_labels else "")]
+    for n, candidate in enumerate(outcome.candidates, start=1):
+        notes = candidate.scout_notes or {}
+        lines.append(f"\n  {n}. {candidate.title}  [{candidate.origin_strategy}; {notes.get('compute_tier')}, "
+                     f"~{notes.get('timeline_weeks')} weeks]")
+        lines.append(f"     RQ: {candidate.research_question}")
+        if candidate.id in screened:
+            lines.append(f"     SCREENED OUT: {candidate.rejection_reason}")
+    return "\n".join(lines)
+
+
+async def scout(sessions: Sessions, investigation_id: uuid.UUID, *, model=None) -> int:
+    if await over_budget(sessions, investigation_id, "generating candidates"):
+        return 3
+    print("\nGenerating candidate ideas (the Scout, one call)...")
+    try:
+        outcome = await scouting_step(sessions, investigation_id, model=model)
+    except NothingToGround as error:
+        print(f"  {error} Nothing was generated.")
+        return 1
+    except LlmError as error:
+        print(f"  The Scout failed: {error}. Nothing was stored; run --continue to try again.")
+        return 1
+    print(format_scouting(outcome))
+    print("\nNext: pre-screening and evaluating the candidates comes with step 5.4.")
     return 0
 
 
@@ -352,7 +388,9 @@ async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, 
     if investigation.stage == Stage.OPPORTUNITY_MINING:
         return await mine(sessions, investigation_id)
     if investigation.stage == Stage.GENERATING_CANDIDATES:
-        print("The landscape is mined. Next: generating candidate ideas comes with step 5.3.")
+        return await scout(sessions, investigation_id)
+    if investigation.stage == Stage.PRESCREENING:
+        print("The candidates are generated. Next: pre-screening and evaluating them comes with step 5.4.")
         return 0
     raise InputError(f"Investigation {investigation_id} can't be continued from stage {investigation.stage}.")
 

@@ -463,6 +463,8 @@ What each type contains:
 
 *"Signal-only" is not stored.* It's derived: a candidate is signal-only when none of its inspirations resolves to a verified tier-1/2 quote. Storing it could let it drift out of sync.
 
+*As built (step 5.3, migration 0014):* the Scout's fields are nullable columns on `candidates` (`origin_strategy`, `hypothesis`, `motivation`, `potential_contribution`, `change_note`), with complexity fit and constraint notes in one JSON column `scout_notes` (compute tier, data source, weeks, complexity note, risks). A Mode 1 user idea leaves them empty. A screened-out candidate also stores its reason in `rejection_reason`.
+
 ### 6.4 CandidateInspiration
 
 **What it is:** one link from a candidate to something that inspired it: **exactly one** of a quote, an opportunity item, or a signal.
@@ -473,6 +475,8 @@ What each type contains:
 - It powers "inspired by" in the UI.
 
 A Mode 1 user idea has no inspirations; it is the user's own.
+
+*As built (step 5.3, table `candidate_inspirations`):* `kind` is `quote` or `opportunity_item` for now. The `signal` link and its column come with the signals service. A check enforces that exactly the link matching `kind` is set.
 
 *(New in version 2. Earlier versions only mentioned "inspiration links" inside the motivation field.)*
 

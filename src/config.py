@@ -245,6 +245,14 @@ ROLE_DEFAULT_EFFORT = {
 }
 
 
+# Default output token limit per role, where EUREKA_LLM_MAX_TOKENS is too small. The Scout writes
+# 8-12 candidates with facets in one answer. Calls aren't streamed, and the Anthropic SDK refuses
+# non-streaming calls above about 21k output tokens, so 20k is the ceiling here.
+ROLE_DEFAULT_MAX_TOKENS = {
+    "scout": 20000,
+}
+
+
 @dataclass(frozen=True)
 class RoleLlmSettings:
     role: str
@@ -258,7 +266,8 @@ def load_role_llm_settings(role: str, environ: Mapping[str, str]) -> RoleLlmSett
 
     Defaults: EUREKA_LLM_MODEL, the role's default effort (ROLE_DEFAULT_EFFORT, else
     EUREKA_LLM_EFFORT) and EUREKA_LLM_MAX_TOKENS. Per-role overrides, e.g. a cheaper
-    Paper Reader: EUREKA_LLM_MODEL_PAPER_READER, EUREKA_LLM_EFFORT_PAPER_READER.
+    Paper Reader: EUREKA_LLM_MODEL_PAPER_READER, EUREKA_LLM_EFFORT_PAPER_READER. The output limit:
+    EUREKA_LLM_MAX_TOKENS_<ROLE>, else ROLE_DEFAULT_MAX_TOKENS, else EUREKA_LLM_MAX_TOKENS.
     """
     base = load_settings(environ)
     suffix = role.upper()
@@ -266,7 +275,14 @@ def load_role_llm_settings(role: str, environ: Mapping[str, str]) -> RoleLlmSett
     effort = environ.get(f"EUREKA_LLM_EFFORT_{suffix}", "").strip() or ROLE_DEFAULT_EFFORT.get(role, base.llm_effort)
     if effort not in EFFORT_LEVELS:
         raise ConfigError(f"EUREKA_LLM_EFFORT_{suffix} must be one of {', '.join(EFFORT_LEVELS)}, got {effort!r}.")
-    return RoleLlmSettings(role=role, model=model, effort=effort, max_tokens=base.llm_max_tokens)
+    raw_max = environ.get(f"EUREKA_LLM_MAX_TOKENS_{suffix}", "").strip()
+    if raw_max:
+        if not raw_max.isdigit() or int(raw_max) <= 0:
+            raise ConfigError(f"EUREKA_LLM_MAX_TOKENS_{suffix} must be a whole number above 0, got {raw_max!r}.")
+        max_tokens = int(raw_max)
+    else:
+        max_tokens = ROLE_DEFAULT_MAX_TOKENS.get(role, base.llm_max_tokens)
+    return RoleLlmSettings(role=role, model=model, effort=effort, max_tokens=max_tokens)
 
 
 def get_role_llm_settings(role: str) -> RoleLlmSettings:

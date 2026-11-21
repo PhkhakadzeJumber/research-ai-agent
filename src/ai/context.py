@@ -32,7 +32,7 @@ ABSTRACT_ONLY_NOTE = (
 )
 FULL_TEXT_NOTE = "Passages from the full text are included as chunks, each with its ID and section."
 
-_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints|field_brief|subtopic|items|item|pairs|pair|finding|setting|statement|quote)\b",
+_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints|field_brief|subtopic|items|item|pairs|pair|finding|setting|statement|statements|quote|material)\b",
                    re.IGNORECASE)
 _QUOTE_IN_ATTRIBUTE = re.compile(r'["<>]')
 
@@ -680,4 +680,67 @@ def render_contradiction_pairs(pairs: tuple[tuple[str, StatementForMining, State
                            f"{_statement_body(item)}</finding>" for item in (first, second))
         lines.append(f'<pair label="{_attribute(label)}">{findings}</pair>')
     lines.append("</pairs>")
+    return "\n".join(lines)
+
+
+# --- the Scout's packet (Mode 2, task discover, step 5.3) --------------------------------------------------
+#
+#     <field_request>...</field_request>                     (as for the field brief)
+#     <material>
+#     <item label="O1" type="limitation_cluster" papers="5" author_groups="5" statements="Q1 Q4">label</item>
+#     <item label="O8" type="subtopic" found="99" read="17" per_year="2024: 30, 2025: 41">name: why</item>
+#     <item label="O20" type="dataset" papers="P3 P7">XNLI (tasks: ...)</item>
+#     </material>
+#     <statements>
+#     <statement label="Q1" paper="P3" kind="finding" direction="negative">what it says<quote>...</quote></statement>
+#     </statements>
+#     <papers><paper label="P3" year="2026">title</paper></papers>
+
+
+@dataclass(frozen=True)
+class ItemForScout:
+    label: str
+    type: str
+    text: str
+    attributes: tuple[tuple[str, str], ...] = ()  # shown as XML attributes, in order
+
+
+@dataclass(frozen=True)
+class StatementForScout:
+    label: str
+    paper_label: str
+    kind: str  # future_work | finding
+    statement: str
+    quote: str
+    direction: str | None = None
+
+
+@dataclass(frozen=True)
+class PaperForScout:
+    label: str
+    title: str
+    year: int | None
+
+
+def render_scout_discover(request: FieldRequest, items: tuple[ItemForScout, ...],
+                          statements: tuple[StatementForScout, ...], papers: tuple[PaperForScout, ...]) -> str:
+    """The Scout's input for the discover task. Raises ValueError without statements to ground ideas in."""
+    if not statements:
+        raise ValueError("The Scout needs verified statements to ground its ideas in.")
+    lines = [render_field_request(request), "<material>"]
+    for item in items:
+        attributes = "".join(f' {name}="{_attribute(value)}"' for name, value in item.attributes)
+        lines.append(f'<item label="{_attribute(item.label)}" type="{_attribute(item.type)}"{attributes}>'
+                     f"{_contain(item.text)}</item>")
+    lines += ["</material>", "<statements>"]
+    for s in statements:
+        direction = f' direction="{_attribute(s.direction)}"' if s.direction else ""
+        lines.append(f'<statement label="{_attribute(s.label)}" paper="{_attribute(s.paper_label)}" '
+                     f'kind="{_attribute(s.kind)}"{direction}>{_contain(s.statement)}'
+                     f"<quote>{_contain(s.quote)}</quote></statement>")
+    lines += ["</statements>", "<papers>"]
+    for paper in papers:
+        year = f' year="{paper.year}"' if paper.year else ""
+        lines.append(f'<paper label="{_attribute(paper.label)}"{year}>{_contain(paper.title)}</paper>')
+    lines.append("</papers>")
     return "\n".join(lines)

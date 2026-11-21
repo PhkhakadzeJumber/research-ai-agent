@@ -216,9 +216,12 @@ async def test_a_failed_call_stores_nothing(db_session, capsys):
 async def test_the_command_shows_what_was_mined(db_session, capsys):
     investigation = await read_landscape(db_session, {"Judges fail in Georgian": ["A"], "Judge drift in Swahili": ["B"],
                                                       "Judges and Finnish": ["C"]})
-    assert await mine(sessions_on(db_session), investigation.id, model=KeywordMiner()) == 0
+    from tests.db.test_scouting import FakeScout, eight  # imported here: test_scouting imports this module
+
+    assert await mine(sessions_on(db_session), investigation.id, model=KeywordMiner(),
+                      scout_model=FakeScout.proposing(eight)) == 0
     output = capsys.readouterr().out
     assert "6 verified statements from 7 papers -> 2 groups" in output
     assert "Recurring open problems: 1" in output and " 3 papers, 3 author groups  judges problem" in output
     assert "Contradictions: 1 of 2 suspected pairs" in output and "Datasets named: 1" in output
-    assert "step 5.3" in output
+    assert "Generating candidate ideas" in output  # mining goes on to the Scout (5.3, test_scouting)

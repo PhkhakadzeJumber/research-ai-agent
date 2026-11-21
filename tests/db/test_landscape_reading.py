@@ -183,7 +183,8 @@ async def test_the_command_reads_and_stops_when_the_budget_is_used_up(db_session
                                 screen_model=TitleScreener.scoring(SCORES), read_model=SameReader(),
                                 mine_model=SameReader())  # nothing to mine: no Claude call is made
     output = capsys.readouterr().out
-    assert code == 0
     assert "Screened 5 papers" in output and "Chosen to read: 3 (1 surveys)" in output
     assert "Read now: 3" in output and "Mining the landscape" in output  # reading goes on to mining (5.2b)
+    # SameReader extracts no statements, so the run stops before the Scout (5.3) with nothing to ground ideas in
+    assert code == 1 and "Nothing was generated" in output
     assert (await db_session.get(Investigation, investigation.id)).stage == "generating_candidates"
