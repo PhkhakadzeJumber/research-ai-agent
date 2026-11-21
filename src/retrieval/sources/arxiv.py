@@ -114,7 +114,8 @@ def build_params(request: SearchRequest) -> dict[str, str | int]:
         "search_query": build_search_query(request),
         "start": 0,
         "max_results": request.limit,
-        "sortBy": "relevance",
+        # arXiv can sort by submission date but has no citation counts: citations -> relevance.
+        "sortBy": "submittedDate" if request.sort == "newest" else "relevance",
         "sortOrder": "descending",
     }
 

@@ -8,12 +8,17 @@ Usage (from the repo root, venv active, database running, Anthropic key in .env)
     python -m scripts.discover --continue <investigation id>      resume where it stopped
     python -m scripts.discover "NLP" --yes                        skip the questions
 
-So far (step 5.1a): the Idea Analyst's field brief (4-8 subtopics of your field, each
-with why it fits you and its landscape searches); you answer its questions (Enter skips
-one), may remove subtopics, and confirm. The landscape search comes with step 5.1b.
+So far (steps 5.1a-5.1b):
+  1. the Idea Analyst's field brief (4-8 subtopics of your field, each with why it fits
+     you and its landscape searches); you answer its questions (Enter skips one), may
+     remove subtopics, and confirm;
+  2. the landscape search: every search of the brief is run as recent work, surveys,
+     highly cited work and newest preprints on OpenAlex and arXiv (no Claude calls;
+     responses cached 7 days); the papers found are stored.
+Reading and mining the landscape come with step 5.2.
 
 This calls the paid Anthropic API (one Opus call for the brief, plus one if you answer
-questions; a few cents each).
+questions; a few cents each) and the free OpenAlex and arXiv APIs.
 Exit code: 0 ok, 1 an Idea Analyst call failed, 2 invalid input or an unavailable database.
 """
 
@@ -30,6 +35,7 @@ from src.ai.schemas.field_brief import FieldBriefOutput
 from src.ai.workflows.budget import set_cost_cap
 from src.ai.workflows.clarification import NotWaitingForClarification, answers_for
 from src.ai.workflows.evaluation import Sessions
+from src.ai.workflows.landscape import LandscapeOutcome, landscape_step
 from src.ai.workflows.field import (
     apply_brief_answers,
     confirm_brief,
@@ -41,7 +47,11 @@ from src.ai.workflows.states import Stage
 from src.config import ConfigError
 from src.db.models import Investigation
 from src.db.models.run import COMPLEXITY_LEVELS
+from src.db.repositories.cache import DbResponseCache
 from src.db.repositories.runs import create_investigation
+from src.retrieval.search import LiteratureSearch
+from src.retrieval.sources.arxiv import ArxivSource
+from src.retrieval.sources.openalex import OpenAlexSource
 from src.db.session import Database
 
 DEFAULT_BUDGET_USD = 12.0  # doc 05 §6, Mode 2
@@ -182,8 +192,55 @@ async def clarify_brief(sessions: Sessions, investigation_id: uuid.UUID, *, yes:
                 print("\n" + format_brief(brief, questions=False))
     final = await confirm_brief(sessions, investigation_id, final=brief, answers=answers, removed=removed)
     print(f"\nConfirmed: {len(final.subtopics)} subtopics to explore.")
-    print("Next: the landscape search comes with step 5.1b.")
     return 0
+
+
+# --- the landscape search -------------------------------------------------------------------------------
+
+def format_landscape(outcome: LandscapeOutcome) -> str:
+    kinds = ", ".join(f"{kind} {count}" for kind, count in outcome.by_kind.items())
+    lines = [f"  {outcome.searches} searches -> {outcome.retrieved} results ({kinds}) -> "
+             f"{outcome.unique_papers} unique papers"
+             + (f" | failed source searches: {outcome.failed_source_searches}" if outcome.failed_source_searches else "")]
+    lines.append("  Papers per subtopic:")
+    lines.extend(f"    {count:>4}  {name}" for name, count in outcome.by_subtopic.items())
+    if outcome.most_cited:
+        lines.append("  Most cited in the landscape:")
+        lines.extend(f"    {paper.citation_count or 0:>6} cites  {paper.title[:80]} ({paper.year or 'n.d.'})"
+                     for paper in outcome.most_cited)
+    return "\n".join(lines)
+
+
+async def landscape(sessions: Sessions, investigation_id: uuid.UUID, *, search_for=None) -> int:
+    print("\nSearching the landscape: recent work, surveys, highly cited, newest preprints...")
+    if search_for is not None:
+        outcome = await landscape_step(sessions, investigation_id, search_for)
+    else:
+        # One client per source, shared by every combination: two arXiv clients each kept their own
+        # 3-second spacing and together got rate-limited (step 5.1b live run: 16 of 34 failed).
+        cache = DbResponseCache(sessions)
+        openalex, arxiv = OpenAlexSource.from_settings(cache=cache), ArxivSource(cache=cache)
+        searches = {("openalex", "arxiv"): LiteratureSearch([openalex, arxiv]),
+                    ("openalex",): LiteratureSearch([openalex]), ("arxiv",): LiteratureSearch([arxiv])}
+        try:
+            outcome = await landscape_step(sessions, investigation_id, lambda sources: searches[tuple(sources)])
+        finally:
+            await openalex.aclose()
+            await arxiv.aclose()
+    print(format_landscape(outcome))
+    if outcome.failed:
+        print("  Every search failed on every source: nothing could be looked at.")
+        return 1
+    print("\nNext: reading the landscape and mining it for open problems comes with step 5.2.")
+    return 0
+
+
+async def continue_after_brief(sessions: Sessions, investigation_id: uuid.UUID, code: int, *, search_for=None) -> int:
+    async with sessions() as session:
+        stage = (await session.get(Investigation, investigation_id)).stage
+    if code != 0 or stage != Stage.LANDSCAPE_RETRIEVAL:
+        return code
+    return await landscape(sessions, investigation_id, search_for=search_for)
 
 
 # --- main -----------------------------------------------------------------------------------------------
@@ -202,9 +259,12 @@ async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, 
         except NotWaitingForClarification as error:
             raise InputError(str(error)) from None
         print("\n" + format_brief(pending.brief))
-        return await clarify_brief(sessions, investigation_id, yes=yes)
+        code = await clarify_brief(sessions, investigation_id, yes=yes)
+        return await continue_after_brief(sessions, investigation_id, code)
     if investigation.stage == Stage.LANDSCAPE_RETRIEVAL:
-        print("The brief is confirmed. Next: the landscape search comes with step 5.1b.")
+        return await landscape(sessions, investigation_id)
+    if investigation.stage == Stage.LANDSCAPE_READING:
+        print("The landscape is stored. Next: reading and mining it come with step 5.2.")
         return 0
     raise InputError(f"Investigation {investigation_id} can't be continued from stage {investigation.stage}.")
 
@@ -237,7 +297,8 @@ async def run(args: argparse.Namespace) -> int:
         if outcome.problems:
             print("\nNote: some subtopics touch your exclusions; they are removed when you confirm:")
             print("\n".join(f"  - {problem}" for problem in outcome.problems))
-        return await clarify_brief(database.session, investigation_id, yes=args.yes)
+        code = await clarify_brief(database.session, investigation_id, yes=args.yes)
+        return await continue_after_brief(database.session, investigation_id, code)
     finally:
         await database.dispose()
 

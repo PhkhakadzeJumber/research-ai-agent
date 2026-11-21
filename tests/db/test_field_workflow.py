@@ -136,7 +136,7 @@ async def test_skip_remove_and_confirm(db_session, capsys):
                                ask=keyboard("", "r", "2", "y"), model=ScriptedLlm())
     assert code == 0
     output = capsys.readouterr().out
-    assert "Confirmed: 3 subtopics to explore." in output and "comes with step 5.1b" in output
+    assert "Confirmed: 3 subtopics to explore." in output
     intake = await find_intake(db_session, investigation.id)
     assert intake.user_edits["removed_subtopics"] == ["multilingual tool use"]
 

@@ -148,3 +148,16 @@ def test_rebuild_abstract():
     assert rebuild_abstract({"world": [1], "Hello": [0], "again": [3], "hello": [2]}) == "Hello world hello again"
     assert rebuild_abstract({}) is None
     assert rebuild_abstract(None) is None
+
+
+@pytest.mark.parametrize(("sort", "expected"), [("citations", "cited_by_count:desc"),
+                                                ("newest", "publication_date:desc"), ("relevance", None)])
+def test_sort_order_sent_to_openalex(sort, expected):
+    assert build_params(SearchRequest(query="x", sort=sort)).get("sort") == expected
+
+
+
+def test_min_citations_filter_is_combined_with_years():
+    params = build_params(SearchRequest(query="x", year_from=2022, min_citations=50))
+    assert params["filter"] == "publication_year:>2021,cited_by_count:>49"
+    assert "filter" not in build_params(SearchRequest(query="x"))

@@ -122,6 +122,10 @@ def parse_work(work: Mapping[str, Any]) -> PaperRecord | None:
         return None
 
 
+# Without a sort parameter, a search is ordered by relevance (OpenAlex's default).
+OPENALEX_SORT = {"citations": "cited_by_count:desc", "newest": "publication_date:desc"}
+
+
 def build_params(
     request: SearchRequest, *, api_key: str | None = None, mailto: str | None = None
 ) -> dict[str, Any]:
@@ -131,12 +135,19 @@ def build_params(
         "per-page": min(request.limit, MAX_PER_PAGE),
         "select": SELECT_FIELDS,
     }
+    filters = []
     if request.year_from is not None and request.year_to is not None:
-        params["filter"] = f"publication_year:{request.year_from}-{request.year_to}"
+        filters.append(f"publication_year:{request.year_from}-{request.year_to}")
     elif request.year_from is not None:
-        params["filter"] = f"publication_year:>{request.year_from - 1}"
+        filters.append(f"publication_year:>{request.year_from - 1}")
     elif request.year_to is not None:
-        params["filter"] = f"publication_year:<{request.year_to + 1}"
+        filters.append(f"publication_year:<{request.year_to + 1}")
+    if request.min_citations:
+        filters.append(f"cited_by_count:>{request.min_citations - 1}")
+    if filters:
+        params["filter"] = ",".join(filters)
+    if request.sort in OPENALEX_SORT:
+        params["sort"] = OPENALEX_SORT[request.sort]
     if api_key:
         params["api_key"] = api_key
     if mailto:

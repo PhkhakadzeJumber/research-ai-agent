@@ -209,3 +209,12 @@ def test_no_retry_when_results_were_found_or_the_query_is_short():
     assert len(sent) == 1
     papers, sent = search_sequence(SearchRequest(query="rag georgian"), EMPTY_FEED)
     assert papers == [] and len(sent) == 1
+
+
+
+@pytest.mark.parametrize(("sort", "expected"), [("newest", "submittedDate"), ("citations", "relevance"),
+                                                ("relevance", "relevance")])
+def test_sort_order_sent_to_arxiv(sort, expected):
+    from src.retrieval.sources.arxiv import build_params
+
+    assert build_params(SearchRequest(query="rag", sort=sort))["sortBy"] == expected

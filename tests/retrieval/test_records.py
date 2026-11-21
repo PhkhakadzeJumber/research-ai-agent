@@ -184,3 +184,11 @@ def test_search_result_counts_duplicates_and_detects_total_failure():
     assert SearchResult(request=request).all_failed is False  # no sources asked: nothing failed
     with pytest.raises(ValueError, match="retrieved_count"):
         SearchResult(request=request, papers=(make_paper(),), retrieved_count=0)
+
+
+
+def test_search_requests_sort_by_relevance_unless_told_otherwise():
+    assert SearchRequest(query="x").sort == "relevance"
+    assert SearchRequest(query="x", sort="citations").sort == "citations"
+    with pytest.raises(ValueError, match="sort must be one of"):
+        SearchRequest(query="x", sort="popularity")

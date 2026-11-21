@@ -133,6 +133,8 @@ Mode 2 needs a picture of the field, not just a target. The landscape stage runs
 - **Latest preprints:** the last few months from arXiv, for emerging directions.
 - **Trend counts:** OpenAlex per-year counts for subtopic queries. A rising count means emerging; a flat or high count means mature. Shown in the landscape map; never a verdict input.
 
+*As built (step 5.1b, `src/ai/workflows/landscape.py`):* every search of the confirmed field brief runs four ways, decided by code: **recent** (last 3 years, relevance; OpenAlex + arXiv), **survey** (the query + "survey", last 5 years; OpenAlex), **cited** (last 5 years, at least 50 citations, by relevance; OpenAlex. Sorting a loose keyword match by citations let famous off-topic papers in, e.g. an image-generation paper for "low-resource language evaluator bias") and **newest** (newest first; arXiv). Searches carry a `sort` option (relevance / citations / newest) and a `min_citations` filter; arXiv has no citation counts, so it falls back to relevance and ignores the filter. All landscape searches share one client per source, so arXiv's rate limit is respected across them. Results are stored as the landscape scope (origin `landscape`, the kind as query type, hits outside any evaluation). Trend counts come with the landscape map.
+
 Then **opportunity mining** runs over the Paper Reader outputs (code with embeddings):
 
 | Miner | How it works | Output |

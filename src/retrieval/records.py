@@ -178,6 +178,9 @@ class PaperRecord:
         return self.authors[0] if self.authors else None
 
 
+SORTS = ("relevance", "citations", "newest")
+
+
 @dataclass(frozen=True)
 class SearchRequest:
     """What to search for. One request is sent to every source."""
@@ -187,6 +190,11 @@ class SearchRequest:
     year_to: int | None = None
     limit: int = 25
     """Maximum results per source."""
+    sort: str = "relevance"
+    """relevance / citations (most cited first) / newest (most recent first). A source that can't
+    sort by citations (arXiv has no citation counts) falls back to relevance (step 5.1b)."""
+    min_citations: int | None = None
+    """Only papers cited at least this often. Sources without citation counts (arXiv) ignore it."""
 
     def __post_init__(self) -> None:
         query = collapse_whitespace(self.query or "")
@@ -200,6 +208,10 @@ class SearchRequest:
             raise ValueError(f"limit must be between 1 and {MAX_LIMIT}.")
         if self.year_from is not None and self.year_to is not None and self.year_from > self.year_to:
             raise ValueError("year_from can't be after year_to.")
+        if self.sort not in SORTS:
+            raise ValueError(f"sort must be one of {', '.join(SORTS)}.")
+        if self.min_citations is not None and self.min_citations < 0:
+            raise ValueError("min_citations can't be negative.")
 
 
 @dataclass(frozen=True)
