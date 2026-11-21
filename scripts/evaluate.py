@@ -60,6 +60,7 @@ import logging
 import sys
 import uuid
 from collections.abc import Callable
+from pathlib import Path
 
 from src.ai.schemas.structured_idea import StructuredIdeaOutput
 from src.ai.workflows.budget import DEFAULT_COST_CAP_USD, cost_cap, set_cost_cap
@@ -83,6 +84,8 @@ from src.ai.workflows.runner import EvaluationModels, run_evaluation
 from scripts.candidate_loop import LoopModels, continue_at
 from src.ai.workflows.states import EvaluationStep, Stage
 from src.ai.workflows.understanding import understand_idea
+from src.ai.workflows.user_document import DocumentError, attach_document, prepare_document, understand_document
+from src.timeutil import now
 from src.config import ConfigError
 from src.db.models import Evaluation, Facet, Investigation
 from src.db.repositories.candidates import investigation_candidates
@@ -107,10 +110,21 @@ def parse_constraint(text: str) -> tuple[str, str]:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="python -m scripts.evaluate", description="Evaluate a research idea.")
-    which = parser.add_mutually_exclusive_group(required=True)
-    which.add_argument("idea", nargs="?", help=f"the idea in your own words (up to {MAX_IDEA_CHARS} characters)")
+    which = parser.add_mutually_exclusive_group()
+    which.add_argument("idea", nargs="?", help=f"the idea in your own words (up to {MAX_IDEA_CHARS} characters); "
+                                               "optional with --idea-file")
     which.add_argument("--continue", dest="continue_id", type=uuid.UUID, metavar="INVESTIGATION",
                        help="resume an investigation waiting for clarification")
+    parser.add_argument("--idea-file", type=Path, metavar="FILE",
+                        help="your own draft, proposal or paper to evaluate (.md or .txt, up to about 15-20 pages); "
+                             "it is sent to Claude to be read, and stays private to this investigation")
+    parser.add_argument("--consent", action="store_true",
+                        help="agree to send --idea-file to Claude (needed with --yes; otherwise you are asked)")
+    parser.add_argument("--published", action="store_true",
+                        help="the document is already published or on arXiv (your own paper is then never counted "
+                             "as prior work against you)")
+    parser.add_argument("--doi", help="the published document's DOI")
+    parser.add_argument("--arxiv", help="the published document's arXiv ID")
     parser.add_argument("--field", help="field or subfield, e.g. NLP (inferred if missing)")
     parser.add_argument("--complexity", choices=COMPLEXITY_LEVELS, default="intermediate",
                         help="desired ambition (default: intermediate)")
@@ -137,9 +151,9 @@ def check_max_read(args: argparse.Namespace) -> None:
 
 
 def investigation_input(args: argparse.Namespace) -> dict:
-    idea = args.idea.strip()
-    if not idea:
-        raise InputError("The idea is empty.")
+    idea = (args.idea or "").strip()
+    if not idea and not args.idea_file:
+        raise InputError("The idea is empty: give it as text, or your document with --idea-file.")
     if len(idea) > MAX_IDEA_CHARS:
         raise InputError(f"The idea is {len(idea)} characters; the limit is {MAX_IDEA_CHARS}.")
     data = {"idea": idea}
@@ -612,9 +626,44 @@ def format_verdict(verdict, coverage, *, final: bool = False) -> str:
 
 # --- main -----------------------------------------------------------------------------------------------
 
+def document_consent(args: argparse.Namespace, ask: Ask = input):
+    """When the user agreed to send the document to Claude (now), or None."""
+    if args.consent:
+        return now()
+    if args.yes:
+        raise InputError("--yes needs --consent with --idea-file: the document is only sent to Claude if you agree.")
+    reply = _ask(ask, f"\n{args.idea_file.name} will be sent to Claude (Anthropic) to be read; it stays private to this "
+                      "investigation and is never sent to the paper search services. Continue? [y/N] ")
+    return now() if (reply or "").strip().lower() in ("y", "yes") else None
+
+
+def format_document_reading(outcome) -> str:
+    verified, total = outcome.reader_quotes
+    lines = [f"Your document was read: {verified} of {total} quotes checked against your text."]
+    if outcome.facet_sources:
+        lines.append("Where the facets come from: " + "; ".join(
+            f"{section}: {text[:60]}" for text, section in outcome.facet_sources.items()))
+    if outcome.novelty_claims:
+        lines.append("Your document's novelty claims (the evaluation will check them):")
+        lines.extend(f"  - ({c['section']}) {c['claim']}" for c in outcome.novelty_claims)
+    return "\n".join(lines)
+
+
 async def run(args: argparse.Namespace) -> int:
     check_max_read(args)
+    if args.continue_id is None and not (args.idea or args.idea_file):
+        raise InputError("Give your idea as text, or a document with --idea-file (or --continue <id>).")
     data = investigation_input(args) if args.continue_id is None else None
+    prepared = consent_at = None
+    if args.continue_id is None and args.idea_file:
+        try:
+            prepared = prepare_document(args.idea_file)
+        except (DocumentError, OSError) as error:
+            raise InputError(str(error)) from None
+        consent_at = document_consent(args)
+        if consent_at is None:
+            print("Not sent: nothing was stored.")
+            return 2
     try:
         database = Database.from_settings()
     except ConfigError as error:
@@ -631,10 +680,19 @@ async def run(args: argparse.Namespace) -> int:
                                                        input=data, constraints=dict(args.constraint))
             set_cost_cap(investigation, args.budget if args.budget is not None else DEFAULT_COST_CAP_USD)
             investigation_id = investigation.id
+            if prepared is not None:
+                ids = {k: v for k, v in (("doi", args.doi), ("arxiv", args.arxiv)) if v}
+                await attach_document(session, investigation_id, prepared, consent_at=consent_at,
+                                      published=bool(args.published or ids) or None, external_ids=ids)
         print(f"Investigation {investigation_id} | complexity {args.complexity} | "
               f"budget ${args.budget if args.budget is not None else DEFAULT_COST_CAP_USD}\n")
 
-        outcome = await understand_idea(database.session, investigation_id)
+        if prepared is not None:
+            print(f"Reading your document {prepared.file_name} ({len(prepared.sections)} sections: the Paper Reader, "
+                  "then the Idea Analyst)...")
+            outcome = await understand_document(database.session, investigation_id)
+        else:
+            outcome = await understand_idea(database.session, investigation_id)
 
         async with database.session() as session:
             stored = await session.get(Investigation, investigation_id)
@@ -642,6 +700,8 @@ async def run(args: argparse.Namespace) -> int:
         if outcome.error:
             print(f"The Idea Analyst failed: {outcome.error}")
         else:
+            if prepared is not None:
+                print(format_document_reading(outcome) + "\n")
             print(format_reading(outcome.reading))
         print(f"\nStage: {stage} ({status}) | cost so far: ${cost:.4f}")
         if outcome.error:

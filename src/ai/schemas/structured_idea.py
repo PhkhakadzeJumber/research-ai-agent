@@ -138,3 +138,49 @@ class StructuredIdeaOutput(_Strict):
     def proposed_key_facets(self) -> list[Facet]:
         """Key facets A1 proposed rather than read: the user must confirm these (step 4.3)."""
         return [facet for facet in self.facets if facet.is_key and not facet.stated_by_user]
+
+
+# --- from the user's own document (Mode 1, task document, step 6a) ------------------------------------------
+
+DOCUMENT_SCHEMA_VERSION = "document-idea-v1"
+MAX_NOVELTY_CLAIMS = 5
+Section = Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^D\d{1,3}$")]
+
+
+class FacetSource(_Strict):
+    facet: Annotated[int, Field(ge=1)] = Field(description="The facet's number (1 = the first facet in your list).")
+    section: Section = Field(description="The document section it comes from, exactly as labelled, e.g. 'D3'.")
+
+
+class NoveltyClaim(_Strict):
+    claim: Text = Field(
+        description=("What the document says is new or not yet done, as one sentence, e.g. 'no prior work evaluates "
+                     "RAG for Georgian QA'. A claim for the evaluation to check, never a fact.")
+    )
+    section: Section = Field(description="The section that says it, e.g. 'D2'.")
+
+
+class DocumentIdeaOutput(StructuredIdeaOutput):
+    """The idea as the user's document states it: the usual reading (every rule of StructuredIdeaOutput applies),
+    plus where each facet comes from and the document's own novelty claims. Code stores the reading as the
+    Intake and the rest with the document (idea_extras)."""
+
+    facet_sources: list[FacetSource] = Field(
+        default_factory=list, max_length=len(FACET_KINDS) * MAX_FACETS_PER_KIND,
+        description="For each facet the document states, the section it comes from. Leave out facets you proposed.",
+    )
+    novelty_claims: list[NoveltyClaim] = Field(
+        default_factory=list, max_length=MAX_NOVELTY_CLAIMS,
+        description=f"At most {MAX_NOVELTY_CLAIMS} claims the document makes about what is new. Empty if it makes none.",
+    )
+
+    @model_validator(mode="after")
+    def _sources_point_at_facets(self) -> DocumentIdeaOutput:
+        too_high = [s.facet for s in self.facet_sources if s.facet > len(self.facets)]
+        if too_high:
+            raise ValueError(f"facet_sources: facet number(s) {too_high} don't exist (there are {len(self.facets)})")
+        return self
+
+    def idea(self) -> StructuredIdeaOutput:
+        """The plain reading, as stored in the Intake (clarification works on it unchanged)."""
+        return StructuredIdeaOutput.model_validate(self.model_dump(exclude={"facet_sources", "novelty_claims"}))

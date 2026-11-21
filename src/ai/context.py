@@ -110,7 +110,7 @@ def render_paper(paper: PaperForReading, *, max_authors: int = 10) -> str:
 #     - available time: 8 weeks
 #     </constraints>
 
-_IDEA_TAGS = re.compile(r"<(/?)(idea|field|seed_papers|complexity|constraints|field_request|interests|technologies|exclusions|domain|count)\b",
+_IDEA_TAGS = re.compile(r"<(/?)(idea|field|seed_papers|complexity|constraints|field_request|interests|technologies|exclusions|domain|count|document|sections|section|reading)\b",
                         re.IGNORECASE)
 
 COMPLEXITY_NOTES = {
@@ -867,4 +867,55 @@ def render_scout_refine(r: RefineRequest) -> str:
         "<papers>" + "".join(f'<paper label="{_attribute(p.label)}"' + (f' year="{p.year}"' if p.year else "")
                              + f">{_contain(p.title)}</paper>" for p in r.papers) + "</papers>",
     ]
+    return "\n".join(lines)
+
+
+
+# --- the Idea Analyst's document packet (Mode 1, task document, step 6a) -------------------------------------
+#
+#     (the idea packet: the user's note, field, known papers, complexity, constraints)
+#     <document title="draft_v3.md">
+#     <sections><section label="D1" heading="Introduction">excerpt</section>...</sections>
+#     <reading>
+#     research questions: (D1) Does RAG reduce hallucination ...
+#     methods: (D3) retrieval-augmented generation | ...
+#     </reading>
+#     </document>
+
+SECTION_EXCERPT_CHARS = 900
+MAX_EXCERPT_SECTIONS = 30
+NO_IDEA_NOTE = "(The idea is the user's document below.)"
+
+
+@dataclass(frozen=True)
+class DocumentForAnalysis:
+    title: str
+    sections: tuple[tuple[str, str, str], ...]
+    """(label, heading, text) per section, in order."""
+    reading: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    """(field name, items) from the Paper Reader's analysis, each item already prefixed with its section."""
+
+
+def _document_text(text: str) -> str:
+    return _contain(_contain_user_text(text))
+
+
+def render_document_idea(request: IdeaForAnalysis, document: DocumentForAnalysis) -> str:
+    """The Idea Analyst's input for structuring an idea from the user's own document."""
+    if not document.sections:
+        raise ValueError("The document has no text.")
+    if not request.idea.strip():
+        request = IdeaForAnalysis(**{**request.__dict__, "idea": NO_IDEA_NOTE})
+    lines = [render_idea(request), f'<document title="{_attribute(document.title)}">', "<sections>"]
+    for label, heading, text in document.sections[:MAX_EXCERPT_SECTIONS]:
+        excerpt = text if len(text) <= SECTION_EXCERPT_CHARS else text[:SECTION_EXCERPT_CHARS].rsplit(" ", 1)[0] + " ..."
+        lines.append(f'<section label="{_attribute(label)}" heading="{_attribute(heading)}">'
+                     f"{_document_text(excerpt)}</section>")
+    lines.append("</sections>")
+    if document.reading:
+        lines.append("<reading>")
+        lines.extend(f"{name}: " + " | ".join(_document_text(item) for item in items)
+                     for name, items in document.reading if items)
+        lines.append("</reading>")
+    lines.append("</document>")
     return "\n".join(lines)

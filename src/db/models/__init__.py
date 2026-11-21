@@ -5,6 +5,7 @@ Base.metadata. Alembic (src/db/migrations/env.py) and the drift test rely on tha
 a model that isn't imported here is invisible to migrations.
 """
 
+from src.db.models.documents import UserDocument  # region 1: the user's own document
 from src.db.models.candidates import Candidate, CandidateInspiration, Facet  # region 4: where ideas come from
 from src.db.models.evaluations import (  # region 5: judging a candidate
     Challenge,
@@ -42,5 +43,6 @@ __all__ = [
     "SearchQuery",
     "TriageDecision",
     "User",
+    "UserDocument",
     "Verdict",
 ]

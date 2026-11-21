@@ -51,7 +51,7 @@ Along with that, it asks **at most 3 clarifying questions**. The user can answer
 
 **One exception to skipping:** if the Idea Analyst had to *propose* a key facet (the user's text didn't state it, e.g. no method for "make LLMs better at low-resource languages"), the user must confirm or edit the reading explicitly before anything is evaluated. Otherwise Eureka could end up judging an idea the user never had.
 
-### 2.4 The user's research document (Mode 1, planned)
+### 2.4 The user's research document (Mode 1; as built in step 6a.1: text and Markdown)
 
 A real research idea rarely fits in 2,000 characters. The user may upload their own draft, proposal or paper, and Eureka evaluates that. No new agent is needed: the existing agents get a new input or task.
 
@@ -69,6 +69,8 @@ A real research idea rarely fits in 2,000 characters. The user may upload their 
 - **The document is never evidence for itself.** Its quotes are verified, so Eureka can show *where* the user said something. But they are labelled "your document", and verdicts count only the published literature (tier 1/2).
 - **The user's own work never counts against them.** If the search finds the document itself (by the given ID, or a matching title and author list), that paper is marked **"your own work"**. It is kept out of the prior-work matrix and the verdicts, and shown separately in the report. The papers the document *cites* are the opposite case: they are prior work, and if one of them already did the idea, Eureka says so.
 - **The document stays private.** It is stored only with its investigation and deleted with it. It is never added to the shared paper library (doc 10 §5) and never sent to the search APIs; only the short keyword queries built from its facets are. It goes to Claude only for reading and evaluation, with the user's consent. Its text is data, never instructions, like any paper text (doc 04).
+
+*As built (step 6a.1):* `python -m scripts.evaluate --idea-file draft.md [--consent] [--published --doi/--arxiv ...]` reads `.md` and `.txt` up to 60,000 characters (about 15–20 pages). The file is split into sections D1, D2, … by its headings (by paragraphs for plain text), and the command asks for consent before anything is sent; with `--yes`, `--consent` is required. The Paper Reader reads the sections with quote verification, and the reading is stored on the `user_documents` row (`src/ai/workflows/user_document.py`). The Idea Analyst's **document task** (prompt `idea_analyst_document`, output `DocumentIdeaOutput`) builds the usual reading, which is stored as the Intake, so clarification is unchanged. Each facet's section and the document's novelty claims are stored with the document (`idea_extras`), and the command shows them before clarification. Still to come in 6a.2: excluding the user's own work from the search results, the Skeptic targeting the novelty claims, A6 seeing the plan, and the report's "your document vs the literature" section. PDF is step 6b.
 
 Cost: reading the document is about 5–15 cents (Opus, depending on length), and the excerpts add a few cents per agent. A full evaluation stays about $3–5.
 

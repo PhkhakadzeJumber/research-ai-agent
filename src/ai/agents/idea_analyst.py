@@ -31,10 +31,12 @@ from typing import Any
 
 from src.ai.context import (
     CandidateForPlanning,
+    DocumentForAnalysis,
     FieldRequest,
     IdeaForAnalysis,
     QuestionAnswer,
     render_field_request,
+    render_document_idea,
     render_field_revision,
     render_idea,
     render_query_task,
@@ -44,7 +46,12 @@ from src.ai.prompts import system_prompt
 from src.ai.schemas import field_brief, query_plan
 from src.ai.schemas.field_brief import FieldBriefOutput, exclusion_problems
 from src.ai.schemas.query_plan import QUERY_COUNTS, FacetRef, QueryPlanOutput, check_quotas, required_variants
-from src.ai.schemas.structured_idea import SCHEMA_VERSION, StructuredIdeaOutput
+from src.ai.schemas.structured_idea import (
+    DOCUMENT_SCHEMA_VERSION,
+    SCHEMA_VERSION,
+    DocumentIdeaOutput,
+    StructuredIdeaOutput,
+)
 from src.config import RoleLlmSettings
 from src.llm import LlmCallRecord, run_structured
 
@@ -80,6 +87,33 @@ async def analyse_idea(
     )
     return IdeaReading(output=result.output, schema_version=SCHEMA_VERSION, prompt_version=system.version_id,
                        records=result.records)
+
+
+@dataclass(frozen=True)
+class DocumentReading:
+    output: DocumentIdeaOutput
+    schema_version: str
+    prompt_version: str
+    records: list[LlmCallRecord]
+
+
+async def analyse_document(
+    request: IdeaForAnalysis,
+    document: DocumentForAnalysis,
+    *,
+    settings: RoleLlmSettings | None = None,
+    model: Any | None = None,
+) -> DocumentReading:
+    """Structures the idea from the user's own document (task document, step 6a): the usual reading plus
+    facet -> section links and the document's novelty claims. Raises ValueError or LlmError subclasses."""
+    system = system_prompt(ROLE, task="document")
+    result = await run_structured(
+        ROLE, system=system.text, prompt_version=system.version_id,
+        user_message=render_document_idea(request, document),
+        output_schema=DocumentIdeaOutput, settings=settings, model=model, cache=PROMPT_CACHE,
+    )
+    return DocumentReading(output=result.output, schema_version=DOCUMENT_SCHEMA_VERSION,
+                           prompt_version=system.version_id, records=result.records)
 
 
 async def revise_idea(

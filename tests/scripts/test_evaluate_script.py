@@ -60,3 +60,26 @@ def test_format_reading_without_questions():
 def test_a_revised_reading_is_shown_without_the_questions_block():
     text = format_reading(StructuredIdeaOutput.model_validate({**VALID, "clarifying_questions": []}), questions=False)
     assert "Questions" not in text and text.endswith("- how hallucination is measured is unspecified")
+
+
+# --- the user's document (step 6a.1) ----------------------------------------------------------------------
+
+def test_a_document_can_replace_the_idea_text():
+    from pathlib import Path
+
+    args = parse_args(["--idea-file", "draft.md", "--consent", "--published", "--arxiv", "2405.01234"])
+    assert (args.idea, args.idea_file, args.consent, args.published, args.arxiv) == (
+        None, Path("draft.md"), True, True, "2405.01234")
+    assert investigation_input(args) == {"idea": ""}
+
+
+def test_consent_is_asked_and_never_assumed():
+    from scripts.evaluate import document_consent
+
+    args = parse_args(["--idea-file", "draft.md"])
+    assert document_consent(args, ask=lambda prompt: "n") is None
+    assert document_consent(args, ask=lambda prompt: "") is None  # Enter means no
+    assert document_consent(args, ask=lambda prompt: "y") is not None
+    with pytest.raises(InputError, match="--yes needs --consent"):
+        document_consent(parse_args(["--idea-file", "draft.md", "--yes"]))
+    assert document_consent(parse_args(["--idea-file", "draft.md", "--yes", "--consent"])) is not None

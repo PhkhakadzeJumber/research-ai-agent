@@ -246,7 +246,7 @@ Deferred: ConversationMessage, ToolCall (section 8)
 | counters snapshot | Counts at this moment | Live counters, funnel chart | read 27 |
 | cost so far | Spend at this moment | The live cost display | $1.40 |
 
-### 3.4 UserDocument (planned; doc 02 §2.4)
+### 3.4 UserDocument (doc 02 §2.4; built in step 6a.1, migration 0016)
 
 **What it is:** the user's own research document (draft, proposal or paper) uploaded for a Mode 1 evaluation.
 

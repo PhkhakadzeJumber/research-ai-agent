@@ -58,6 +58,8 @@ def idea_request(investigation: Investigation) -> IdeaForAnalysis:
     """The Idea Analyst's view of a Mode 1 investigation (its input and constraints snapshot)."""
     data = investigation.input or {}
     idea = (data.get("idea") or "").strip()
+    if not idea and data.get("document"):  # the idea is the user's own document (step 6a.1)
+        idea = f"(The user's own document {data['document']}: the reading below was built from it.)"
     if investigation.mode != Mode.EVALUATE or not idea:
         raise NotAnIdeaInvestigation(f"Investigation {investigation.id} is not a Mode 1 idea with text.")
     constraints = tuple(
