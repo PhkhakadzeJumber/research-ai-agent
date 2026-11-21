@@ -114,6 +114,12 @@ The **blocking requirements** list always overrides the level.
 
 Each recommendation shows its **rule trace**: which rules fired, and the claim IDs behind them.
 
+**As built (step 4.8, `src/ai/evidence/verdicts.py`):**
+
+- **Significance (`significance-rules-v1`):** S1 Weak if the novelty verdict is Previously investigated or Incremental (the contribution is marginal); S2 Strong with ≥2 verified significance claims resting on different papers, or one on a paper the Paper Reader classified as a survey; S3 Moderate with ≥1 verified claim; S4 Unclear otherwise. S5: an overstated-contribution challenge with evidence that wasn't rebutted drops the level one step (the "unless ≥2 verified quotes the challenge doesn't address" exception of §4.5 isn't automated yet).
+- **Feasibility (`feasibility-rules-v1`):** F1 Not feasible if something blocks and no simplification is offered; F2 Feasible with adjustments if something blocks (with simplifications) or skills are missing; F3 Unclear if required data isn't confirmed available; F4 Feasible. Code adds its own blocking requirement when A6's timeline exceeds the available time in the constraints. Until a dataset lookup exists, a dataset counts as available only if a paper Eureka read names it.
+- **Recommendation (`recommendation-rules-v1`):** R1 Reconsider (previously investigated, not feasible, or weak significance); R2 Pursue; R3 Refine when exactly one dimension falls short and a refinement exists (A6's simplifications, or facets the matching paper leaves open); **R4 Reconsider otherwise** (several dimensions short, or nothing concrete to refine), a case §4.4 doesn't cover. The "needs further investigation" flag goes with any recommendation when novelty is insufficient or Potential with search limits, or a dimension is Unclear.
+
 ### 4.5 Conflict resolution between agents
 
 | Conflict | Resolution |

@@ -75,6 +75,9 @@ class Evaluation(UUIDPrimaryKey, Timestamps, Base):
     novelty_assessment: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # The coverage snapshot (doc 10 §7.1): computed from the search trail, frozen at `concluding`.
     coverage: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # The Value & Feasibility Evaluator's assessment with code's checks (dataset availability,
+    # timeline vs available time); its significance claims are Claim rows (step 4.8).
+    value_feasibility: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
 class FacetMatch(UUIDPrimaryKey, Timestamps, Base):

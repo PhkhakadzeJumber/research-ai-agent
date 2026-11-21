@@ -28,7 +28,7 @@ python -m scripts.search "your query" --limit 10 --from 2022  # all sources: use
 python -m scripts.search "your query" --sources arxiv --save  # store as an investigation (needs the database)
 python -m scripts.search "your query" --sources arxiv --save --rank  # + rank by embeddings (needs Vertex AI setup)
 python -m scripts.read_papers --latest --top 5 [--details]  # Paper Reader on a saved search: paid API, ask first
-python -m scripts.evaluate "your idea" [--field NLP] [--complexity beginner]  # Workflow A (so far: up to the Skeptic loop; --max-read N, default 25): paid API, ask first
+python -m scripts.evaluate "your idea" [--field NLP] [--complexity beginner]  # Workflow A (so far: up to value & feasibility + all verdicts; --max-read N, default 25): paid API, ask first
 python -m scripts.evaluate --continue <investigation id>   # resume where it stopped (clarification or evaluation)
 
 # Backend

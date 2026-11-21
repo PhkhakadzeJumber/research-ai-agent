@@ -27,7 +27,11 @@ So far (steps 4.2-4.4):
      reads up to 5 new relevant papers, and the Skeptic challenges the analysis with
      quotes from them (about 35 cents a round); the Novelty Investigator then accepts or
      rebuts each challenge with quoted evidence (about 30 cents). Rounds repeat until one
-     finds no new relevant papers (saturation) or 3 rounds are done.
+     finds no new relevant papers (saturation) or 3 rounds are done;
+  8. value and feasibility: one Opus call (about 30 cents) judges significance and
+     feasibility for you; code checks datasets against the papers read and the timeline
+     against your available time, then shows every verdict, the recommendation and the
+     triage rule (a preview until `concluding`, step 4.9).
 If Eureka had to propose a KEY facet, you must confirm the reading yourself: --yes is
 refused. Quitting at the confirmation keeps everything; resume with --continue.
 Later steps extend this until the whole evaluation runs (step 4.8).
@@ -62,6 +66,7 @@ from src.ai.workflows.clarification import (
 )
 from sqlalchemy import select
 
+from src.ai.evidence.verdicts import LABELS
 from src.ai.schemas.query_plan import QueryPlanOutput
 from src.ai.workflows.evaluation import (
     begin_evaluation,
@@ -75,6 +80,7 @@ from src.ai.workflows.evaluation import (
 )
 from src.ai.workflows.skeptic_round import revision_step, skeptic_round_step
 from src.ai.workflows.states import EvaluationStep, Stage
+from src.ai.workflows.value_feasibility import value_step, verdicts_for
 from src.ai.workflows.understanding import understand_idea
 from src.config import ConfigError
 from src.db.models import Evaluation, Facet, Investigation
@@ -275,7 +281,7 @@ def _short(text: str, width: int = TITLE_WIDTH) -> str:
 async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read: int | None = None,
                    search_factory=None, settings=None, model=None, screen_settings=None, screen_model=None,
                    read_settings=None, read_model=None, novelty_settings=None, novelty_model=None,
-                   skeptic_settings=None, skeptic_model=None) -> int:
+                   skeptic_settings=None, skeptic_model=None, value_settings=None, value_model=None) -> int:
     """Runs the full evaluation of the investigation's confirmed idea, from wherever it stands."""
     async with sessions() as session:
         candidates = [c for c in await investigation_candidates(session, investigation_id)
@@ -389,13 +395,19 @@ async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read:
                 async with sessions() as session:
                     verdict, coverage = await novelty_verdict_for(session, evaluation_id)
                 print("\n" + format_verdict(verdict, coverage))
+        elif step == EvaluationStep.ASSESSING_VALUE_FEASIBILITY:
+            print("\nJudging significance and feasibility for you (Value & Feasibility Evaluator, one call)...")
+            outcome = await value_step(sessions, evaluation_id, settings=value_settings, model=value_model)
+            print(format_value(outcome))
         else:
             async with sessions() as session:
-                verdict, coverage = await novelty_verdict_for(session, evaluation_id)
+                verdicts = await verdicts_for(session, evaluation_id)
                 cost = (await session.get(Investigation, investigation_id)).cost_usd
-            print("\n" + format_verdict(verdict, coverage))
+            print("\n" + format_verdict(verdicts.novelty, verdicts.coverage))
+            print(format_all_verdicts(verdicts))
             print(f"\nCost so far: ${cost:.4f}")
-            print(f"Next: value and feasibility come with step 4.8 (now at {step}).")
+            print(f"Next: concluding (verdicts frozen, triage applied) and the full report come with step 4.9 "
+                  f"(now at {step}).")
             return 0
 
 
@@ -486,6 +498,51 @@ def format_revision(outcome) -> str:
             lines.append(f"      rebuttal ({holds}): {response.rebuttal.text}")
     next_label = "another Skeptic round" if outcome.next_step == "skeptic_review" else "value and feasibility"
     lines.append(f"  Next: {next_label}")
+    return "\n".join(lines)
+
+
+def format_value(outcome) -> str:
+    if outcome.error:
+        return f"  {outcome.error}"
+    output = outcome.reading.output
+    sig, feas = output.significance, output.feasibility
+    lines = ["Significance:"]
+    for claim in outcome.reading.claims:
+        marks = "".join("+" if quote.verified else "!" for _, quote in claim.evidence)
+        lines.append(f"  [{claim.status} {marks}] {claim.text}")
+    if sig.beneficiaries:
+        lines.append(f"  who benefits: {'; '.join(sig.beneficiaries)}")
+    lines.append(f"  contribution vs closest works: {sig.contribution_vs_closest}")
+    lines.append("Feasibility:")
+    for check in outcome.data_checks:
+        lines.append(f"  data: {check['name']} ({check['source']}) -> {check['status']}")
+    lines.append(f"  compute: {feas.compute_needed}")
+    if feas.skill_gaps:
+        lines.append(f"  skill gaps: {'; '.join(feas.skill_gaps)}")
+    timeline = outcome.timeline
+    available = f"{timeline['available_weeks']:g}" if timeline["available_weeks"] is not None else "?"
+    lines.append(f"  timeline: {' + '.join(f'{p.phase} {p.weeks:g}w' for p in feas.timeline)} "
+                 f"= {timeline['total_weeks']:g} weeks (available: {available})")
+    for title, items in (("risks", feas.risks), ("ethics", feas.ethics),
+                         ("blocking", [*feas.blocking_requirements, *outcome.code_blocking]),
+                         ("simplifications", feas.simplifications)):
+        if items:
+            lines.append(f"  {title}:")
+            lines.extend(f"    - {item}" for item in items)
+    return "\n".join(lines)
+
+
+def format_all_verdicts(verdicts) -> str:
+    lines = []
+    for name, verdict in (("Significance", verdicts.significance), ("Feasibility", verdicts.feasibility)):
+        lines.append(f"{name}: {LABELS[verdict.category]}   [{verdict.rules_version}, rule {verdict.rule}]")
+        lines.extend(f"  {line}" for line in verdict.trace)
+    rec = verdicts.recommendation
+    flag = "   + needs further investigation" if rec.needs_further_investigation else ""
+    lines.append(f"\nRecommendation (preview): {rec.label}{flag}   [{rec.rules_version}, rule {rec.rule}]")
+    lines.extend(f"  {line}" for line in rec.trace)
+    lines.append(f"Triage (preview): rule {verdicts.triage.number}: {verdicts.triage.action} "
+                 f"({verdicts.triage.reason})")
     return "\n".join(lines)
 
 

@@ -32,7 +32,7 @@ ABSTRACT_ONLY_NOTE = (
 )
 FULL_TEXT_NOTE = "Passages from the full text are included as chunks, each with its ID and section."
 
-_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge)\b",
+_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints)\b",
                    re.IGNORECASE)
 _QUOTE_IN_ATTRIBUTE = re.compile(r'["<>]')
 
@@ -447,6 +447,55 @@ def render_novelty_revision(candidate: CandidateForPlanning, claims: tuple[Claim
         for paper, quote in item.evidence:
             lines.append(f'quote from {_attribute(paper)}: "{_contain(quote)}"')
         lines.append("</challenge>")
+    lines.append("</challenges>")
+    if papers:
+        novelty = render_novelty_task(candidate, papers, coverage="")
+        lines.append(novelty[novelty.index("<papers>"):novelty.index("</papers>") + len("</papers>")])
+    return "\n".join(lines)
+
+
+# --- the Value & Feasibility Evaluator's packet -------------------------------------------------------------
+#
+#     (the candidate block)
+#     <complexity>beginner: ...</complexity>
+#     <constraints>
+#     - available time: 10 weeks
+#     </constraints>
+#     <claims>...</claims>
+#     <challenges>
+#     <challenge type="feasibility_risk" resolution="accepted">argument</challenge>
+#     </challenges>
+#     <papers>...</papers>
+
+
+@dataclass(frozen=True)
+class ChallengeSummary:
+    type: str
+    argument: str
+    resolution: str
+
+
+def render_value_feasibility(candidate: CandidateForPlanning, *, complexity: str,
+                             constraints: tuple[tuple[str, str], ...], claims: tuple[ClaimForSkeptic, ...],
+                             challenges: tuple[ChallengeSummary, ...], papers: tuple[PaperForNovelty, ...]) -> str:
+    """The Value & Feasibility Evaluator's input."""
+    lines = [render_query_task(candidate, task="Judge significance and feasibility for this user.")]
+    lines.append(f"<complexity>{_contain(COMPLEXITY_NOTES.get(complexity, complexity))}</complexity>")
+    lines.append("<constraints>")
+    lines.extend(f"- {_contain(_contain_user_text(name))}: {_contain(_contain_user_text(value))}"
+                 for name, value in constraints)
+    if not constraints:
+        lines.append("(none given)")
+    lines.append("</constraints>")
+    lines.append("<claims>")
+    for claim in claims:
+        lines.append(f'<claim label="{_attribute(claim.label)}" kind="{claim.kind}" status="{claim.status}">'
+                     f"{_contain(claim.text)}</claim>")
+    lines.append("</claims>")
+    lines.append("<challenges>")
+    for challenge in challenges:
+        lines.append(f'<challenge type="{challenge.type}" resolution="{challenge.resolution}">'
+                     f"{_contain(challenge.argument)}</challenge>")
     lines.append("</challenges>")
     if papers:
         novelty = render_novelty_task(candidate, papers, coverage="")

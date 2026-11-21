@@ -257,6 +257,20 @@ SCREEN_SETTINGS = RoleLlmSettings(role="relevance_screening", model="claude-haik
 READ_SETTINGS = RoleLlmSettings(role="paper_reader", model="claude-opus-5-5", effort="low", max_tokens=16000)
 NOVELTY_SETTINGS = RoleLlmSettings(role="novelty", model="claude-opus-5-5", effort="high", max_tokens=16000)
 SKEPTIC_SETTINGS = RoleLlmSettings(role="skeptic", model="claude-opus-5-5", effort="high", max_tokens=16000)
+VALUE_SETTINGS = RoleLlmSettings(role="value_feasibility", model="claude-opus-5-5", effort="high", max_tokens=16000)
+
+
+def value_answer(claims=(), data=(), timeline=(("experiments", 6),), blocking=(), simplifications=(),
+                 skill_gaps=()):
+    """A Value & Feasibility answer. claims: (text, paper, quote); data: (name, source)."""
+    return answer(json.dumps({
+        "significance": {"claims": [{"text": t, "evidence": [{"paper": p, "quote": q}]} for t, p, q in claims],
+                         "beneficiaries": ["students"], "contribution_vs_closest": "c", "proposed_level": "moderate"},
+        "feasibility": {"data_needed": [{"name": n, "use": "u", "source": src} for n, src in data],
+                        "compute_needed": "one GPU", "skills_needed": [], "skill_gaps": list(skill_gaps),
+                        "timeline": [{"phase": ph, "weeks": w} for ph, w in timeline], "ethics": [], "risks": [],
+                        "blocking_requirements": list(blocking), "simplifications": list(simplifications),
+                        "proposed_level": "feasible"}}))
 
 
 def skeptic_queries_answer(*texts):
@@ -286,12 +300,14 @@ async def test_the_command_runs_the_evaluation_up_to_the_novelty_assessment(db_s
     reader = ScriptedLlm.with_answers(answer(json.dumps({"contribution_type": "empirical_study"})))
     novelty = ScriptedLlm.with_answers(novelty_answer([("P1", 1, "same", "We study Paper A")]))
     skeptic = ScriptedLlm.with_answers(skeptic_queries_answer())  # its searches find nothing new
+    value = ScriptedLlm.with_answers(value_answer())
     search = FakeSearch({"rag hallucination georgian question answering": ["Paper A", "Paper B"]})
 
     code = await evaluate(sessions_on(db_session), investigation.id, search_factory=lambda: search,
                           settings=SETTINGS, model=planner, screen_settings=SCREEN_SETTINGS, screen_model=screener,
                           read_settings=READ_SETTINGS, read_model=reader, novelty_settings=NOVELTY_SETTINGS,
-                          novelty_model=novelty, skeptic_settings=SKEPTIC_SETTINGS, skeptic_model=skeptic)
+                          novelty_model=novelty, skeptic_settings=SKEPTIC_SETTINGS, skeptic_model=skeptic,
+                          value_settings=VALUE_SETTINGS, value_model=value)
 
     assert code == 0
     output = capsys.readouterr().out
@@ -309,7 +325,12 @@ async def test_the_command_runs_the_evaluation_up_to_the_novelty_assessment(db_s
     assert "4 searches -> 0 papers new to this evaluation -> 0 relevant -> 0 read" in output
     assert "Saturation statistic: 0 new relevant papers (saturated)" in output
     assert "Novelty (preliminary, after 1 Skeptic round)" in output
-    assert "value and feasibility come with step 4.8 (now at assessing_value_feasibility)" in output
+    assert "Judging significance and feasibility for you" in output
+    assert "timeline: experiments 6w = 6 weeks (available: ?)" in output
+    assert "Significance: Unclear" in output and "Feasibility: Feasible" in output
+    assert "Recommendation (preview): Reconsider   + needs further investigation" in output  # novelty insufficient
+    assert "Triage (preview): rule 7: expand_search" in output
+    assert "come with step 4.9 (now at concluding)" in output
 
 
 async def test_the_command_resumes_where_the_evaluation_stopped(db_session, capsys):
@@ -317,7 +338,8 @@ async def test_the_command_resumes_where_the_evaluation_stopped(db_session, caps
     llm = ScriptedLlm.with_answers()  # planning must not run again
     code = await evaluate(sessions_on(db_session), investigation.id, search_factory=lambda: FakeSearch(), model=llm,
                           skeptic_settings=SKEPTIC_SETTINGS,
-                          skeptic_model=ScriptedLlm.with_answers(skeptic_queries_answer()))
+                          skeptic_model=ScriptedLlm.with_answers(skeptic_queries_answer()),
+                          value_settings=VALUE_SETTINGS, value_model=ScriptedLlm.with_answers(value_answer()))
     assert code == 0 and llm.requests == []
     assert "Planning the searches" not in capsys.readouterr().out
     assert (await db_session.get(Candidate, (await db_session.get(Evaluation, evaluation_id)).candidate_id))

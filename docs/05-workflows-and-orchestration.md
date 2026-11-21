@@ -112,7 +112,7 @@ Triage runs after each evaluation. The first rule that matches applies.
 | 8 | A Skeptic challenge refuted a key claim | Re-run the novelty assessment with the challenge, then re-apply triage |
 | 9 | Otherwise | **Advance** (light → full) or **finalize** (full) |
 
-Every triage decision is stored with its rule number and the evidence IDs behind it. That record is the "why" behind each card in the UI.
+Every triage decision is stored with its rule number and the evidence IDs behind it. (As built, step 4.8: `triage_rule()` in `src/ai/evidence/verdicts.py` implements rules 1–7 and 9 in this order; rule 8 already happens inside the evaluation, in the Skeptic loop. Rule 5's "not feasible with suggested simplifications" is the feasibility verdict *Feasible with adjustments* **with a blocking requirement**; skill gaps alone don't trigger it. Decisions are stored and carried out from step 4.9; refine and alternatives need the Scout, step 5.) That record is the "why" behind each card in the UI.
 
 ## 5. Candidate lifecycle
 
