@@ -208,7 +208,7 @@ Sections 2–5 explain the workflows in prose. This section defines them **exact
 | `awaiting_clarification` | both | **human** | The user confirms, edits or skips. Mode 1: Candidate v1 is created on confirmation | clarifying |
 | `landscape_retrieval` | 2 | code (C2, C3) | Landscape searches per subtopic + tier-3 signals | running |
 | `landscape_reading` | 2 | relevance screener (small model) + code + **A3** Paper Reader | Score every landscape paper 0–3 against the subtopics; code picks ~45 (≥5 per subtopic, surveys first, then score and how often found; a paper's subtopics come from the searches that found it); read them (cache reused) | running |
-| `opportunity_mining` | 2 | code (miners) | Subtopics, limitation clusters, contradictions, combinations, dataset hints → OpportunityItems | running |
+| `opportunity_mining` | 2 | code (miners) + opportunity miner (small model: grouping, contradiction check) | Subtopics, recurring problems (limitation clusters), contradictions, dataset hints → OpportunityItems; combinations wait for full text (doc 06 §4) | running |
 | `generating_candidates` | both | **A2** Scout | One Scout task: *discover* (Mode 2 start), *alternatives* (Mode 1 after a reconsider), *replenish* (Mode 2, too few survivors, or user steering) | running |
 | `prescreening` | both | code + **A6** quick feasibility | Grounding check, dedup, hard-constraint filter, diversity → `screened_out` or `light_evaluating` | running |
 | `light_evaluation` | both | evaluation sub-graph (§11.4), depth light | Every candidate in `light_evaluating`, in parallel (concurrency 2–3) | running |

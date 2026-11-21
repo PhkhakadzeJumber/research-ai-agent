@@ -32,7 +32,7 @@ ABSTRACT_ONLY_NOTE = (
 )
 FULL_TEXT_NOTE = "Passages from the full text are included as chunks, each with its ID and section."
 
-_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints|field_brief|subtopic)\b",
+_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints|field_brief|subtopic|items|item|pairs|pair|finding|setting|statement|quote)\b",
                    re.IGNORECASE)
 _QUOTE_IN_ATTRIBUTE = re.compile(r'["<>]')
 
@@ -622,4 +622,62 @@ def render_landscape_screening(subtopics: tuple[tuple[int, str, str], ...],
                  for number, name, why in subtopics)
     lines.append("</field_brief>")
     lines.append(_screening_papers(papers))
+    return "\n".join(lines)
+
+
+# --- the opportunity miner's packets (Mode 2, step 5.2b) ---------------------------------------------------
+#
+#     <field_brief><subtopic number="1">name</subtopic>...</field_brief>
+#     <items>
+#     <item label="M1" kind="finding" direction="negative" paper="3">
+#       <setting>...</setting><statement>...</statement><quote>...</quote></item>
+#     </items>
+#
+#     <pairs>
+#     <pair label="X1"><finding paper="3" direction="negative">(setting, statement, quote)</finding>
+#                      <finding paper="7" direction="positive">...</finding></pair>
+#     </pairs>
+
+
+@dataclass(frozen=True)
+class StatementForMining:
+    label: str
+    kind: str  # future_work | finding
+    paper_number: int
+    statement: str
+    quote: str
+    direction: str | None = None  # findings only
+    setting: str | None = None  # findings only
+
+
+def _statement_body(item: StatementForMining) -> str:
+    setting = f"<setting>{_contain(item.setting)}</setting>" if item.setting else ""
+    return f"{setting}<statement>{_contain(item.statement)}</statement><quote>{_contain(item.quote)}</quote>"
+
+
+def render_mining_items(subtopic_names: tuple[str, ...], items: tuple[StatementForMining, ...]) -> str:
+    """The opportunity miner's grouping input: the subtopics, then the statements to group."""
+    if not items:
+        raise ValueError("Grouping needs statements.")
+    lines = ["<field_brief>"]
+    lines.extend(f'<subtopic number="{n}">{_contain(name)}</subtopic>' for n, name in enumerate(subtopic_names, 1))
+    lines += ["</field_brief>", "<items>"]
+    for item in items:
+        direction = f' direction="{_attribute(item.direction)}"' if item.direction else ""
+        lines.append(f'<item label="{_attribute(item.label)}" kind="{_attribute(item.kind)}"{direction} '
+                     f'paper="{item.paper_number}">{_statement_body(item)}</item>')
+    lines.append("</items>")
+    return "\n".join(lines)
+
+
+def render_contradiction_pairs(pairs: tuple[tuple[str, StatementForMining, StatementForMining], ...]) -> str:
+    """The contradiction check's input: (label, finding, finding) per pair."""
+    if not pairs:
+        raise ValueError("The contradiction check needs pairs.")
+    lines = ["<pairs>"]
+    for label, first, second in pairs:
+        findings = "".join(f'<finding paper="{item.paper_number}" direction="{_attribute(item.direction or "")}">'
+                           f"{_statement_body(item)}</finding>" for item in (first, second))
+        lines.append(f'<pair label="{_attribute(label)}">{findings}</pair>')
+    lines.append("</pairs>")
     return "\n".join(lines)

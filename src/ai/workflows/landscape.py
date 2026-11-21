@@ -196,6 +196,21 @@ class LandscapeReading:
         return sum(1 for o in self.read if o.error)
 
 
+async def subtopic_attribution(session, investigation_id: uuid.UUID, brief: FieldBriefOutput):
+    """hit -> the subtopics whose landscape searches found it (sorted names). A paper's subtopics
+    are known from the searches, so no model is asked for them."""
+    query_subtopic = {f"{query}{kind.suffix}": subtopic.name
+                      for subtopic in brief.subtopics for query in subtopic.queries for kind in KINDS}
+    texts = dict((await session.execute(
+        select(SearchQuery.id, SearchQuery.query_text).where(SearchQuery.investigation_id == investigation_id,
+                                                             SearchQuery.origin == "landscape"))).all())
+
+    def subtopics_of(hit: RetrievalHit) -> list[str]:
+        return sorted({query_subtopic.get(texts.get(q), "") for q in hit.found_by_query_ids} - {""})
+
+    return subtopics_of
+
+
 def is_survey(title: str) -> bool:
     return bool(_SURVEY.search(title or ""))
 
@@ -253,16 +268,9 @@ async def landscape_reading_step(
         lambda papers: screen_landscape_batch(subtopics, papers, settings=screen_settings, model=screen_model))
 
     # 2. choosing: subtopics from the searches that found each paper
-    query_subtopic = {}
-    for subtopic in brief.subtopics:
-        for query in subtopic.queries:
-            for kind in KINDS:
-                query_subtopic[f"{query}{kind.suffix}"] = subtopic.name
     in_scope = (RetrievalHit.investigation_id == investigation_id) & RetrievalHit.evaluation_id.is_(None)
     async with sessions() as session:
-        texts = dict((await session.execute(
-            select(SearchQuery.id, SearchQuery.query_text).where(SearchQuery.investigation_id == investigation_id,
-                                                                 SearchQuery.origin == "landscape"))).all())
+        subtopics_of = await subtopic_attribution(session, investigation_id, brief)
         has_text = or_(Paper.abstract.is_not(None), select(Chunk.id).where(Chunk.paper_id == Paper.id).exists())
         hits = (await session.execute(
             select(RetrievalHit, Paper, has_text).join(Paper, Paper.id == RetrievalHit.paper_id).where(in_scope)
@@ -273,7 +281,7 @@ async def landscape_reading_step(
             if hit.screened:
                 counts[hit.llm_score] = counts.get(hit.llm_score, 0) + 1
             if (hit.llm_score or 0) >= READ_THRESHOLD and readable:
-                names = sorted({query_subtopic.get(texts.get(q), "") for q in hit.found_by_query_ids} - {""})
+                names = subtopics_of(hit)
                 rows.append((paper, names, hit.llm_score, len(hit.found_by_query_ids), hit.source_rank))
         outcome.score_counts = {score: counts.get(score, 0) for score in (3, 2, 1, 0)}
         chosen = choose_landscape_papers(rows, [s.name for s in brief.subtopics], limit=limit,

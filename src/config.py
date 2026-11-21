@@ -236,6 +236,7 @@ ROLE_DEFAULT_EFFORT = {
     "scout": "high",
     "paper_reader": "low",
     "relevance_screening": "low",
+    "opportunity_mining": "low",
     "novelty": "high",
     "skeptic": "high",
     "feasibility_quick": "medium",

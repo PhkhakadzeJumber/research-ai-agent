@@ -180,9 +180,10 @@ async def test_the_command_reads_and_stops_when_the_budget_is_used_up(db_session
     investigation.budget = {"cost_usd": 12.0}
     await db_session.flush()
     code = await read_landscape(sessions_on(db_session), investigation.id,
-                                screen_model=TitleScreener.scoring(SCORES), read_model=SameReader())
+                                screen_model=TitleScreener.scoring(SCORES), read_model=SameReader(),
+                                mine_model=SameReader())  # nothing to mine: no Claude call is made
     output = capsys.readouterr().out
     assert code == 0
     assert "Screened 5 papers" in output and "Chosen to read: 3 (1 surveys)" in output
-    assert "Read now: 3" in output and "step 5.2b" in output
-    assert (await db_session.get(Investigation, investigation.id)).stage == "opportunity_mining"
+    assert "Read now: 3" in output and "Mining the landscape" in output  # reading goes on to mining (5.2b)
+    assert (await db_session.get(Investigation, investigation.id)).stage == "generating_candidates"

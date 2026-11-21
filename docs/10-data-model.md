@@ -430,6 +430,8 @@ What each type contains:
 | Combination | Method, task, row/column counts, neighbouring examples. A *hint*, never proof | "RAG × low-resource QA for <1B models: 0 papers in sample" |
 | Dataset | Dataset name, tasks, availability result | "AfriQA: available, CC-BY" |
 
+*As built (step 5.2b, migration 0013, table `opportunity_items`):* columns `investigation_id`, `type`, `label`, `quote_ids`, `paper_ids`, `counts` (code-computed numbers only: papers, author groups, per-year counts), `content` (the type's details: a limitation cluster's sources with their kind, future work or finding, and direction; a contradiction's group, directions and the check's reason; a subtopic's why-it-fits and surveys; a dataset's tasks) and `prompt_version` (set when the opportunity miner grouped or checked the item; empty for code-only items). From abstracts, limitation clusters are built from future-work statements and negative or mixed findings (doc 06 §4). The dataset availability check is not built yet.
+
 ### 6.3 Candidate
 
 **What it is:** a research idea under evaluation. It is either the user's own idea (Mode 1) or one created by the Scout (discovery, alternatives, refinements, replenishment).

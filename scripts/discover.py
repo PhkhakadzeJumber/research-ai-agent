@@ -8,7 +8,7 @@ Usage (from the repo root, venv active, database running, Anthropic key in .env)
     python -m scripts.discover --continue <investigation id>      resume where it stopped
     python -m scripts.discover "NLP" --yes                        skip the questions
 
-So far (steps 5.1a-5.2a):
+So far (steps 5.1a-5.2b):
   1. the Idea Analyst's field brief (4-8 subtopics of your field, each with why it fits
      you and its landscape searches); you answer its questions (Enter skips one), may
      remove subtopics, and confirm;
@@ -17,11 +17,15 @@ So far (steps 5.1a-5.2a):
      responses cached 7 days); the papers found are stored;
   3. reading the landscape: the relevance screener (a small model) scores every paper
      against the subtopics, code picks about 45 to read (at least 5 per subtopic, surveys
-     first) and the Paper Reader reads them into the library.
-Mining the landscape for open problems comes with step 5.2b.
+     first) and the Paper Reader reads them into the library;
+  4. mining: recurring open problems (future work and negative or mixed findings, grouped
+     by a small model, kept by code only if 3+ papers from 2+ author groups), confirmed
+     contradictions, subtopic summaries and datasets, stored for the Scout.
+Generating candidate ideas comes with step 5.3.
 
 This calls the paid Anthropic API (the brief: a few cents per call; screening the landscape:
-a few cents; reading: about 3 cents per paper not already in the library) and the free
+a few cents; reading: about 3 cents per paper not already in the library; mining: a few
+cents) and the free
 OpenAlex and arXiv APIs.
 Exit code: 0 ok, 1 a step failed, 2 invalid input or an unavailable database, 3 the budget
 is used up (resume with --continue and a higher --budget).
@@ -41,6 +45,7 @@ from src.ai.workflows.budget import budget_left, cost_cap, set_cost_cap
 from src.ai.workflows.clarification import NotWaitingForClarification, answers_for
 from src.ai.workflows.evaluation import Sessions
 from src.ai.workflows.landscape import LandscapeOutcome, LandscapeReading, landscape_reading_step, landscape_step
+from src.ai.workflows.mining import MiningOutcome, mining_step
 from src.ai.workflows.field import (
     apply_brief_answers,
     confirm_brief,
@@ -58,6 +63,7 @@ from src.retrieval.search import LiteratureSearch
 from src.retrieval.sources.arxiv import ArxivSource
 from src.retrieval.sources.openalex import OpenAlexSource
 from src.db.session import Database
+from src.llm import LlmError
 
 DEFAULT_BUDGET_USD = 12.0  # doc 05 §6, Mode 2
 Ask = Callable[[str], str]
@@ -267,14 +273,47 @@ async def over_budget(sessions: Sessions, investigation_id: uuid.UUID, before: s
 
 
 async def read_landscape(sessions: Sessions, investigation_id: uuid.UUID, *, screen_model=None,
-                         read_model=None) -> int:
+                         read_model=None, mine_model=None) -> int:
     if await over_budget(sessions, investigation_id, "reading the landscape"):
         return 3
     print("\nReading the landscape: screening every paper, then reading the best ~45...")
     outcome = await landscape_reading_step(sessions, investigation_id, screen_model=screen_model,
                                            read_model=read_model)
     print(format_reading(outcome))
-    print("\nNext: mining the landscape for open problems comes with step 5.2b.")
+    return await mine(sessions, investigation_id, model=mine_model)
+
+
+# --- mining the landscape -------------------------------------------------------------------------------
+
+def format_mining(outcome: MiningOutcome) -> str:
+    lines = [f"  {outcome.statements} verified statements from {outcome.papers} papers -> {outcome.groups} groups"]
+    lines.append(f"  Recurring open problems: {len(outcome.clusters)}")
+    lines.extend(f"    {item.counts['papers']:>2} papers, {item.counts['author_groups']} author groups  {item.label}"
+                 for item in sorted(outcome.clusters, key=lambda i: -i.counts["papers"]))
+    if outcome.dropped:
+        lines.append(f"  Not recurring enough (fewer than 3 papers or 2 author groups): {len(outcome.dropped)}")
+    lines.append(f"  Contradictions: {len(outcome.contradictions)} of {outcome.pairs_checked} suspected pairs")
+    lines.extend(f"    {item.label}" for item in outcome.contradictions)
+    lines.append("  Subtopics (landscape papers / read):")
+    lines.extend(f"    {item.counts['landscape_papers']:>4} / {item.counts['read']:<3} {item.label}"
+                 for item in outcome.subtopics)
+    shared = [item for item in outcome.datasets if item.counts["papers"] > 1]
+    lines.append(f"  Datasets named: {len(outcome.datasets)}"
+                 + (f" (in 2+ papers: {', '.join(item.label for item in shared)})" if shared else ""))
+    return "\n".join(lines)
+
+
+async def mine(sessions: Sessions, investigation_id: uuid.UUID, *, model=None) -> int:
+    if await over_budget(sessions, investigation_id, "mining the landscape"):
+        return 3
+    print("\nMining the landscape: recurring problems, contradictions, subtopics, datasets...")
+    try:
+        outcome = await mining_step(sessions, investigation_id, model=model)
+    except LlmError as error:
+        print(f"  The opportunity miner failed: {error}. Nothing was stored; run --continue to try again.")
+        return 1
+    print(format_mining(outcome))
+    print("\nNext: generating candidate ideas from this material comes with step 5.3.")
     return 0
 
 
@@ -311,7 +350,9 @@ async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, 
     if investigation.stage == Stage.LANDSCAPE_READING:
         return await read_landscape(sessions, investigation_id)
     if investigation.stage == Stage.OPPORTUNITY_MINING:
-        print("The landscape is read. Next: mining it for open problems comes with step 5.2b.")
+        return await mine(sessions, investigation_id)
+    if investigation.stage == Stage.GENERATING_CANDIDATES:
+        print("The landscape is mined. Next: generating candidate ideas comes with step 5.3.")
         return 0
     raise InputError(f"Investigation {investigation_id} can't be continued from stage {investigation.stage}.")
 

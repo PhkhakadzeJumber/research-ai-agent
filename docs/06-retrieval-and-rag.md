@@ -147,6 +147,8 @@ Then **opportunity mining** runs over the Paper Reader outputs (code with embedd
 | Method × problem matrix | Normalize extracted methods and tasks; count co-occurrences; highlight empty cells whose row and column are both well populated | Combination hints |
 | Dataset hints | Datasets mentioned per task, plus a Hugging Face availability check | Dataset table |
 
+*As built (step 5.2b, `src/ai/workflows/mining.py`):* the landscape is read from abstracts, which almost never state limitations (the first live run: 0 limitation quotes, 17 future-work quotes, 82 findings). So **recurring problems** replace limitation clusters: the opportunity miner (a small model, role `opportunity_mining`) groups verified future-work statements and verified findings by the open problem they point at; code counts the *problem* statements of each group (future work, negative and mixed findings) and keeps the group only with ≥3 papers from ≥2 author groups (papers joined when they share an author). **Contradictions** need no embeddings: within each group, code pairs a positive finding with a negative or no-effect finding from another paper (at most 15 pairs) and the miner checks each pair; only confirmed pairs are kept. **Subtopic** items (landscape papers per subtopic from the searches that found them, per-year counts, papers read, surveys) and **dataset** items (names the reader's check found in the text, with the papers' tasks) are pure code. The **method × problem matrix** waits for full text: from abstracts nearly every method and task name occurs once. The Hugging Face check and trend counts are deferred.
+
 ## 5. Caching, rate limits, retries
 
 | Concern | Approach |
