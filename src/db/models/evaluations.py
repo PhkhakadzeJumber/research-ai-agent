@@ -12,7 +12,8 @@ Step 4.6 adds the novelty evidence (doc 10 §7.2-7.3):
   ClaimEvidence  a claim's link to a verified-or-not quote, with a stance
 and two JSON columns on Evaluation: the Novelty Investigator's remaining output
 (closest works, proposed verdict, uncertainties) and the coverage snapshot (frozen at
-`concluding`). Verdicts arrive with `concluding`.
+`concluding`). Step 4.7 adds Challenge: one objection raised by the Skeptic (doc 10 §7.4).
+Verdicts arrive with `concluding`.
 """
 
 from __future__ import annotations
@@ -21,9 +22,9 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import CheckConstraint, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, SmallInteger, String, Text, UniqueConstraint, Uuid
 from sqlalchemy import text as sql_text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src import timeutil
@@ -40,6 +41,10 @@ STATEMENT_TYPES = ("evidence", "interpretation", "hypothesis")
 CLAIM_STATUSES = ("proposed", "verified", "unverified_quote", "no_evidence", "challenged", "defended", "refuted")
 AUTHOR_AGENTS = ("novelty", "skeptic", "value_feasibility")
 STANCES = ("supports", "contradicts", "qualifies")
+# doc 10 §7.4
+CHALLENGE_TYPES = ("prior_work_found", "weak_assumption", "methodological_flaw", "overstated_contribution",
+                   "alternative_explanation", "feasibility_risk")
+CHALLENGE_RESOLUTIONS = ("unresolved", "accepted", "rebutted")
 
 
 class Evaluation(UUIDPrimaryKey, Timestamps, Base):
@@ -124,3 +129,34 @@ class ClaimEvidence(UUIDPrimaryKey, Timestamps, Base):
     claim_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("claims.id", ondelete="CASCADE"), index=True)
     quote_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("quotes.id"))
     stance: Mapped[str] = mapped_column(String(16))
+
+
+
+class Challenge(UUIDPrimaryKey, Timestamps, Base):
+    """One objection raised by the Skeptic (doc 10 §7.4). Rounds are append-only: earlier
+    challenges are never deleted. The resolution is set by code from the Novelty
+    Investigator's response (step 4.7b)."""
+
+    __tablename__ = "challenges"
+    __table_args__ = (
+        CheckConstraint(one_of("type", CHALLENGE_TYPES), name="type_valid"),
+        CheckConstraint(one_of("resolution", CHALLENGE_RESOLUTIONS), name="resolution_valid"),
+        CheckConstraint(one_of("statement_type", STATEMENT_TYPES), name="statement_type_valid"),
+        CheckConstraint("round >= 1", name="round_positive"),
+    )
+
+    evaluation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("evaluations.id", ondelete="CASCADE"), index=True)
+    round: Mapped[int] = mapped_column(SmallInteger)
+    target_claim_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("claims.id"))
+    type: Mapped[str] = mapped_column(String(32))
+    argument: Mapped[str] = mapped_column(Text)
+    # evidence: backed by verified quotes; interpretation: an assumption/method critique without evidence
+    statement_type: Mapped[str] = mapped_column(String(16))
+    evidence_quote_ids: Mapped[list[uuid.UUID]] = mapped_column(ARRAY(Uuid), default=list,
+                                                                server_default=sql_text("'{}'"))
+    new_paper_ids: Mapped[list[uuid.UUID]] = mapped_column(ARRAY(Uuid), default=list, server_default=sql_text("'{}'"))
+    # The facets (numbers) the Skeptic says a paper matches as "same": with verified quotes on every
+    # key facet, the challenge overrides the novelty claim (doc 07 §4.5).
+    same_on_facets: Mapped[list[int]] = mapped_column(ARRAY(Integer), default=list, server_default=sql_text("'{}'"))
+    resolution: Mapped[str] = mapped_column(String(16), default="unresolved", server_default="unresolved")
+    rebuttal_claim_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("claims.id"))

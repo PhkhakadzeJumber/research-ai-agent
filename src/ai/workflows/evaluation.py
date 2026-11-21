@@ -107,7 +107,7 @@ class SearchesLike(Protocol):
     async def search(self, request: SearchRequest) -> SearchResult: ...
 
 
-async def _at_step(session: AsyncSession, evaluation_id: uuid.UUID, step: EvaluationStep) -> Evaluation:
+async def at_step(session: AsyncSession, evaluation_id: uuid.UUID, step: EvaluationStep) -> Evaluation:
     """The evaluation, if it's running and at `step`: checked before any money is spent."""
     evaluation = await session.get(Evaluation, evaluation_id)
     if evaluation is None:
@@ -182,7 +182,7 @@ async def plan_step(
     sessions: Sessions, evaluation_id: uuid.UUID, *, settings: RoleLlmSettings | None = None, model: Any | None = None
 ) -> PlanOutcome:
     async with sessions() as session:
-        evaluation = await _at_step(session, evaluation_id, EvaluationStep.PLANNING_QUERIES)
+        evaluation = await at_step(session, evaluation_id, EvaluationStep.PLANNING_QUERIES)
         candidate = await session.get(Candidate, evaluation.candidate_id)
         investigation_id, depth = candidate.investigation_id, evaluation.depth
         view = await candidate_for_planning(session, candidate)
@@ -231,7 +231,7 @@ async def retrieve_step(
     sessions: Sessions, evaluation_id: uuid.UUID, search: SearchesLike, *, concurrency: int = SEARCH_CONCURRENCY
 ) -> RetrievalOutcome:
     async with sessions() as session:
-        evaluation = await _at_step(session, evaluation_id, EvaluationStep.RETRIEVING)
+        evaluation = await at_step(session, evaluation_id, EvaluationStep.RETRIEVING)
         candidate = await session.get(Candidate, evaluation.candidate_id)
         investigation_id = candidate.investigation_id
         plan = QueryPlanOutput.model_validate(evaluation.query_plan)
@@ -302,22 +302,20 @@ def _found_count():
     return func.cardinality(RetrievalHit.found_by_query_ids)
 
 
-async def screen_step(
+async def score_unscreened(
     sessions: Sessions,
     evaluation_id: uuid.UUID,
     *,
-    max_read: int | None = None,
+    view: CandidateForPlanning,
+    investigation_id: uuid.UUID,
     batch_size: int = BATCH_SIZE,
     concurrency: int = SCREEN_CONCURRENCY,
     settings: RoleLlmSettings | None = None,
     model: Any | None = None,
-) -> ScreeningOutcome:
+) -> tuple[int, int]:
+    """Scores every not-yet-screened paper of the evaluation, in parallel batches.
+    Returns (screened, not_screened). Used by screening and by each Skeptic round."""
     async with sessions() as session:
-        evaluation = await _at_step(session, evaluation_id, EvaluationStep.SCREENING)
-        candidate = await session.get(Candidate, evaluation.candidate_id)
-        investigation_id = candidate.investigation_id
-        limit = max_read if max_read is not None else MAX_READ[evaluation.depth]
-        view = await candidate_for_planning(session, candidate)
         rows = (await session.execute(
             select(RetrievalHit.id, Paper.title, Paper.year, Paper.abstract)
             .join(Paper, Paper.id == RetrievalHit.paper_id)
@@ -360,7 +358,31 @@ async def screen_step(
                 hit.llm_score, hit.llm_reason, hit.screened = judgement.score, judgement.reason, True
                 screened += 1
         await session.flush()
+    return screened, not_screened
 
+
+async def screen_step(
+    sessions: Sessions,
+    evaluation_id: uuid.UUID,
+    *,
+    max_read: int | None = None,
+    batch_size: int = BATCH_SIZE,
+    concurrency: int = SCREEN_CONCURRENCY,
+    settings: RoleLlmSettings | None = None,
+    model: Any | None = None,
+) -> ScreeningOutcome:
+    async with sessions() as session:
+        evaluation = await at_step(session, evaluation_id, EvaluationStep.SCREENING)
+        candidate = await session.get(Candidate, evaluation.candidate_id)
+        investigation_id = candidate.investigation_id
+        limit = max_read if max_read is not None else MAX_READ[evaluation.depth]
+        view = await candidate_for_planning(session, candidate)
+
+    screened, not_screened = await score_unscreened(
+        sessions, evaluation_id, view=view, investigation_id=investigation_id, batch_size=batch_size,
+        concurrency=concurrency, settings=settings, model=model)
+
+    async with sessions() as session:
         if not_screened:
             await note_degraded(session, evaluation_id, "screening",
                                 f"{not_screened} papers could not be screened (failed or skipped batches)")
@@ -444,7 +466,7 @@ async def read_step(
     model: Any | None = None,
 ) -> ReadingOutcome:
     async with sessions() as session:
-        evaluation = await _at_step(session, evaluation_id, EvaluationStep.READING)
+        evaluation = await at_step(session, evaluation_id, EvaluationStep.READING)
         investigation_id = (await session.get(Candidate, evaluation.candidate_id)).investigation_id
         chosen = await selected_papers(session, evaluation_id)
 
@@ -520,7 +542,7 @@ async def novelty_step(
     model: Any | None = None,
 ) -> NoveltyOutcome:
     async with sessions() as session:
-        evaluation = await _at_step(session, evaluation_id, EvaluationStep.ASSESSING_NOVELTY)
+        evaluation = await at_step(session, evaluation_id, EvaluationStep.ASSESSING_NOVELTY)
         candidate = await session.get(Candidate, evaluation.candidate_id)
         investigation_id = candidate.investigation_id
         view = await candidate_for_planning(session, candidate)
@@ -633,10 +655,12 @@ async def novelty_verdict_for(session: AsyncSession, evaluation_id: uuid.UUID) -
     minor = frozenset(work["paper_id"] for work in assessment.get("closest_works", [])
                       if work.get("minor_difference_only"))
     coverage = await compute_coverage(session, evaluation_id)
+    rounds = (evaluation.counters or {}).get("skeptic_rounds", [])
     inputs = NoveltyInputs(
         depth=evaluation.depth, key_facets=tuple(f.position + 1 for f in facets if f.is_key), matches=matches,
         minor_difference_papers=minor, gap_claim_statuses=gap_statuses, relevant=coverage["funnel"]["relevant"],
         screened=coverage["funnel"]["screened"], read=coverage["funnel"]["read"], sources_ok=coverage["sources_ok"],
         retrieval_failed=evaluation.status == "failed", assessment_failed=not assessment or "error" in assessment,
+        skeptic_ran=bool(rounds), skeptic_saturated=bool(rounds) and rounds[-1].get("saturated", False),
     )
     return novelty_verdict(inputs), coverage

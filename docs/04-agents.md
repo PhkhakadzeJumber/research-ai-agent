@@ -235,7 +235,9 @@ Model settings use Claude through ADK (doc 08). *Effort* is the model's reasonin
 - The list of paper IDs already considered, so it looks elsewhere.
 - Its search budget.
 
-**Tools:**
+**As built (step 4.7): code-driven rounds instead of tool calls.** The Skeptic decides, code acts: one call plans 4–8 adversarial searches (other terminology, older work, adjacent fields, other methods, follow-ups of the closest works); code runs them (origin `skeptic`, with the round), screens the papers new to the evaluation and reads the most relevant (up to 5 per round); a second call writes challenges quoting those papers. Code maps labels to IDs, verifies every quote, and records the round's saturation statistic. This keeps cost exact and the step testable without money; a real tool loop can come later if needed. The tools below describe the original sketch.
+
+**Tools (original sketch):**
 
 | Tool | Use |
 |---|---|

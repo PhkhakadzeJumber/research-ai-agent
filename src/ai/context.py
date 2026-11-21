@@ -2,7 +2,8 @@
 Paper Reader (render_paper); ideas, revisions and query-planning tasks for the Idea
 Analyst (render_idea, render_revision, render_query_task); batches of papers for the
 relevance screener (render_screening_batch); the closest papers with their readings for
-the Novelty Investigator (render_novelty_task).
+the Novelty Investigator (render_novelty_task); the analysis's claims and verdict for the
+Skeptic (render_skeptic_queries, render_skeptic_challenges).
 
 Agents never read the database themselves. The orchestrator gives each one a curated
 packet, rendered as clearly labelled blocks so the model knows what it may cite:
@@ -30,7 +31,8 @@ ABSTRACT_ONLY_NOTE = (
 )
 FULL_TEXT_NOTE = "Passages from the full text are included as chunks, each with its ID and section."
 
-_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage)\b", re.IGNORECASE)
+_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined)\b",
+                   re.IGNORECASE)
 _QUOTE_IN_ATTRIBUTE = re.compile(r'["<>]')
 
 
@@ -342,4 +344,56 @@ def render_novelty_task(candidate: CandidateForPlanning, papers: tuple[PaperForN
         lines.append("</paper>")
     lines.append("</papers>")
     lines.append(f"<coverage>{_contain(coverage)}</coverage>")
+    return "\n".join(lines)
+
+
+
+# --- the Skeptic's packets ------------------------------------------------------------------------------
+#
+#     (the candidate block)
+#     <claims>
+#     <claim label="C1" kind="gap" status="verified">...</claim>
+#     </claims>
+#     <verdict>Potential opportunity (no verified match; the search has limits)</verdict>
+#     <examined>
+#     - Title of an examined paper (2024)
+#     </examined>                                  (query planning)
+#     <papers>...</papers>                         (challenges: the new papers, as for A4)
+
+
+@dataclass(frozen=True)
+class ClaimForSkeptic:
+    label: str
+    kind: str
+    text: str
+    status: str
+
+
+def _skeptic_context(candidate: CandidateForPlanning, claims: tuple[ClaimForSkeptic, ...], verdict: str,
+                     task: str) -> list[str]:
+    lines = [render_query_task(candidate, task=task), "<claims>"]
+    for claim in claims:
+        lines.append(f'<claim label="{_attribute(claim.label)}" kind="{claim.kind}" status="{claim.status}">'
+                     f"{_contain(claim.text)}</claim>")
+    lines.append("</claims>")
+    lines.append(f"<verdict>{_contain(verdict)}</verdict>")
+    return lines
+
+
+def render_skeptic_queries(candidate: CandidateForPlanning, claims: tuple[ClaimForSkeptic, ...], verdict: str,
+                           examined: tuple[str, ...]) -> str:
+    """The Skeptic's input for planning its searches."""
+    lines = _skeptic_context(candidate, claims, verdict, "Plan searches that could disprove the idea's novelty.")
+    lines.append("<examined>")
+    lines.extend(f"- {_contain(title)}" for title in examined)
+    lines.append("</examined>")
+    return "\n".join(lines)
+
+
+def render_skeptic_challenges(candidate: CandidateForPlanning, claims: tuple[ClaimForSkeptic, ...], verdict: str,
+                              papers: tuple[PaperForNovelty, ...]) -> str:
+    """The Skeptic's input for writing challenges from the new papers it found."""
+    lines = _skeptic_context(candidate, claims, verdict, "Challenge the analysis using the new papers below.")
+    novelty = render_novelty_task(candidate, papers, coverage="")
+    lines.append(novelty[novelty.index("<papers>"):novelty.index("</papers>") + len("</papers>")])
     return "\n".join(lines)

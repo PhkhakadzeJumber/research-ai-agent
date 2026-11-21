@@ -326,6 +326,8 @@ stateDiagram-v2
 
 **As built (step 4.6):** `assessing_novelty` runs A4 on the 12 closest read papers and stores the facet matrix (`facet_matches`), claims and their evidence; the novelty verdict is computed by the verdict engine from that evidence and the coverage snapshot. It is shown as *preliminary* until the Skeptic has run (step 4.7) and is frozen at `concluding` (step 4.9).
 
+**As built (step 4.7a):** each `skeptic_review` round stores its searches (origin `skeptic`, round n), screens and reads up to 5 new relevant papers, stores the challenges (claims they target become `challenged`), and records its saturation statistic (new relevant papers). With challenges or new relevant papers it moves to `revising_novelty`; with neither it is saturated and moves to `assessing_value_feasibility`. A failed Skeptic call degrades the step.
+
 The evaluation's separate **status** (`running` / `done` / `partial` / `failed`) records *how* it ended. A failed step degrades the evaluation to `partial` instead of stopping the investigation. Example: all sources fail → novelty becomes "insufficient evidence".
 
 ### 11.5 Candidate statuses

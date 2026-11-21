@@ -615,6 +615,8 @@ The papers the Skeptic finds flow back into the search trail as SearchQuery (ori
 | argument | The Skeptic's reasoning | The user reads it | "A 2025 workshop paper tests RAG on 0.5B models for Georgian" |
 | evidence quote IDs, new paper IDs | The proof and the newly found papers | A challenge backed by a verified quote can override a novelty claim | `qt_102`, `p_9001` |
 | resolution | accepted / rebutted / unresolved | Shows how the system responded; unresolved challenges go into the limitations | accepted |
+| statement type | evidence (≥1 verified quote) / interpretation | Set by code; challenges without verified evidence are shown as the Skeptic's interpretation | evidence |
+| same on facets | For prior work found: the facets the cited paper matches as "same" | With verified quotes on every key facet, the challenge overrides the novelty claim (doc 07 §4.5) | 1, 2, 3 |
 | rebuttal claim id | The Novelty Investigator's answer, as a claim with its own evidence | The debate is data: claim → challenge → rebuttal → evidence | `cl_14` |
 
 ### 7.5 Verdict

@@ -256,6 +256,13 @@ SCREEN_SETTINGS = RoleLlmSettings(role="relevance_screening", model="claude-haik
                                   max_tokens=16000)
 READ_SETTINGS = RoleLlmSettings(role="paper_reader", model="claude-opus-5-5", effort="low", max_tokens=16000)
 NOVELTY_SETTINGS = RoleLlmSettings(role="novelty", model="claude-opus-5-5", effort="high", max_tokens=16000)
+SKEPTIC_SETTINGS = RoleLlmSettings(role="skeptic", model="claude-opus-5-5", effort="high", max_tokens=16000)
+
+
+def skeptic_queries_answer(*texts):
+    texts = texts or ("attribution low-resource qa", "open-book qa georgian", "kartvelian grounding",
+                      "small models retrieval faithfulness")
+    return answer(json.dumps({"queries": [{"text": t, "angle": "other_terminology", "why": "w"} for t in texts]}))
 
 
 def novelty_answer(cells=(), **extra):
@@ -278,12 +285,13 @@ async def test_the_command_runs_the_evaluation_up_to_the_novelty_assessment(db_s
     screener = ScriptedLlm.with_answers(screening_answer(3, 1))  # Paper A direct prior work, Paper B tangential
     reader = ScriptedLlm.with_answers(answer(json.dumps({"contribution_type": "empirical_study"})))
     novelty = ScriptedLlm.with_answers(novelty_answer([("P1", 1, "same", "We study Paper A")]))
+    skeptic = ScriptedLlm.with_answers(skeptic_queries_answer())  # its searches find nothing new
     search = FakeSearch({"rag hallucination georgian question answering": ["Paper A", "Paper B"]})
 
     code = await evaluate(sessions_on(db_session), investigation.id, search_factory=lambda: search,
                           settings=SETTINGS, model=planner, screen_settings=SCREEN_SETTINGS, screen_model=screener,
                           read_settings=READ_SETTINGS, read_model=reader, novelty_settings=NOVELTY_SETTINGS,
-                          novelty_model=novelty)
+                          novelty_model=novelty, skeptic_settings=SKEPTIC_SETTINGS, skeptic_model=skeptic)
 
     assert code == 0
     output = capsys.readouterr().out
@@ -297,13 +305,19 @@ async def test_the_command_runs_the_evaluation_up_to_the_novelty_assessment(db_s
     assert "Prior-work matrix" in output and "P1 Paper A" in output
     assert "Novelty (preliminary, before the Skeptic): Insufficient evidence" in output  # 1 relevant paper < 20
     assert "Blind spots:" in output and "semantic_scholar was not searched." in output
-    assert "the Skeptic reviews this with step 4.7" in output
+    assert "Round 1" in output and "attribution low-resource qa" in output
+    assert "4 searches -> 0 papers new to this evaluation -> 0 relevant -> 0 read" in output
+    assert "Saturation statistic: 0 new relevant papers (saturated)" in output
+    assert "Novelty (preliminary, after 1 Skeptic round)" in output
+    assert "value and feasibility come with step 4.8 (now at assessing_value_feasibility)" in output
 
 
 async def test_the_command_resumes_where_the_evaluation_stopped(db_session, capsys):
     investigation, evaluation_id = await planned(db_session)  # already planned
     llm = ScriptedLlm.with_answers()  # planning must not run again
-    code = await evaluate(sessions_on(db_session), investigation.id, search_factory=lambda: FakeSearch(), model=llm)
+    code = await evaluate(sessions_on(db_session), investigation.id, search_factory=lambda: FakeSearch(), model=llm,
+                          skeptic_settings=SKEPTIC_SETTINGS,
+                          skeptic_model=ScriptedLlm.with_answers(skeptic_queries_answer()))
     assert code == 0 and llm.requests == []
     assert "Planning the searches" not in capsys.readouterr().out
     assert (await db_session.get(Candidate, (await db_session.get(Evaluation, evaluation_id)).candidate_id))

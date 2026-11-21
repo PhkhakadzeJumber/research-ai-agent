@@ -22,7 +22,10 @@ So far (steps 4.2-4.4):
      Opus; papers already in the library are free);
   6. novelty: the Novelty Investigator compares the idea with the 12 closest read papers
      facet by facet (one Opus call, about 25 cents); code verifies its quotes and the
-     verdict engine gives a preliminary novelty verdict with the coverage snapshot.
+     verdict engine gives a preliminary novelty verdict with the coverage snapshot;
+  7. Skeptic round: the Skeptic plans adversarial searches, code runs them, screens and
+     reads up to 5 new relevant papers, and the Skeptic challenges the analysis with
+     quotes from them (2 Opus calls + up to 5 readings, about 50-70 cents).
 If Eureka had to propose a KEY facet, you must confirm the reading yourself: --yes is
 refused. Quitting at the confirmation keeps everything; resume with --continue.
 Later steps extend this until the whole evaluation runs (step 4.8).
@@ -68,6 +71,7 @@ from src.ai.workflows.evaluation import (
     novelty_verdict_for,
     selected_papers,
 )
+from src.ai.workflows.skeptic_round import skeptic_round_step
 from src.ai.workflows.states import EvaluationStep, Stage
 from src.ai.workflows.understanding import understand_idea
 from src.config import ConfigError
@@ -268,7 +272,8 @@ def _short(text: str, width: int = TITLE_WIDTH) -> str:
 
 async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read: int | None = None,
                    search_factory=None, settings=None, model=None, screen_settings=None, screen_model=None,
-                   read_settings=None, read_model=None, novelty_settings=None, novelty_model=None) -> int:
+                   read_settings=None, read_model=None, novelty_settings=None, novelty_model=None,
+                   skeptic_settings=None, skeptic_model=None) -> int:
     """Runs the full evaluation of the investigation's confirmed idea, from wherever it stands."""
     async with sessions() as session:
         candidates = [c for c in await investigation_candidates(session, investigation_id)
@@ -362,13 +367,28 @@ async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read:
                         .where(Evaluation.id == evaluation_id).order_by(Facet.position)
                     )).scalars())
                 print(format_novelty(outcome, facets))
+            async with sessions() as session:
+                verdict, coverage = await novelty_verdict_for(session, evaluation_id)
+            print("\n" + format_verdict(verdict, coverage))
+        elif step == EvaluationStep.SKEPTIC_REVIEW:
+            print("\nSkeptic round: searching for evidence against the idea...")
+            factory = search_factory or (lambda: LiteratureSearch.from_settings(cache=DbResponseCache(sessions)))
+            async with factory() as search:
+                outcome = await skeptic_round_step(
+                    sessions, evaluation_id, search, settings=skeptic_settings, model=skeptic_model,
+                    screen_settings=screen_settings, screen_model=screen_model, read_settings=read_settings,
+                    read_model=read_model)
+            print(format_round(outcome))
         else:
             async with sessions() as session:
                 verdict, coverage = await novelty_verdict_for(session, evaluation_id)
                 cost = (await session.get(Investigation, investigation_id)).cost_usd
             print("\n" + format_verdict(verdict, coverage))
             print(f"\nCost so far: ${cost:.4f}")
-            print(f"Next: the Skeptic reviews this with step 4.7 (now at {step}).")
+            if step == EvaluationStep.REVISING_NOVELTY:
+                print("Next: the Novelty Investigator answers the challenges with step 4.7b (now at revising_novelty).")
+            else:
+                print(f"Next: value and feasibility come with step 4.8 (now at {step}).")
             return 0
 
 
@@ -416,9 +436,38 @@ def format_novelty(outcome, facets) -> str:
     return "\n".join(lines)
 
 
+def format_round(outcome) -> str:
+    lines = [f"Round {outcome.round}"]
+    if outcome.plan is not None:
+        lines.append("  Attack searches:")
+        lines.extend(f"    {q.angle:<22} {q.text}   ({q.why})" for q in outcome.plan.output.queries)
+    lines.append(f"  {outcome.searches} searches -> {outcome.new_papers} papers new to this evaluation -> "
+                 f"{outcome.new_relevant} relevant -> {len(outcome.read)} read")
+    for paper, result in outcome.read:
+        status = f"FAILED: {result.error}" if result.error else f"quotes verified {result.verified_quotes}/{result.quotes}"
+        lines.append(f"    {_short(paper.title, 70)} ({paper.year or 'n.d.'}) | {status}")
+    if outcome.challenges:
+        lines.append("  Challenges (+ verified quote, ! unverified):")
+        for challenge in outcome.challenges:
+            target = f" -> {challenge.target_claim}" if challenge.target_claim else ""
+            marks = "".join("+" if quote.verified else "!" for _, quote in challenge.evidence)
+            kind = "evidence" if challenge.statement_type == "evidence" else "interpretation"
+            same = f" | same on facets {challenge.same_on_facets}" if challenge.same_on_facets else ""
+            lines.append(f"    [{challenge.type}{target}, {kind} {marks}] {challenge.argument}{same}")
+    elif outcome.error is None:
+        lines.append("  No challenges: the new papers don't damage the analysis.")
+    if outcome.error:
+        lines.append(f"  {outcome.error}")
+    lines.append(f"  Saturation statistic: {outcome.new_relevant} new relevant papers"
+                 + (" (saturated)" if outcome.saturated else ""))
+    return "\n".join(lines)
+
+
 def format_verdict(verdict, coverage) -> str:
     funnel = coverage["funnel"]
-    lines = [f"Novelty (preliminary, before the Skeptic): {verdict.label}   [{verdict.rules_version}, rule {verdict.rule}]"]
+    rounds = len(coverage.get("skeptic_rounds", []))
+    when = "before the Skeptic" if not rounds else f"after {rounds} Skeptic round{'s' if rounds > 1 else ''}"
+    lines = [f"Novelty (preliminary, {when}): {verdict.label}   [{verdict.rules_version}, rule {verdict.rule}]"]
     lines.extend(f"  {line}" for line in verdict.trace)
     if verdict.weaknesses:
         lines.append("  Limits of the search behind this:")

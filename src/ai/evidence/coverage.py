@@ -61,7 +61,15 @@ async def compute_coverage(session: AsyncSession, evaluation_id: uuid.UUID) -> d
     full_text = (await session.execute(
         select(func.count(func.distinct(Chunk.paper_id))).where(Chunk.paper_id.in_(read_ids))
     )).scalar_one()
-    read = int(counters.get("read_now", 0)) + int(counters.get("read_reused", 0))
+    # Counted from the database, so later steps (Skeptic rounds) are included (step 4.7a live run:
+    # the counters still said 24 read after the Skeptic had read 5 more).
+    read = (await session.execute(select(func.count()).select_from(read_ids.subquery()))).scalar_one()
+    retrieved = (await session.execute(
+        select(func.coalesce(func.sum(SearchQuery.result_count), 0)).where(SearchQuery.evaluation_id == evaluation_id)
+    )).scalar_one()
+    unique, screened = (await session.execute(
+        select(func.count(), func.count().filter(RetrievalHit.screened.is_(True))).where(in_scope)
+    )).one()
 
     blind_spots = [f"{name} was not searched." for name in ALL_SOURCES if name not in sources]
     blind_spots += [f"{name} failed for {entry['failed']} of {entry['searches']} searches."
@@ -80,9 +88,9 @@ async def compute_coverage(session: AsyncSession, evaluation_id: uuid.UUID) -> d
         "queries_by_origin": origins,
         "years": {"from": years[0], "to": years[1]},
         "funnel": {
-            "retrieved": int(counters.get("retrieved", 0)),
-            "unique": int(counters.get("unique_papers", 0)),
-            "screened": int(counters.get("screened", 0)),
+            "retrieved": int(retrieved),  # records returned by all sources, before deduplication
+            "unique": unique,
+            "screened": screened,
             "relevant": relevant,
             "read": read,
             "read_failed": int(counters.get("read_failed", 0)),
@@ -90,7 +98,10 @@ async def compute_coverage(session: AsyncSession, evaluation_id: uuid.UUID) -> d
         "read_full_text": full_text,
         "read_abstract_only": max(read - full_text, 0),
         "tier_mix": {"peer_reviewed": read_tiers.get(1, 0), "preprint": read_tiers.get(2, 0)},
-        "skeptic_rounds": [],
+        "skeptic_rounds": [
+            {"round": r["round"], "new_relevant": r.get("new_relevant", 0), "challenges": r.get("challenges", 0)}
+            for r in counters.get("skeptic_rounds", [])
+        ],
         "budgets_hit": [],
         "blind_spots": blind_spots,
     }
