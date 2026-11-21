@@ -110,7 +110,8 @@ def render_paper(paper: PaperForReading, *, max_authors: int = 10) -> str:
 #     - available time: 8 weeks
 #     </constraints>
 
-_IDEA_TAGS = re.compile(r"<(/?)(idea|field|seed_papers|complexity|constraints)\b", re.IGNORECASE)
+_IDEA_TAGS = re.compile(r"<(/?)(idea|field|seed_papers|complexity|constraints|field_request|interests|technologies|exclusions|domain|count)\b",
+                        re.IGNORECASE)
 
 COMPLEXITY_NOTES = {
     "beginner": "beginner: a well-scoped empirical question; existing models and public datasets used as-is",
@@ -531,3 +532,68 @@ def name_papers(value, papers: dict):
     if isinstance(value, dict):
         return {key: name_papers(item, papers) for key, item in value.items()}
     return value
+
+
+
+# --- the Idea Analyst's field-brief packets (Mode 2, step 5.1) -------------------------------------------
+#
+#     <field_request>
+#     <field>NLP</field>
+#     <interests>evaluation of LLM agents</interests>
+#     <technologies>PyTorch</technologies>
+#     <exclusions>medical</exclusions>
+#     <domain>education</domain>
+#     <complexity>beginner: ...</complexity>
+#     <constraints>
+#     - available time: 10 weeks
+#     </constraints>
+#     <count>3</count>
+#     </field_request>
+
+
+@dataclass(frozen=True)
+class FieldRequest:
+    """What the Idea Analyst is shown for a Mode 2 request (doc 02 §2.2)."""
+
+    field: str
+    complexity: str
+    interests: str | None = None
+    technologies: str | None = None
+    exclusions: tuple[str, ...] = ()
+    domain: str | None = None
+    constraints: tuple[tuple[str, str], ...] = ()
+    count: int = 3
+
+
+def render_field_request(request: FieldRequest) -> str:
+    """The Idea Analyst's input for a field brief. Raises ValueError for an empty field."""
+    if not request.field.strip():
+        raise ValueError("The field is empty.")
+    lines = ["<field_request>", f"<field>{_contain_user_text(request.field)}</field>"]
+    for tag, value in (("interests", request.interests), ("technologies", request.technologies),
+                       ("domain", request.domain)):
+        if value:
+            lines.append(f"<{tag}>{_contain_user_text(value)}</{tag}>")
+    if request.exclusions:
+        lines.append(f"<exclusions>{_contain_user_text('; '.join(request.exclusions))}</exclusions>")
+    lines.append(f"<complexity>{COMPLEXITY_NOTES.get(request.complexity, request.complexity)}</complexity>")
+    if request.constraints:
+        items = "\n".join(f"- {_contain_user_text(name)}: {_contain_user_text(value)}"
+                          for name, value in request.constraints)
+        lines.append(f"<constraints>\n{items}\n</constraints>")
+    lines.append(f"<count>{request.count}</count>")
+    lines.append("</field_request>")
+    return "\n".join(lines)
+
+
+def render_field_revision(request: FieldRequest, brief_json: str, answers: tuple[QuestionAnswer, ...]) -> str:
+    """The Idea Analyst's input for revising its field brief with the user's answers."""
+    if not answers:
+        raise ValueError("Nothing to revise: no answers.")
+    items = "\n".join(
+        f'<answer question="{_attribute(_contain_revision_text(item.question))}">'
+        f"{_contain_revision_text(item.answer)}</answer>"
+        for item in answers
+    )
+    return "\n".join([render_field_request(request), f"<reading>\n{_contain_revision_text(brief_json)}\n</reading>",
+                      f"<answers>\n{items}\n</answers>"])

@@ -15,8 +15,12 @@ idea_analyst_query_plan). Code checks the quotas (src/ai/schemas/query_plan.py);
 that misses them is regenerated once with the exact shortfalls. If the second plan still
 misses some, it is used anyway and the shortfalls are returned (recorded as a degraded step).
 
+analyse_field() and revise_field() (step 5.1, Mode 2) write and revise the field brief:
+4-8 subtopics with landscape searches. Code checks the user's exclusions; a brief that
+touches an excluded topic is rewritten once, told exactly what to fix.
+
 The facet rules live in the schema, so a broken answer gets one automatic repair attempt.
-Field brief (Mode 2) and candidate normalization come with later steps.
+Candidate normalization comes with a later step.
 """
 
 from __future__ import annotations
@@ -27,14 +31,18 @@ from typing import Any
 
 from src.ai.context import (
     CandidateForPlanning,
+    FieldRequest,
     IdeaForAnalysis,
     QuestionAnswer,
+    render_field_request,
+    render_field_revision,
     render_idea,
     render_query_task,
     render_revision,
 )
 from src.ai.prompts import system_prompt
-from src.ai.schemas import query_plan
+from src.ai.schemas import field_brief, query_plan
+from src.ai.schemas.field_brief import FieldBriefOutput, exclusion_problems
 from src.ai.schemas.query_plan import QUERY_COUNTS, FacetRef, QueryPlanOutput, check_quotas, required_variants
 from src.ai.schemas.structured_idea import SCHEMA_VERSION, StructuredIdeaOutput
 from src.config import RoleLlmSettings
@@ -157,3 +165,61 @@ async def plan_queries(
 
     return QueryPlanReading(output=plan, schema_version=query_plan.SCHEMA_VERSION, prompt_version=system.version_id,
                             records=records, problems=problems, regenerated=regenerated)
+
+
+
+# --- the field brief (Mode 2, step 5.1) -------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class FieldReading:
+    output: FieldBriefOutput
+    schema_version: str
+    prompt_version: str
+    records: list[LlmCallRecord]
+    problems: list[str]
+    """Exclusion violations left after the rewrite (empty normally)."""
+
+
+async def analyse_field(
+    request: FieldRequest, *, settings: RoleLlmSettings | None = None, model: Any | None = None
+) -> FieldReading:
+    """The field brief for a Mode 2 request. Raises ValueError (empty field) or LlmError subclasses."""
+    system = system_prompt(ROLE, task="field_brief")
+    message = render_field_request(request)
+    result = await run_structured(
+        ROLE, system=system.text, prompt_version=system.version_id, user_message=message,
+        output_schema=FieldBriefOutput, settings=settings, model=model, cache=PROMPT_CACHE,
+    )
+    records = list(result.records)
+    brief, problems = result.output, exclusion_problems(result.output, request.exclusions)
+    if problems:  # one rewrite, naming exactly what touched an exclusion
+        retry = (f"{message}\n<previous_brief>\n{brief.model_dump_json(indent=1)}\n</previous_brief>\n"
+                 f"<problems>Your previous brief touched the user's exclusions: {'; '.join(problems)}. "
+                 "Write a complete new brief that avoids them entirely.</problems>")
+        result = await run_structured(
+            ROLE, system=system.text, prompt_version=system.version_id, user_message=retry,
+            output_schema=FieldBriefOutput, settings=settings, model=model, cache=PROMPT_CACHE,
+        )
+        records.extend(result.records)
+        brief, problems = result.output, exclusion_problems(result.output, request.exclusions)
+    return FieldReading(brief, field_brief.SCHEMA_VERSION, system.version_id, records, problems)
+
+
+async def revise_field(
+    request: FieldRequest,
+    brief: FieldBriefOutput,
+    answers: tuple[QuestionAnswer, ...],
+    *,
+    settings: RoleLlmSettings | None = None,
+    model: Any | None = None,
+) -> FieldReading:
+    """The brief corrected with the user's answers (no new questions)."""
+    system = system_prompt(ROLE, task="field_brief_revise")
+    result = await run_structured(
+        ROLE, system=system.text, prompt_version=system.version_id,
+        user_message=render_field_revision(request, brief.model_dump_json(indent=1), answers),
+        output_schema=FieldBriefOutput, settings=settings, model=model, cache=PROMPT_CACHE,
+    )
+    output = result.output.model_copy(update={"clarifying_questions": []})
+    return FieldReading(output, field_brief.SCHEMA_VERSION, system.version_id, list(result.records),
+                        exclusion_problems(output, request.exclusions))

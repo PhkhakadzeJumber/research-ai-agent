@@ -1,0 +1,259 @@
+"""Find a research idea (Workflow B, Mode 2) from the command line.
+
+Usage (from the repo root, venv active, database running, Anthropic key in .env):
+    python -m scripts.discover "NLP"
+    python -m scripts.discover "NLP" --interests "evaluation of LLM agents" --technologies "PyTorch" \\
+        --exclude medical --domain education --complexity beginner \\
+        --constraint "available time=10 weeks" --count 3 --budget 12
+    python -m scripts.discover --continue <investigation id>      resume where it stopped
+    python -m scripts.discover "NLP" --yes                        skip the questions
+
+So far (step 5.1a): the Idea Analyst's field brief (4-8 subtopics of your field, each
+with why it fits you and its landscape searches); you answer its questions (Enter skips
+one), may remove subtopics, and confirm. The landscape search comes with step 5.1b.
+
+This calls the paid Anthropic API (one Opus call for the brief, plus one if you answer
+questions; a few cents each).
+Exit code: 0 ok, 1 an Idea Analyst call failed, 2 invalid input or an unavailable database.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import sys
+import uuid
+from collections.abc import Callable
+
+from src.ai.schemas.field_brief import FieldBriefOutput
+from src.ai.workflows.budget import set_cost_cap
+from src.ai.workflows.clarification import NotWaitingForClarification, answers_for
+from src.ai.workflows.evaluation import Sessions
+from src.ai.workflows.field import (
+    apply_brief_answers,
+    confirm_brief,
+    load_pending_brief,
+    remove_subtopics,
+    understand_field,
+)
+from src.ai.workflows.states import Stage
+from src.config import ConfigError
+from src.db.models import Investigation
+from src.db.models.run import COMPLEXITY_LEVELS
+from src.db.repositories.runs import create_investigation
+from src.db.session import Database
+
+DEFAULT_BUDGET_USD = 12.0  # doc 05 §6, Mode 2
+Ask = Callable[[str], str]
+
+
+class InputError(ValueError):
+    """Invalid input, or the database isn't usable."""
+
+
+def parse_constraint(text: str) -> tuple[str, str]:
+    name, separator, value = text.partition("=")
+    if not separator or not name.strip() or not value.strip():
+        raise argparse.ArgumentTypeError(f"expected name=value, got {text!r}")
+    return name.strip(), value.strip()
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="python -m scripts.discover", description="Find a research idea.")
+    which = parser.add_mutually_exclusive_group(required=True)
+    which.add_argument("field", nargs="?", help="your field, e.g. NLP, Robotics, Computer Vision")
+    which.add_argument("--continue", dest="continue_id", type=uuid.UUID, metavar="INVESTIGATION",
+                       help="resume an investigation where it stopped")
+    parser.add_argument("--interests", help="interests or subtopics, e.g. 'evaluation of LLM agents'")
+    parser.add_argument("--technologies", help="preferred technologies, e.g. 'PyTorch, small language models'")
+    parser.add_argument("--exclude", action="append", default=[], metavar="TOPIC",
+                        help="a topic or method to avoid (repeatable)")
+    parser.add_argument("--domain", help="application domain, e.g. education")
+    parser.add_argument("--complexity", choices=COMPLEXITY_LEVELS, default="intermediate")
+    parser.add_argument("--constraint", action="append", default=[], type=parse_constraint, metavar="NAME=VALUE",
+                        help='a constraint, e.g. "available time=10 weeks" (repeatable)')
+    parser.add_argument("--count", type=int, default=3, help="how many research ideas you want (default: 3)")
+    parser.add_argument("--budget", type=float, default=None, metavar="USD",
+                        help=f"cost cap for the investigation's Claude calls (default: {DEFAULT_BUDGET_USD:g})")
+    parser.add_argument("--yes", action="store_true", help="skip the questions and confirm the brief")
+    parser.add_argument("--verbose", action="store_true", help="show logs")
+    return parser.parse_args(argv)
+
+
+def investigation_input(args: argparse.Namespace) -> dict:
+    field = (args.field or "").strip()
+    if not field:
+        raise InputError("The field is empty.")
+    if not 1 <= args.count <= 10:
+        raise InputError("--count must be between 1 and 10.")
+    if args.budget is not None and args.budget <= 0:
+        raise InputError("--budget must be more than 0.")
+    data = {"field": field, "count": args.count}
+    for key, value in (("interests", args.interests), ("technologies", args.technologies), ("domain", args.domain)):
+        if value and value.strip():
+            data[key] = value.strip()
+    exclusions = [e.strip() for e in args.exclude if e.strip()]
+    if exclusions:
+        data["exclusions"] = exclusions
+    return data
+
+
+# --- output -------------------------------------------------------------------------------------------
+
+def format_brief(brief: FieldBriefOutput, *, questions: bool = True) -> str:
+    lines = ["Subtopics to explore:"]
+    for number, subtopic in enumerate(brief.subtopics, start=1):
+        lines.append(f"  {number}. {subtopic.name}")
+        lines.append(f"     why it fits you: {subtopic.why_it_fits_you}")
+        lines.append(f"     searches: {' | '.join(subtopic.queries)}")
+    if brief.assumptions:
+        lines.append("\nAssumed:")
+        lines.extend(f"  - {item}" for item in brief.assumptions)
+    if questions:
+        if brief.clarifying_questions:
+            lines.append("\nQuestions (Eureka uses the assumption after → if you skip):")
+            for number, question in enumerate(brief.clarifying_questions, start=1):
+                lines.append(f"  {number}. {question.question}")
+                lines.append(f"     → {question.if_skipped}")
+        else:
+            lines.append("\nQuestions: none.")
+    return "\n".join(lines)
+
+
+# --- clarification (interactive) -----------------------------------------------------------------------
+
+def _ask(ask: Ask, prompt: str) -> str | None:
+    try:
+        return ask(prompt)
+    except EOFError:
+        return None
+
+
+def _paused(investigation_id: uuid.UUID) -> int:
+    print(f"\nPaused. Continue with: python -m scripts.discover --continue {investigation_id}")
+    return 0
+
+
+async def clarify_brief(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, ask: Ask = input,
+                        settings=None, model=None) -> int:
+    pending = await load_pending_brief(sessions, investigation_id)
+    brief, removed = pending.brief, []
+    if yes:
+        answers = answers_for(brief, [None] * len(brief.clarifying_questions))
+    else:
+        replies = []
+        for number, question in enumerate(brief.clarifying_questions, start=1):
+            print(f"\n{number}. {question.question}")
+            reply = _ask(ask, f"   your answer (Enter = skip → {question.if_skipped}): ")
+            if reply is None:
+                return _paused(investigation_id)
+            replies.append(reply)
+        answers = answers_for(brief, replies)
+        if any(not a.skipped for a in answers):
+            print("\nApplying your answers (one Idea Analyst call)...")
+        revision = await apply_brief_answers(sessions, pending, answers, settings=settings, model=model)
+        if revision.error:
+            print(f"Applying your answers failed: {revision.error}")
+            print(f"Nothing was lost; try again with: python -m scripts.discover --continue {investigation_id}")
+            return 1
+        brief = revision.brief
+        if revision.revised:
+            print("\n" + format_brief(brief, questions=False))
+        while True:
+            choice = _ask(ask, "\nConfirm these subtopics? [y] confirm  [r] remove some  [q] quit for now: ")
+            choice = (choice or "q").strip().lower()
+            if choice == "q":
+                return _paused(investigation_id)
+            if choice == "y":
+                break
+            if choice == "r":
+                numbers = (_ask(ask, "   subtopic numbers to remove (e.g. 2 5): ") or "").split()
+                if not all(n.isdigit() for n in numbers) or not numbers:
+                    print("   Give subtopic numbers, separated by spaces.")
+                    continue
+                try:
+                    names = [brief.subtopics[int(n) - 1].name for n in numbers if 1 <= int(n) <= len(brief.subtopics)]
+                    brief = remove_subtopics(brief, [int(n) for n in numbers])
+                except ValueError as error:
+                    print(f"   Not changed: {error}")
+                    continue
+                removed += names
+                print("\n" + format_brief(brief, questions=False))
+    final = await confirm_brief(sessions, investigation_id, final=brief, answers=answers, removed=removed)
+    print(f"\nConfirmed: {len(final.subtopics)} subtopics to explore.")
+    print("Next: the landscape search comes with step 5.1b.")
+    return 0
+
+
+# --- main -----------------------------------------------------------------------------------------------
+
+async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, budget: float | None) -> int:
+    async with sessions() as session:
+        investigation = await session.get(Investigation, investigation_id)
+        if investigation is not None and budget is not None:
+            set_cost_cap(investigation, budget)
+    if investigation is None or investigation.mode != "discover":
+        raise InputError(f"No Mode 2 investigation {investigation_id}.")
+    print(f"Investigation {investigation_id} | stage {investigation.stage} ({investigation.status})")
+    if investigation.stage == Stage.AWAITING_CLARIFICATION:
+        try:
+            pending = await load_pending_brief(sessions, investigation_id)
+        except NotWaitingForClarification as error:
+            raise InputError(str(error)) from None
+        print("\n" + format_brief(pending.brief))
+        return await clarify_brief(sessions, investigation_id, yes=yes)
+    if investigation.stage == Stage.LANDSCAPE_RETRIEVAL:
+        print("The brief is confirmed. Next: the landscape search comes with step 5.1b.")
+        return 0
+    raise InputError(f"Investigation {investigation_id} can't be continued from stage {investigation.stage}.")
+
+
+async def run(args: argparse.Namespace) -> int:
+    data = investigation_input(args) if args.continue_id is None else None
+    try:
+        database = Database.from_settings()
+    except ConfigError as error:
+        raise InputError(str(error)) from None
+    try:
+        if not await database.ping():
+            raise InputError("The database isn't reachable: start it with `docker compose up -d db`.")
+        if args.continue_id is not None:
+            return await resume(database.session, args.continue_id, yes=args.yes, budget=args.budget)
+        budget = args.budget if args.budget is not None else DEFAULT_BUDGET_USD
+        async with database.session() as session:
+            investigation = await create_investigation(session, mode="discover", complexity=args.complexity,
+                                                       input=data, constraints=dict(args.constraint))
+            set_cost_cap(investigation, budget)
+            investigation_id = investigation.id
+        print(f"Investigation {investigation_id} | field {data['field']} | complexity {args.complexity} | "
+              f"budget ${budget:g}\n")
+        print("Mapping your field (Idea Analyst, one call)...")
+        outcome = await understand_field(database.session, investigation_id)
+        if outcome.error:
+            print(f"The Idea Analyst failed: {outcome.error}")
+            return 1
+        print("\n" + format_brief(outcome.brief))
+        if outcome.problems:
+            print("\nNote: some subtopics touch your exclusions; they are removed when you confirm:")
+            print("\n".join(f"  - {problem}" for problem in outcome.problems))
+        return await clarify_brief(database.session, investigation_id, yes=args.yes)
+    finally:
+        await database.dispose()
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
+                        format="%(levelname)s %(name)s: %(message)s")
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    try:
+        return asyncio.run(run(args))
+    except InputError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
