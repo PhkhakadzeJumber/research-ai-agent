@@ -27,8 +27,11 @@ So far (steps 5.1a-5.4):
      feasibility call for all candidates; the best --max-light (default 5) go on, varied by
      origin strategy, the rest wait in reserve;
   7. light evaluation, one candidate at a time: Mode 1's evaluation at depth light (about
-     $1-1.30 each), then triage: advanced, needs refinement or rejected.
-Refinements, replenishing, full evaluation of the best and the ranking come with steps 5.5-5.6.
+     $1-1.40 each), then triage: advanced, needs refinement or rejected;
+  8. the candidate loop (scripts/candidate_loop.py): an idea sent back for refinement gets its
+     next version from the Scout (about 10-20 cents) and a light re-evaluation, at most 2 per
+     idea and 4 in all.
+Replenishing comes with step 5.5b; full evaluation of the best and the ranking with step 5.6.
 
 This calls the paid Anthropic API (the brief: a few cents per call; screening the landscape:
 a few cents; reading: about 3 cents per paper not already in the library; mining: a few
@@ -56,8 +59,8 @@ from src.ai.workflows.landscape import LandscapeOutcome, LandscapeReading, lands
 from src.ai.workflows.mining import MiningOutcome, mining_step
 from src.ai.workflows.scouting import NothingToGround, ScoutingOutcome, scouting_step
 from src.ai.workflows.prescreening import PrescreenOutcome, prescreen_step
-from src.ai.workflows.light_evaluation import LightOutcome, light_evaluation_step, short_step_line
 from src.ai.workflows.runner import EvaluationModels
+from scripts.candidate_loop import continue_at, evaluate_light
 from src.ai.workflows.field import (
     apply_brief_answers,
     confirm_brief,
@@ -363,7 +366,7 @@ async def scout(sessions: Sessions, investigation_id: uuid.UUID, *, model=None, 
         return 1
     print(format_scouting(outcome))
     return await prescreen(sessions, investigation_id, model=quick_model, evaluation_models=evaluation_models,
-                           search_factory=search_factory)
+                           search_factory=search_factory, scout_model=model)
 
 
 # --- pre-screening and light evaluation -----------------------------------------------------------------
@@ -383,7 +386,7 @@ def format_prescreen(outcome: PrescreenOutcome) -> str:
 
 
 async def prescreen(sessions: Sessions, investigation_id: uuid.UUID, *, model=None,
-                    evaluation_models: EvaluationModels | None = None, search_factory=None) -> int:
+                    evaluation_models: EvaluationModels | None = None, search_factory=None, scout_model=None) -> int:
     if await over_budget(sessions, investigation_id, "pre-screening"):
         return 3
     print("\nPre-screening: duplicates, your constraints, a quick feasibility check (one call)...")
@@ -393,46 +396,8 @@ async def prescreen(sessions: Sessions, investigation_id: uuid.UUID, *, model=No
         print(f"  The quick feasibility check failed: {error}. Nothing was stored; run --continue to try again.")
         return 1
     print(format_prescreen(outcome))
-    return await evaluate_light(sessions, investigation_id, models=evaluation_models, search_factory=search_factory)
-
-
-async def evaluate_light(sessions: Sessions, investigation_id: uuid.UUID, *,
-                         models: EvaluationModels | None = None, search_factory=None) -> int:
-    async def on_candidate(candidate, number, total) -> None:
-        print(f"\nLight evaluation {number}/{total}: {candidate.title}")
-
-    async def report(step, phase, outcome) -> None:
-        line = short_step_line(step, outcome) if phase == "done" else None
-        if line:
-            print(f"  {line}")
-
-    outcome = await light_evaluation_step(sessions, investigation_id, models=models, search_factory=search_factory,
-                                          report=report, on_candidate=on_candidate)
-    print(format_light(outcome))
-    async with sessions() as session:
-        investigation = await session.get(Investigation, investigation_id)
-    if outcome.stopped == "budget":
-        print(f"\nBudget used up: ${investigation.cost_usd:.2f} of ${cost_cap(investigation)}. Stopped at "
-              f"{outcome.stopped_at}. Resume with: python -m scripts.discover --continue {investigation_id} "
-              "--budget <more>")
-        return 3
-    if outcome.stopped:
-        print(f"\nThe light evaluation stopped ({outcome.stopped}) at {outcome.stopped_at}. "
-              f"Run --continue to try again.")
-        return 1
-    print(f"\nTotal cost so far: ${investigation.cost_usd:.2f}")
-    print("Next: refinements, replenishing, full evaluation of the best and the ranking come with steps 5.5-5.6.")
-    return 0
-
-
-def format_light(outcome: LightOutcome) -> str:
-    if not outcome.triaged:
-        return ""
-    lines = ["\nTriage after light evaluation:"]
-    for candidate, decision in outcome.triaged:
-        lines.append(f"  {candidate.title}\n    rule {decision.rule_number}: {decision.action} -> "
-                     f"{candidate.status.replace('_', ' ')} ({decision.reason})")
-    return "\n".join(lines)
+    return await evaluate_light(sessions, investigation_id, models=evaluation_models, search_factory=search_factory,
+                                scout_model=scout_model, command="discover")
 
 
 async def continue_after_brief(sessions: Sessions, investigation_id: uuid.UUID, code: int, *, search_for=None) -> int:
@@ -476,12 +441,9 @@ async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, 
         return await scout(sessions, investigation_id)
     if investigation.stage == Stage.PRESCREENING:
         return await prescreen(sessions, investigation_id)
-    if investigation.stage == Stage.LIGHT_EVALUATION:
-        return await evaluate_light(sessions, investigation_id)
-    if investigation.stage == Stage.TRIAGE:
-        print("The light evaluations are triaged. Next: refinements, replenishing, full evaluation of the best "
-              "and the ranking come with steps 5.5-5.6.")
-        return 0
+    if investigation.stage in (Stage.LIGHT_EVALUATION, Stage.TRIAGE, Stage.REFINING, Stage.FULL_EVALUATION,
+                               Stage.RANKING):
+        return await continue_at(sessions, investigation_id, command="discover")
     raise InputError(f"Investigation {investigation_id} can't be continued from stage {investigation.stage}.")
 
 

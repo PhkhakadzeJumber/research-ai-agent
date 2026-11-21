@@ -32,7 +32,7 @@ ABSTRACT_ONLY_NOTE = (
 )
 FULL_TEXT_NOTE = "Passages from the full text are included as chunks, each with its ID and section."
 
-_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints|field_brief|subtopic|items|item|pairs|pair|finding|setting|statement|statements|quote|material|candidates|candidate|research_question|facets|data|fit)\b",
+_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints|field_brief|subtopic|items|item|pairs|pair|finding|setting|statement|statements|quote|material|candidates|candidate|research_question|facets|data|fit|limits|triage|verdicts|closest_works|work|facet_matrix|cell|feasibility|blocking|simplification|skill_gap|motivation|contribution)\b",
                    re.IGNORECASE)
 _QUOTE_IN_ATTRIBUTE = re.compile(r'["<>]')
 
@@ -783,4 +783,81 @@ def render_quick_feasibility(request: FieldRequest, candidates: tuple[CandidateF
                      + (f"<fit>{_contain(c.complexity_note)}</fit>" if c.complexity_note else "")
                      + "</candidate>")
     lines.append("</candidates>")
+    return "\n".join(lines)
+
+
+# --- the Scout's refine packet (both workflows, step 5.5a) -------------------------------------------------
+#
+#     <limits><complexity>...</complexity><constraints>...</constraints><exclusions>...</exclusions></limits>
+#     <candidate version="1" origin_strategy="limitation"><title>...</title><research_question>...</research_question>
+#       <facets>1 problem (key): ... | 2 method: ...</facets><fit>T1, 8 weeks, data: ...</fit>
+#       <motivation>...</motivation><contribution>...</contribution></candidate>
+#     <triage rule="5">reason</triage>
+#     <verdicts>novelty: ... | significance: ... | feasibility: ...</verdicts>
+#     <closest_works><work paper="P1" minor_difference_only="true">what they did -> how the idea differs</work></closest_works>
+#     <facet_matrix><cell paper="P1" facet="1" overlap="same" statement="Q3"/></facet_matrix>
+#     <feasibility><blocking>...</blocking><simplifications>...</simplifications><skill_gaps>...</skill_gaps></feasibility>
+#     <statements><statement label="Q1" paper="P2">quote</statement></statements>
+#     <papers><paper label="P1" year="2025">title</paper></papers>
+
+
+@dataclass(frozen=True)
+class RefineRequest:
+    complexity: str
+    constraints: tuple[tuple[str, str], ...]
+    exclusions: tuple[str, ...]
+    version: int
+    origin_strategy: str | None
+    title: str
+    research_question: str
+    facets: tuple[tuple[int, str, str, bool], ...]  # (number, kind, text, is_key)
+    fit: str
+    motivation: str
+    contribution: str
+    triage_rule: int
+    triage_reason: str
+    verdicts: tuple[str, ...]
+    closest_works: tuple[tuple[str, bool, str, str], ...]  # (paper label, minor only, what they did, how it differs)
+    cells: tuple[tuple[str, int, str, str | None], ...]  # (paper label, facet number, overlap, statement label)
+    blocking: tuple[str, ...]
+    simplifications: tuple[str, ...]
+    skill_gaps: tuple[str, ...]
+    statements: tuple[tuple[str, str, str], ...]  # (label, paper label, quote)
+    papers: tuple[PaperForScout, ...]
+
+
+def render_scout_refine(r: RefineRequest) -> str:
+    """The Scout's input for refining one candidate."""
+    def items(tag: str, values) -> str:
+        return "".join(f"<{tag}>{_contain(v)}</{tag}>" for v in values)
+
+    limits = [f"<complexity>{COMPLEXITY_NOTES.get(r.complexity, r.complexity)}</complexity>"]
+    if r.constraints:
+        limits.append("<constraints>" + "; ".join(f"{_contain_user_text(n)}: {_contain_user_text(v)}"
+                                                 for n, v in r.constraints) + "</constraints>")
+    if r.exclusions:
+        limits.append(f"<exclusions>{_contain_user_text('; '.join(r.exclusions))}</exclusions>")
+    facets = " | ".join(f"{n} {kind}{' (key)' if key else ''}: {_contain(text)}" for n, kind, text, key in r.facets)
+    strategy = f' origin_strategy="{_attribute(r.origin_strategy)}"' if r.origin_strategy else ""
+    lines = [
+        "<limits>" + "".join(limits) + "</limits>",
+        f'<candidate version="{r.version}"{strategy}><title>{_contain(r.title)}</title>'
+        f"<research_question>{_contain(r.research_question)}</research_question><facets>{facets}</facets>"
+        f"<fit>{_contain(r.fit)}</fit><motivation>{_contain(r.motivation)}</motivation>"
+        f"<contribution>{_contain(r.contribution)}</contribution></candidate>",
+        f'<triage rule="{r.triage_rule}">{_contain(r.triage_reason)}</triage>',
+        "<verdicts>" + " | ".join(_contain(v) for v in r.verdicts) + "</verdicts>",
+        "<closest_works>" + "".join(
+            f'<work paper="{_attribute(p)}" minor_difference_only="{str(minor).lower()}">{_contain(did)} -> '
+            f"{_contain(differs)}</work>" for p, minor, did, differs in r.closest_works) + "</closest_works>",
+        "<facet_matrix>" + "".join(
+            f'<cell paper="{_attribute(p)}" facet="{f}" overlap="{_attribute(o)}"'
+            + (f' statement="{_attribute(q)}"' if q else "") + "/>" for p, f, o, q in r.cells) + "</facet_matrix>",
+        "<feasibility>" + items("blocking", r.blocking) + items("simplification", r.simplifications)
+        + items("skill_gap", r.skill_gaps) + "</feasibility>",
+        "<statements>" + "".join(f'<statement label="{_attribute(q)}" paper="{_attribute(p)}">{_contain(text)}'
+                                 "</statement>" for q, p, text in r.statements) + "</statements>",
+        "<papers>" + "".join(f'<paper label="{_attribute(p.label)}"' + (f' year="{p.year}"' if p.year else "")
+                             + f">{_contain(p.title)}</paper>" for p in r.papers) + "</papers>",
+    ]
     return "\n".join(lines)

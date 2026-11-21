@@ -167,7 +167,8 @@ async def test_the_command_lists_the_candidates(db_session, capsys):
     stored = (await db_session.execute(select(Candidate).where(Candidate.investigation_id == investigation.id))
               ).scalars().all()
     assert len(stored) == 8
-    assert (await db_session.get(Investigation, investigation.id)).stage == "triage"
+    # everything ruled out: the router (5.5a) finds nothing to evaluate and goes to ranking
+    assert (await db_session.get(Investigation, investigation.id)).stage == "ranking"
 
 
 async def test_a_failed_scout_stores_nothing(db_session, capsys):

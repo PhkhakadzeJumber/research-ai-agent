@@ -78,6 +78,7 @@ from src.ai.schemas.query_plan import QueryPlanOutput
 from src.ai.workflows.evaluation import begin_evaluation, novelty_verdict_for, selected_papers
 from src.ai.workflows.concluding import finish_investigation
 from src.ai.workflows.runner import EvaluationModels, run_evaluation
+from scripts.candidate_loop import LoopModels, continue_at
 from src.ai.workflows.states import EvaluationStep, Stage
 from src.ai.workflows.understanding import understand_idea
 from src.config import ConfigError
@@ -282,14 +283,14 @@ def _short(text: str, width: int = TITLE_WIDTH) -> str:
 async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read: int | None = None,
                    search_factory=None, settings=None, model=None, screen_settings=None, screen_model=None,
                    read_settings=None, read_model=None, novelty_settings=None, novelty_model=None,
-                   skeptic_settings=None, skeptic_model=None, value_settings=None, value_model=None) -> int:
+                   skeptic_settings=None, skeptic_model=None, value_settings=None, value_model=None,
+                   scout_model=None) -> int:
     """Runs the full evaluation of the investigation's confirmed idea, from wherever it stands."""
     async with sessions() as session:
         candidates = [c for c in await investigation_candidates(session, investigation_id)
                       if c.status == "full_evaluating"]
-        if not candidates:
-            print("No candidate is waiting for a full evaluation.")
-            return 2
+        if not candidates:  # e.g. a refined version waiting in the candidate loop
+            return await continue_at(sessions, investigation_id, command="evaluate")
         candidate_id = candidates[0].id
         evaluation = await latest_evaluation(session, candidate_id)
         evaluation_id = evaluation.id if evaluation is not None and evaluation.status == "running" else None
@@ -323,7 +324,8 @@ async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read:
               f"before {result.step}. Resume with: python -m scripts.evaluate --continue {investigation_id} "
               "--budget <more>")
         return 3
-    return await finish(sessions, investigation_id, result.ended)
+    return await finish(sessions, investigation_id, result.ended,
+                        LoopModels(models, scout_model=scout_model, search_factory=search_factory))
 
 
 async def _report_start(sessions: Sessions, evaluation_id: uuid.UUID, step: str) -> None:
@@ -545,11 +547,12 @@ def format_value(outcome) -> str:
     return "\n".join(lines)
 
 
-async def finish(sessions: Sessions, investigation_id: uuid.UUID, evaluation_status: str) -> int:
-    """After the evaluation: triage, ranking, reporting, results ready."""
+async def finish(sessions: Sessions, investigation_id: uuid.UUID, evaluation_status: str,
+                 models: LoopModels | None = None) -> int:
+    """After the evaluation: triage, then the router: ranking -> reporting -> results ready, or a refinement
+    carried out by the candidate loop (scripts/candidate_loop.py)."""
     async with sessions() as session:
-        investigation = await session.get(Investigation, investigation_id)
-        stage, cost = investigation.stage, investigation.cost_usd
+        stage = (await session.get(Investigation, investigation_id)).stage
     if stage == Stage.FULL_EVALUATION:
         outcome = await finish_investigation(sessions, investigation_id)
         decision = outcome.decision
@@ -558,6 +561,11 @@ async def finish(sessions: Sessions, investigation_id: uuid.UUID, evaluation_sta
               f" | evaluation {evaluation_status}")
         if outcome.not_executed:
             print(f"  {outcome.not_executed}")
+        if outcome.route is not None and outcome.route.stage != Stage.RANKING:
+            print(f"\nNext: {outcome.route.stage.replace('_', ' ')} ({outcome.route.reason})")
+            return await continue_at(sessions, investigation_id, models, command="evaluate")
+    async with sessions() as session:
+        cost = (await session.get(Investigation, investigation_id)).cost_usd
     print(f"\nDone. Total cost: ${cost:.2f}")
     print(f"Full report: python -m scripts.report {investigation_id} [--out report.md]")
     return 0
@@ -672,6 +680,9 @@ async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, 
     if investigation.stage == Stage.RESULTS_READY:
         print(f"Completed. Full report: python -m scripts.report {investigation_id}")
         return 0
+    if investigation.stage in (Stage.TRIAGE, Stage.REFINING, Stage.LIGHT_EVALUATION, Stage.RANKING,
+                               Stage.FULL_EVALUATION):
+        return await continue_at(sessions, investigation_id, command="evaluate")
     raise InputError(f"Investigation {investigation_id} can't be continued from stage {investigation.stage} "
                      f"({investigation.status}).")
 

@@ -77,6 +77,28 @@ def _has_compute_constraint(constraints: dict) -> str | None:
     return None
 
 
+def hard_constraints(scout_notes: dict | None, constraints: dict, complexity: str) -> tuple[str | None, dict]:
+    """The code checks of the user's hard limits (time; compute when no compute constraint is stated).
+    Returns (the reason it fails, or None; the checks' record). Shared with refined versions (step 5.5a)."""
+    notes = scout_notes or {}
+    weeks, compute = available_weeks(constraints), _has_compute_constraint(constraints)
+    need, tier = notes.get("timeline_weeks"), notes.get("compute_tier")
+    over_time = weeks is not None and need is not None and need > weeks
+    checks = {"time": {"needs_weeks": need, "available_weeks": weeks, "over": over_time}}
+    if compute:
+        checks["compute"] = {"tier": tier, "constraint": compute, "judged_by": "quick feasibility"}
+        over_compute = False
+    else:
+        ceiling = TIER_CEILING.get(complexity, "T3")
+        over_compute = tier in TIERS and TIERS.index(tier) > TIERS.index(ceiling)
+        checks["compute"] = {"tier": tier, "ceiling": ceiling, "over": over_compute}
+    if over_time:
+        return f"Needs about {need} weeks; {weeks:g} are available.", checks
+    if over_compute:
+        return f"Needs compute tier {tier}; the {complexity} level allows up to {checks['compute']['ceiling']}.", checks
+    return None, checks
+
+
 def choose_for_light(passing: list[tuple[Candidate, int, str]], limit: int) -> list[Candidate]:
     """passing: (candidate, grounding papers, quick level). The best of each origin strategy in turn."""
     ordered = sorted(passing, key=lambda row: (LEVEL_ORDER.get(row[2], 3), -row[1]))
@@ -136,26 +158,11 @@ async def prescreen_step(
             kept.append((c, words))
 
     # 2. hard constraints
-    weeks = available_weeks(constraints)
-    compute = _has_compute_constraint(constraints)
-    ceiling = TIER_CEILING.get(complexity, "T3")
     for c in candidates:
-        notes = c.scout_notes or {}
-        need = notes.get("timeline_weeks")
-        over_time = weeks is not None and need is not None and need > weeks
-        records[c.id]["checks"]["time"] = {"needs_weeks": need, "available_weeks": weeks, "over": over_time}
-        tier = notes.get("compute_tier")
-        if compute:
-            records[c.id]["checks"]["compute"] = {"tier": tier, "constraint": compute,
-                                                  "judged_by": "quick feasibility"}
-            over_compute = False
-        else:
-            over_compute = tier in TIERS and TIERS.index(tier) > TIERS.index(ceiling)
-            records[c.id]["checks"]["compute"] = {"tier": tier, "ceiling": ceiling, "over": over_compute}
-        if c.id not in out and over_time:
-            out[c.id] = f"Needs about {need} weeks; {weeks:g} are available."
-        elif c.id not in out and over_compute:
-            out[c.id] = f"Needs compute tier {tier}; the {complexity} level allows up to {ceiling}."
+        reason, checks = hard_constraints(c.scout_notes, constraints, complexity)
+        records[c.id]["checks"].update(checks)
+        if c.id not in out and reason:
+            out[c.id] = reason
 
     # 3. quick feasibility, one call for everyone still in
     remaining = [c for c in candidates if c.id not in out]

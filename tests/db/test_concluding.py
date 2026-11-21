@@ -92,16 +92,20 @@ async def test_an_infeasible_idea_is_rejected_with_its_reason(db_session):
     assert candidate.rejection_reason == "Rule 1: infeasible under your constraints"
 
 
-async def test_a_refinement_is_recorded_but_not_carried_out_yet(db_session):
+async def test_a_refinement_is_routed_to_refining(db_session):
+    # Step 5.5a: refinements are carried out now (they used to be recorded only, "needs the Scout (step 5)").
     investigation_id, evaluation_id = await at_concluding(
         db_session, value=value_answer(timeline=[("all", 20)], simplifications=["use one 1B model"]))
     await conclude_step(sessions_on(db_session), evaluation_id)
     outcome = await finish_investigation(sessions_on(db_session), investigation_id)
     assert (outcome.decision.rule_number, outcome.decision.action, outcome.candidate_status) == (
         5, "refine", "needs_refinement")
-    assert "needs the Scout (step 5)" in outcome.not_executed
+    assert outcome.not_executed is None
+    assert outcome.route.stage == "refining" and outcome.route.reason == "1 candidate(s) to refine"
     [stored] = (await db_session.execute(select(TriageDecision))).scalars().all()
     assert stored.id == outcome.decision.id
+    investigation = await refreshed(db_session, Investigation, investigation_id)
+    assert (investigation.stage, investigation.status) == ("refining", "running")
 
 
 async def test_finishing_needs_a_concluded_evaluation(db_session):

@@ -5,13 +5,14 @@ conclude_step(sessions, evaluation_id), evaluation step `concluding`, in this or
 Verdict rows (novelty, significance, feasibility, recommendation; never changed
 afterwards), then end the evaluation (`done`, or `partial` if a step was degraded).
 
-finish_investigation(sessions, investigation_id), investigation stages
-`full_evaluation -> triage -> ranking -> reporting -> results_ready`:
+finish_investigation(sessions, investigation_id), Mode 1 after its full evaluation: stage
+`full_evaluation -> triage`, then the router (src/ai/workflows/routing.py, step 5.5a) picks the next
+stage: `refining` for a refinement (carried out by scripts/candidate_loop.py), or `ranking ->
+reporting -> results_ready` (wrap_up):
   - triage (doc 05 §4): the first matching rule becomes a stored TriageDecision, and the
     candidate's status follows it: finalize -> finalist, reject -> rejected (with the
     reason), refine -> needs_refinement, advance -> advanced; expand_search leaves it as it
-    is. Carrying out a refinement, alternatives or an expanded search needs the Scout
-    (Workflow B, step 5): until then the decision is recorded and reported, not executed;
+    is. An expanded search and alternatives aren't carried out yet (recorded and reported);
   - ranking and reporting: Mode 1 has one candidate, so nothing to order; the report is
     built from what is stored, on demand (scripts/report.py);
   - results_ready: the investigation is `completed`.
@@ -25,6 +26,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 
 from src.ai.workflows.evaluation import Sessions, at_step
+from src.ai.workflows.routing import Route, route_after_triage
 from src.ai.workflows.states import CandidateStatus, EvaluationStep, Stage
 from src.ai.workflows.transitions import advance_evaluation, advance_investigation, set_candidate_status
 from src.ai.workflows.value_feasibility import Verdicts, verdicts_for
@@ -38,7 +40,6 @@ STATUS_FOR_ACTION = {
     "advance": CandidateStatus.ADVANCED,
 }
 NOT_YET_EXECUTABLE = {
-    "refine": "Carrying out a refinement needs the Scout (step 5); the suggested direction is in the report.",
     "expand_search": "Expanding the search is carried out with step 5; the verdict stays flagged until then.",
 }
 
@@ -83,7 +84,9 @@ class FinishOutcome:
     decision: TriageDecision
     candidate_status: str
     not_executed: str | None
-    """Why the decided action isn't carried out yet (refine / expand_search before step 5)."""
+    """Why the decided action isn't carried out yet (expand_search)."""
+    route: Route | None = None
+    """Where the investigation went after triage (src/ai/workflows/routing.py)."""
 
 
 async def stored_verdicts(session, evaluation_id: uuid.UUID) -> dict[str, Verdict]:
@@ -125,9 +128,17 @@ async def finish_investigation(sessions: Sessions, investigation_id: uuid.UUID) 
         await advance_investigation(session, investigation_id, to=Stage.TRIAGE, expected_from=Stage.FULL_EVALUATION)
         decision = await triage_candidate(session, candidate.id, evaluation.id,
                                           expected_from=CandidateStatus.FULL_EVALUATING)
-
-        for current, target in ((Stage.TRIAGE, Stage.RANKING), (Stage.RANKING, Stage.REPORTING),
-                                (Stage.REPORTING, Stage.RESULTS_READY)):
-            await advance_investigation(session, investigation_id, to=target, expected_from=current)
+    route = await route_after_triage(sessions, investigation_id)
+    if route.stage == Stage.RANKING:
+        await wrap_up(sessions, investigation_id)
+    async with sessions() as session:
         final_status = (await session.get(Candidate, candidate.id)).status
-    return FinishOutcome(decision, final_status, NOT_YET_EXECUTABLE.get(decision.action))
+    return FinishOutcome(decision, final_status, NOT_YET_EXECUTABLE.get(decision.action), route)
+
+
+async def wrap_up(sessions: Sessions, investigation_id: uuid.UUID) -> None:
+    """Mode 1 from `ranking`: one idea needs no ordering, and the report is built on demand, so
+    ranking -> reporting -> results_ready (completed)."""
+    async with sessions() as session:
+        for current, target in ((Stage.RANKING, Stage.REPORTING), (Stage.REPORTING, Stage.RESULTS_READY)):
+            await advance_investigation(session, investigation_id, to=target, expected_from=current)

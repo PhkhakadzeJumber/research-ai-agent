@@ -164,7 +164,8 @@ async def test_the_command_shows_each_evaluation_and_the_triage(db_session, caps
     assert "Light evaluation 2/2: Translated benchmark artifacts" in output
     assert "plan: 8 searches" in output and "reading: 0 read, 2 from the library, 0 failed" in output
     assert "verdicts: novelty" in output and "Triage after light evaluation:" in output
-    assert "steps 5.5-5.6" in output
+    # then the router (5.5a): nothing advanced or to refine here, so ranking, which comes with 5.6
+    assert "Next: ranking (nothing left to evaluate)" in output and "step 5.6" in output
 
 
 async def test_the_command_says_when_the_budget_stopped_it(db_session, capsys):

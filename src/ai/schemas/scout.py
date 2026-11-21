@@ -1,6 +1,7 @@
 """The Research Opportunity Scout's output (agent A2, task discover; doc 04, doc 10 §6.3-6.4).
 
-A CandidateSet: 8-12 research ideas grounded in the mined landscape. The input labels
+ScoutOutput (task discover): a CandidateSet of 8-12 research ideas grounded in the mined landscape.
+RefineOutput (task refine, step 5.5a): the next version of one candidate, with a change note. The input labels
 the material: opportunity items O1, O2, ... (recurring problems, contradictions,
 subtopics, datasets), verified statements Q1, Q2, ... and papers P1, P2, ... Every
 candidate links to what inspired it by those labels; code maps them back to IDs, so the
@@ -81,23 +82,16 @@ class Fit(_Strict):
     complexity_note: _text(400) = Field(description="Why this fits the user's complexity level and constraints.")
 
 
-class ScoutCandidate(_Strict):
+class _CandidateBody(_Strict):
+    """The fields every Scout task writes for a candidate."""
+
     title: _text(150) = Field(description="A short, specific name for the idea.")
     research_question: _text(400) = Field(
         description="ONE research question a concrete study could answer. No title-only ideas."
     )
     hypothesis: _text(400) | None = Field(default=None, description="A testable expectation, if there is one.")
-    origin_strategy: OriginStrategy = Field(
-        description=("How you found it: limitation (a recurring problem), future_work (a direction papers call for), "
-                     "contradiction (findings that disagree), combination (a method not yet applied to a problem: "
-                     "phrase it as 'possibly unexplored'), practical_problem (a need of practitioners).")
-    )
     motivation: _text(1500) = Field(
         description="Why it is worth doing, citing the evidence. Refer to papers as P3, never by title."
-    )
-    inspirations: list[Inspiration] = Field(
-        min_length=MIN_INSPIRATIONS, max_length=8,
-        description="What inspired it: at least two, and at least two of them statements (Q labels).",
     )
     potential_contribution: _text(800) = Field(
         description="What this would add if it works. A claim for the evaluation to check, not a verdict."
@@ -112,9 +106,41 @@ class ScoutCandidate(_Strict):
                                     description="What could make it fail or not be new (your own guess).")
 
     @model_validator(mode="after")
-    def _facet_rules(self) -> ScoutCandidate:
+    def _facet_rules(self):
         check_facet_rules(self.facets, where=f"facets of '{self.title}'")
         return self
+
+
+class ScoutCandidate(_CandidateBody):
+    """A new idea (task discover)."""
+
+    origin_strategy: OriginStrategy = Field(
+        description=("How you found it: limitation (a recurring problem), future_work (a direction papers call for), "
+                     "contradiction (findings that disagree), combination (a method not yet applied to a problem: "
+                     "phrase it as 'possibly unexplored'), practical_problem (a need of practitioners).")
+    )
+    inspirations: list[Inspiration] = Field(
+        min_length=MIN_INSPIRATIONS, max_length=8,
+        description="What inspired it: at least two, and at least two of them statements (Q labels).",
+    )
+
+
+class RefinedCandidate(_CandidateBody):
+    """The next version of one candidate (task refine, step 5.5a). Its origin strategy is `refinement` (set by
+    code), and it keeps its parent's inspirations; these are extra ones."""
+
+    inspirations: list[Inspiration] = Field(
+        default_factory=list, max_length=6,
+        description="New inspirations, if the change rests on further evidence (Q labels); the parent's are kept.",
+    )
+    change_note: _text(600) = Field(
+        description="What changed compared with the parent, and why: how it answers the triage reason."
+    )
+    addresses: _text(300) = Field(description="The problem this version fixes, in a few words (the triage reason).")
+
+
+class RefineOutput(_Strict):
+    candidate: RefinedCandidate
 
 
 class ScoutOutput(_Strict):

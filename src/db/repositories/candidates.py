@@ -46,6 +46,28 @@ async def create_root_candidate(
     return candidate
 
 
+async def create_refined_candidate(
+    session: AsyncSession,
+    parent: Candidate,
+    *,
+    title: str,
+    research_question: str,
+    facets: Sequence[FacetToStore],
+) -> Candidate:
+    """The next version of the parent's lineage (origin `refine`), in status `proposed`, with its facets."""
+    candidate = Candidate(investigation_id=parent.investigation_id, version=parent.version + 1, parent_id=parent.id,
+                          root_id=parent.root_id, origin="refine", title=title, research_question=research_question)
+    session.add(candidate)
+    await session.flush()
+    session.add_all(
+        Facet(candidate_id=candidate.id, position=position, kind=facet.kind, text=facet.text,
+              is_key=facet.is_key, stated_by_user=facet.stated_by_user)
+        for position, facet in enumerate(facets)
+    )
+    await session.flush()
+    return candidate
+
+
 async def lock_candidate(session: AsyncSession, candidate_id: uuid.UUID) -> Candidate | None:
     """The candidate, locked until the transaction ends (status changes read it under this lock)."""
     return (await session.execute(
