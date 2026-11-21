@@ -47,12 +47,13 @@
 
 ### 1.2 High-value extensions (week 4, in this order)
 
-1. Candidate comparison view.
-2. Mode 2 steering buttons (more like this / simpler / exclude).
-3. Evidence graph.
-4. PDF export.
-5. Ablation runs + an evaluation dashboard page.
-6. Hacker News / RSS signals.
+1. **The user's research document (Mode 1; doc 02 §2.4)**, built right after Workflow B (step 5.6): text and Markdown first, then PDF once the parser dependency is approved; the upload endpoint with the API.
+2. Candidate comparison view.
+3. Mode 2 steering buttons (more like this / simpler / exclude).
+4. Evidence graph.
+5. PDF export.
+6. Ablation runs + an evaluation dashboard page.
+7. Hacker News / RSS signals.
 
 ### 1.3 Later / future
 

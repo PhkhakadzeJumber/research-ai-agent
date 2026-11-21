@@ -287,8 +287,10 @@ async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read:
                    scout_model=None) -> int:
     """Runs the full evaluation of the investigation's confirmed idea, from wherever it stands."""
     async with sessions() as session:
+        # this path is the user's own idea (v1); later full evaluations (a refined version or an alternative
+        # that advanced) run in the candidate loop (scripts/candidate_loop.py, step 5.6a)
         candidates = [c for c in await investigation_candidates(session, investigation_id)
-                      if c.status == "full_evaluating"]
+                      if c.status == "full_evaluating" and c.origin == "user" and c.version == 1]
         if not candidates:  # e.g. a refined version waiting in the candidate loop
             return await continue_at(sessions, investigation_id, command="evaluate")
         candidate_id = candidates[0].id

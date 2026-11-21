@@ -6,7 +6,7 @@ out and prints what happens, until the investigation reaches a stage that isn't 
     triage -> refining -> light_evaluation -> triage -> ...   (refine: the Scout writes the next version)
     triage -> generating_candidates -> prescreening -> light_evaluation -> triage -> ...
                                      (Mode 2 replenish: reserve first, then the Scout; Mode 1 alternatives)
-    triage -> full_evaluation                                 (advanced candidates: step 5.6)
+    triage -> full_evaluation -> triage -> ...               (the best advanced candidates, step 5.6a)
     triage -> ranking -> reporting -> results_ready          (Mode 1; Mode 2's ranking comes with 5.6)
 
 Exit codes as in the commands: 0 ok, 1 a step failed, 3 the budget is used up.
@@ -21,6 +21,7 @@ from src.ai.workflows.budget import budget_left, cost_cap
 from src.ai.workflows.concluding import wrap_up
 from src.ai.workflows.evaluation import Sessions
 from src.ai.workflows.alternatives import NoIdeaToReplace
+from src.ai.workflows.full_evaluation import full_evaluation_step
 from src.ai.workflows.generating import generate_step
 from src.ai.workflows.light_evaluation import LightOutcome, light_evaluation_step, short_step_line
 from src.ai.workflows.prescreening import PrescreenOutcome, prescreen_step
@@ -177,6 +178,43 @@ async def evaluate_light(sessions: Sessions, investigation_id: uuid.UUID, *, mod
                        command=command)
 
 
+# --- full evaluation ------------------------------------------------------------------------------------
+
+async def evaluate_full(sessions: Sessions, investigation_id: uuid.UUID, models: LoopModels | None = None, *,
+                        command: str) -> int:
+    models = models or LoopModels()
+
+    async def on_candidate(candidate, number, total) -> None:
+        print(f"\nFull evaluation {number}/{total}: {candidate.title}"
+              + (f" (v{candidate.version})" if candidate.version > 1 else "")
+              + " (extends its light evaluation: earlier searches and readings are reused)")
+
+    async def report(step, phase, outcome) -> None:
+        line = short_step_line(step, outcome) if phase == "done" else None
+        if line:
+            print(f"  {line}")
+
+    outcome = await full_evaluation_step(sessions, investigation_id, models=models.evaluation,
+                                         search_factory=models.search_factory, report=report,
+                                         on_candidate=on_candidate)
+    if outcome.triaged:
+        print("\nTriage after full evaluation:")
+        for candidate, decision in outcome.triaged:
+            print(f"  {candidate.title}\n    rule {decision.rule_number}: {decision.action} -> "
+                  f"{candidate.status.replace('_', ' ')} ({decision.reason})")
+    async with sessions() as session:
+        investigation = await session.get(Investigation, investigation_id)
+    if outcome.stopped == "budget":
+        print(f"\nBudget used up: ${investigation.cost_usd:.2f} of ${cost_cap(investigation)}. Stopped at "
+              f"{outcome.stopped_at}. Resume with: python -m scripts.{command} --continue {investigation_id} "
+              "--budget <more>")
+        return 3
+    if outcome.stopped:
+        print(f"\nThe full evaluation stopped ({outcome.stopped}) at {outcome.stopped_at}. Run --continue to try again.")
+        return 1
+    return await route(sessions, investigation_id, models, command=command)
+
+
 # --- refining -------------------------------------------------------------------------------------------
 
 def format_refining(outcome: RefiningOutcome) -> str:
@@ -236,8 +274,7 @@ async def continue_at(sessions: Sessions, investigation_id: uuid.UUID, models: L
     if stage == Stage.PRESCREENING:
         return await prescreen(sessions, investigation_id, models, command=command)
     if stage == Stage.FULL_EVALUATION:
-        print("Full evaluation of the advanced candidates comes with step 5.6.")
-        return 0
+        return await evaluate_full(sessions, investigation_id, models, command=command)
     if stage == Stage.RANKING and mode == Mode.EVALUATE:
         await wrap_up(sessions, investigation_id)
         async with sessions() as session:

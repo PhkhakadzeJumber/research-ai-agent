@@ -39,6 +39,7 @@ Model settings use Claude through ADK (doc 08). *Effort* is the model's reasonin
 | Query plan | StructuredIdea or candidate facets | **QueryPlan:** 10–20 queries of different kinds: synonyms and older terminology, facet-only, facet pairs, method-in-other-domain, plus date ranges |
 | Revise with answers | The user's request, A1's earlier StructuredIdea, the user's answers to its questions | The corrected StructuredIdea: answered facets marked as stated by the user, resolved assumptions and flags removed, no new questions. Called only if the user answered something |
 | Normalize candidate | A Scout candidate | Facets in the same format as StructuredIdea. *Not used (step 5.3): the Scout writes the facets* |
+| Structure idea from a document (Mode 1, planned; doc 02 §2.4) | The Paper Reader's reading of the user's own document, plus the idea text if given | The same StructuredIdea; every facet points to the document passage it came from. Claimed contributions are kept as claims to check, never as facts |
 
 **Tools:** none. It is a single structured call.
 
@@ -155,6 +156,8 @@ Model settings use Claude through ADK (doc 08). *Effort* is the model's reasonin
 **When:** for every paper selected for reading, in any stage. Results are cached per paper, so a paper is read once and reused.
 
 **Input:** paper metadata + abstract, plus full-text chunks if available (top open-access papers only), plus the list of fields to extract.
+
+*Planned (doc 02 §2.4): A3 also reads the user's own research document, with the same schema and quote verification. That reading is stored privately with the investigation, never in the shared library, and its quotes are labelled "your document": never evidence for verdicts.*
 
 **Output: PaperAnalysis:**
 

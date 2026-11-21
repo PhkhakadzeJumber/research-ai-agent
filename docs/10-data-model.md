@@ -246,6 +246,23 @@ Deferred: ConversationMessage, ToolCall (section 8)
 | counters snapshot | Counts at this moment | Live counters, funnel chart | read 27 |
 | cost so far | Spend at this moment | The live cost display | $1.40 |
 
+### 3.4 UserDocument (planned; doc 02 §2.4)
+
+**What it is:** the user's own research document (draft, proposal or paper) uploaded for a Mode 1 evaluation.
+
+**Why it exists:** a full document says far more than a short idea text, and it lets Eureka check the document's own claims. It is kept **separate from the shared library** (Paper, Chunk, PaperAnalysis, Quote are global). A private flag on Paper would leak unpublished work into other investigations' searches the first time a query forgot the filter.
+
+| Field | Meaning | Why we need it | Example |
+|---|---|---|---|
+| investigation id | Owner; deleted with the investigation | Privacy | `inv_42` |
+| file name, media type, size, content hash | What was uploaded | Display, limits, deduplicating re-uploads | `draft_v3.pdf`, 1.2 MB |
+| text, sections | The extracted text and its sections (headings kept) | What the Paper Reader reads; what quotes are verified against | "2 Related work …" |
+| consent at | When the user agreed to send it to Claude | Required before any reading | `2026-11-22T10:05:00+04:00` |
+| published, external ids | The user's answer to "already published?", with a DOI/arXiv ID if given | Finding the user's own paper in search results ("your own work") | arXiv 2405.01234 |
+| reading | The Paper Reader's analysis of it (same schema), with its quotes and their verification | Facets, seeds (cited papers), the Skeptic's claim targets, A6's plan | — |
+
+Rules: its quotes are labelled `user_document` and never count as evidence for a verdict. A search hit matching the document (by ID, or by title + authors) is marked "your own work" and excluded from the prior-work matrix and verdicts. Its text is never sent to search APIs.
+
 ---
 
 ## 4. Investigation data: the search trail

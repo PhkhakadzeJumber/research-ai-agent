@@ -6,7 +6,7 @@ finished has its TriageDecision. The first matching line decides the next stage:
   1. a candidate is `needs_refinement` and its lineage has refinements left -> refining
   2. Mode 1: the user's idea was rejected, no alternatives generated yet  -> generating_candidates
   3. Mode 2: finalists + advanced < requested count, a replenish round left -> generating_candidates
-  4. a candidate is `advanced` (waiting for a full evaluation)            -> full_evaluation
+  4. a candidate is `advanced` and fewer than FULL_LIMIT full evaluations ran -> full_evaluation
   5. otherwise                                                           -> ranking
 Before that, candidates in `needs_refinement` whose lineage is out of refinements (doc 05 §6:
 2 per idea, 4 per investigation) become `rejected`, with the reason.
@@ -21,14 +21,14 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.ai.workflows.budget import budget_left, light_cap
 from src.ai.workflows.evaluation import Sessions
 from src.ai.workflows.prescreening import light_evaluations_done
 from src.ai.workflows.states import CandidateStatus, Mode, Stage
 from src.ai.workflows.transitions import StaleState, advance_investigation, set_candidate_status
-from src.db.models import Candidate, Investigation
+from src.db.models import Candidate, Evaluation, Investigation
 
 MAX_REFINEMENTS_PER_LINEAGE = 2  # doc 05 §6
 MAX_REFINEMENTS_PER_INVESTIGATION = 4  # doc 05 §6 (Mode 2; Mode 1 has one lineage, so 2 bind first)
@@ -55,6 +55,15 @@ def refinement_room(candidate: Candidate, used: int) -> str | None:
     if used >= MAX_REFINEMENTS_PER_INVESTIGATION:
         return f"Refinement limit reached: {MAX_REFINEMENTS_PER_INVESTIGATION} refinements in this investigation."
     return None
+
+
+FULL_LIMIT = 3  # doc 05 §6 (also in src/ai/workflows/full_evaluation.py)
+
+
+async def full_evaluations_done(session, investigation_id: uuid.UUID) -> int:
+    return (await session.execute(
+        select(func.count()).select_from(Evaluation).join(Candidate, Candidate.id == Evaluation.candidate_id)
+        .where(Candidate.investigation_id == investigation_id, Evaluation.depth == "full"))).scalar_one()
 
 
 async def route_after_triage(sessions: Sessions, investigation_id: uuid.UUID) -> Route:
@@ -101,7 +110,8 @@ async def route_after_triage(sessions: Sessions, investigation_id: uuid.UUID) ->
             source = f"{len(reserve)} in reserve" if reserve else "asking the Scout for more"
             route = Route(Stage.GENERATING_CANDIDATES, f"{survivors} of {count} ideas survived: replenishing "
                           f"({source})", task="replenish")
-        elif by_status.get(CandidateStatus.ADVANCED):
+        elif by_status.get(CandidateStatus.ADVANCED) and await full_evaluations_done(session, investigation_id) \
+                < FULL_LIMIT:
             route = Route(Stage.FULL_EVALUATION,
                           f"{len(by_status[CandidateStatus.ADVANCED])} advanced candidate(s) to evaluate fully")
         else:

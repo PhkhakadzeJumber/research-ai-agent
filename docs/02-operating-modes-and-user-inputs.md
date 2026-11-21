@@ -23,6 +23,7 @@ A Mode 2 candidate can be promoted to a **deep dive**: a full Mode 1 investigati
 | Idea text | Yes | Free text: a question, hypothesis, topic or short abstract (up to ~2,000 characters) |
 | Field / subfield | Optional | Helps query planning; inferred if missing |
 | Known related papers | Optional | DOIs, arXiv IDs or titles the user already knows. Used as seeds and never counted as Eureka's own discoveries |
+| Research document | Optional (planned, §2.4) | The user's own draft, proposal or paper (text or Markdown first, then PDF). Read in full and used instead of the short idea text; treated by the rules in §2.4 |
 | Complexity level | Yes (default: Intermediate) | See section 3 |
 | Constraints profile | Yes (with defaults) | See section 4 |
 
@@ -49,6 +50,29 @@ After intake, the Idea Analyst shows its structured reading of the request:
 Along with that, it asks **at most 3 clarifying questions**. The user can answer, edit the facets/brief, or skip. When the user skips, Eureka proceeds with its stated assumptions and lists them in the report. This is the main human-in-the-loop checkpoint.
 
 **One exception to skipping:** if the Idea Analyst had to *propose* a key facet (the user's text didn't state it, e.g. no method for "make LLMs better at low-resource languages"), the user must confirm or edit the reading explicitly before anything is evaluated. Otherwise Eureka could end up judging an idea the user never had.
+
+### 2.4 The user's research document (Mode 1, planned)
+
+A real research idea rarely fits in 2,000 characters. The user may upload their own draft, proposal or paper, and Eureka evaluates that. No new agent is needed: the existing agents get a new input or task.
+
+**How it flows through the pipeline:**
+
+1. **Upload (code).** Text and Markdown first; PDF once a parser library is approved (a new dependency); DOCX later. Limits are about 10 MB and 50 pages. At upload the user agrees that the document is sent to Claude for reading, and answers "Is this already published or on arXiv?" (with an optional ID).
+2. **Reading (A3 Paper Reader).** The document is read like a paper: the same schema, with quotes verified against the user's own text. That gives research questions, method, data, claimed contributions, limitations, and the papers it cites.
+3. **Structuring (A1 Idea Analyst, a new task).** A1 builds the facets from that reading. Each facet points to the passage of the document it came from.
+4. **The cited papers become seeds.** They are searched for and read like any known related paper.
+5. **The evaluation** runs as usual. **A4** and **A6** also get relevant excerpts of the document: its method, data plan and timeline, so feasibility judges what the user actually planned. **A5 Skeptic** gets the document's novelty claims as targets ("no one has done X" is a claim to refute, not a fact).
+6. **The report** relates the two sides: "your document claims X (section 2); the literature shows Y (paper Z)".
+
+**Three rules:**
+
+- **The document is never evidence for itself.** Its quotes are verified, so Eureka can show *where* the user said something. But they are labelled "your document", and verdicts count only the published literature (tier 1/2).
+- **The user's own work never counts against them.** If the search finds the document itself (by the given ID, or a matching title and author list), that paper is marked **"your own work"**. It is kept out of the prior-work matrix and the verdicts, and shown separately in the report. The papers the document *cites* are the opposite case: they are prior work, and if one of them already did the idea, Eureka says so.
+- **The document stays private.** It is stored only with its investigation and deleted with it. It is never added to the shared paper library (doc 10 §5) and never sent to the search APIs; only the short keyword queries built from its facets are. It goes to Claude only for reading and evaluation, with the user's consent. Its text is data, never instructions, like any paper text (doc 04).
+
+Cost: reading the document is about 5–15 cents (Opus, depending on length), and the excerpts add a few cents per agent. A full evaluation stays about $3–5.
+
+*Mode 2:* no upload for now. Inferring interests from the user's past papers is a possible later addition, but the text inputs already cover it.
 
 ## 3. Complexity levels
 
