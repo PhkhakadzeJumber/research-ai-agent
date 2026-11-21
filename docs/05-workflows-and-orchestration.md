@@ -136,6 +136,8 @@ These are default values to tune with real runs. They're all configuration, not 
 | Scout tool calls per task | ≤8 | ≤8 |
 | Skeptic searches per round | ≤6 | ≤6 |
 | LLM cost cap | ~$5 | ~$12 |
+
+*As built (step 4.9, `src/ai/workflows/budget.py`):* the cost cap is stored per investigation (`--budget`, default $5). The Skeptic loop stops when it is reached (recorded in the coverage snapshot's "budgets hit", and the novelty verdict says the budget, not saturation, ended the loop), and `scripts.evaluate` stops before any further paid step (exit code 3; resume with a higher budget). Full evaluations read up to 30 papers.
 | Wall-clock cap | ~15 min | ~30 min |
 
 **Stopping conditions:**
@@ -329,6 +331,8 @@ stateDiagram-v2
 **As built (step 4.7a):** each `skeptic_review` round stores its searches (origin `skeptic`, round n), screens and reads up to 5 new relevant papers, stores the challenges (claims they target become `challenged`), and records its saturation statistic (new relevant papers). With challenges or new relevant papers it moves to `revising_novelty`; with neither it is saturated and moves to `assessing_value_feasibility`. A failed Skeptic call degrades the step.
 
 **As built (step 4.7b):** `revising_novelty` gives A4 its claims, the open challenges and the papers (the Skeptic's new ones marked), and stores the new matrix cells (existing cells are never overwritten). Code resolves each challenge: accepted (its claim becomes refuted), rebutted only with a verified quote (its claim becomes defended), otherwise unresolved and reported as a limitation. The loop returns to `skeptic_review` while rounds are left (light 1, full 3) and the last round wasn't saturated; otherwise it moves to `assessing_value_feasibility`.
+
+**As built (step 4.9, `src/ai/workflows/concluding.py`):** `concluding` freezes the coverage snapshot into the evaluation, then stores the four verdicts as `verdicts` rows (never changed afterwards), then ends the evaluation. The investigation then runs `triage -> ranking -> reporting -> results_ready`: the triage rule becomes a stored `triage_decisions` row and sets the candidate's status (finalize -> finalist, reject -> rejected, refine -> needs_refinement). Refinements, alternatives and expanded searches are recorded and reported, and carried out once the Scout exists (step 5). `scripts/report.py` builds the full report from stored data.
 
 The evaluation's separate **status** (`running` / `done` / `partial` / `failed`) records *how* it ended. A failed step degrades the evaluation to `partial` instead of stopping the investigation. Example: all sources fail → novelty becomes "insufficient evidence".
 

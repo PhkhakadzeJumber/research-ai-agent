@@ -30,7 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.ai.agents.value_feasibility import ValueReading, assess_value
-from src.ai.context import ChallengeSummary, ChunkForReading, ClaimForSkeptic, PaperForNovelty
+from src.ai.context import ChallengeSummary, ChunkForReading, ClaimForSkeptic, PaperForNovelty, name_papers
 from src.ai.evidence.verdicts import (
     FeasibilityInputs,
     Recommendation,
@@ -174,7 +174,8 @@ async def value_step(
         await record_llm_calls(session, outcome.reading.records, investigation_id=investigation.id,
                                evaluation_id=evaluation_id)
         for n, claim in enumerate(outcome.reading.claims):
-            row = Claim(evaluation_id=evaluation_id, kind="significance", text=claim.text, statement_type="evidence",
+            row = Claim(evaluation_id=evaluation_id, kind="significance", text=name_papers(claim.text, papers),
+                        statement_type="evidence",
                         inferred=False, status=claim.status, author_agent="value_feasibility")
             session.add(row)
             await session.flush()
@@ -192,10 +193,10 @@ async def value_step(
         significance = outcome.reading.output.significance
         evaluation.value_feasibility = {
             "prompt_version": outcome.reading.prompt_version,
-            "significance": {"beneficiaries": significance.beneficiaries,
-                             "contribution_vs_closest": significance.contribution_vs_closest,
+            "significance": {"beneficiaries": name_papers(significance.beneficiaries, papers),
+                             "contribution_vs_closest": name_papers(significance.contribution_vs_closest, papers),
                              "proposed_level": significance.proposed_level},
-            "feasibility": feasibility.model_dump(mode="json"),
+            "feasibility": name_papers(feasibility.model_dump(mode="json"), papers),
             "data_checks": outcome.data_checks,
             "timeline": outcome.timeline,
             "code_blocking": outcome.code_blocking,

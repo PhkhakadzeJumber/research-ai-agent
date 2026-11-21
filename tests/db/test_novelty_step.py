@@ -156,3 +156,17 @@ async def test_the_tier_mix_counts_only_papers_actually_read(db_session):
     await db_session.execute(delete(PaperAnalysis).where(PaperAnalysis.paper_id == first.id))  # as if its reading failed
     coverage = await compute_coverage(db_session, evaluation_id)
     assert coverage["tier_mix"] == {"peer_reviewed": 2, "preprint": 0}  # 3 selected, 2 read (step 4.6 live run: 25 vs 24)
+
+
+async def test_stored_texts_name_papers_by_title_not_label(db_session):
+    _, evaluation_id = await at_novelty(db_session)
+    await run_novelty(db_session, evaluation_id, novelty_answer(
+        claims=[{**GAP_LIKE, "text": "P1 studies only larger models"}], uncertainties=["P2 is abstract-only"]))
+    claim = (await db_session.execute(select(Claim).where(Claim.evaluation_id == evaluation_id))).scalar_one()
+    assert claim.text == '"Paper 0" (n.d.) studies only larger models'
+    row = await evaluation(db_session, evaluation_id)
+    assert row.novelty_assessment["uncertainties"] == ['"Paper 1" (n.d.) is abstract-only']
+
+
+GAP_LIKE = {"kind": "gap", "statement_type": "interpretation", "inferred": True,
+            "evidence": [{"paper": "P1", "quote": "We study Paper 0", "stance": "supports"}]}

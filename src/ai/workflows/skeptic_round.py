@@ -38,7 +38,7 @@ from sqlalchemy import func, or_, select
 
 from src.ai.agents.novelty_investigator import RevisionReading, revise_novelty
 from src.ai.agents.skeptic import AttackPlan, CheckedChallenge, plan_attack, write_challenges
-from src.ai.context import ChallengeForRevision, ChunkForReading, ClaimForSkeptic, PaperForNovelty
+from src.ai.context import ChallengeForRevision, ChunkForReading, ClaimForSkeptic, PaperForNovelty, name_papers
 from src.ai.workflows.evaluation import (
     READ_THRESHOLD,
     Sessions,
@@ -50,6 +50,7 @@ from src.ai.workflows.evaluation import (
     score_unscreened,
 )
 from src.ai.workflows.reading import LibraryOutcome, read_into_library
+from src.ai.workflows.budget import budget_left, cost_cap
 from src.ai.workflows.states import EvaluationStep
 from src.ai.workflows.transitions import advance_evaluation, note_degraded
 from src.config import RoleLlmSettings
@@ -62,6 +63,7 @@ from src.db.models import (
     Evaluation,
     Facet,
     FacetMatch,
+    Investigation,
     Paper,
     PaperAnalysis,
     Quote,
@@ -243,7 +245,8 @@ async def skeptic_round_step(
             target = claims.get(challenge.target_claim) if challenge.target_claim else None
             session.add(Challenge(
                 evaluation_id=evaluation_id, round=round_no, target_claim_id=target.id if target else None,
-                type=challenge.type, argument=challenge.argument, statement_type=challenge.statement_type,
+                type=challenge.type, argument=name_papers(challenge.argument, outcome.papers),
+                statement_type=challenge.statement_type,
                 evidence_quote_ids=list(dict.fromkeys(quote_ids)),
                 new_paper_ids=[outcome.papers[label].id for label in challenge.papers],
                 same_on_facets=challenge.same_on_facets,
@@ -286,11 +289,12 @@ async def _paper_view(session, label: str, paper: Paper, *, is_new: bool) -> Pap
                            analysis.content if analysis else None, is_new=is_new)
 
 
-def loop_next(evaluation: Evaluation) -> str:
-    """Another Skeptic round, or on to value and feasibility (doc 05 §11.4)."""
+def loop_next(evaluation: Evaluation, *, budget_left: bool = True) -> str:
+    """Another Skeptic round (rounds left, not saturated, budget left), or on to value and
+    feasibility (doc 05 §11.4)."""
     rounds = (evaluation.counters or {}).get("skeptic_rounds", [])
     saturated = bool(rounds) and rounds[-1].get("saturated", False)
-    if len(rounds) < MAX_ROUNDS[evaluation.depth] and not saturated:
+    if len(rounds) < MAX_ROUNDS[evaluation.depth] and not saturated and budget_left:
         return EvaluationStep.SKEPTIC_REVIEW
     return EvaluationStep.ASSESSING_VALUE_FEASIBILITY
 
@@ -379,7 +383,8 @@ async def revision_step(
                         f"cell:{n}", match.quote.text, match.quote.chunk_id, match.quote.verified, match.quote.score)])
                     quote_id = stored[f"cell:{n}"].id if stored[f"cell:{n}"] is not None else None
                 session.add(FacetMatch(evaluation_id=evaluation_id, facet_id=facet.id, paper_id=paper.id,
-                                       overlap=match.overlap, quote_id=quote_id, rationale=match.rationale))
+                                       overlap=match.overlap, quote_id=quote_id,
+                                       rationale=name_papers(match.rationale, outcome.papers)))
                 existing.add((paper.id, facet.id))
                 outcome.new_cells += 1
 
@@ -393,7 +398,8 @@ async def revision_step(
                         target.status = "refuted"
                 elif response.rebuttal is not None:
                     rebuttal = Claim(evaluation_id=evaluation_id, kind=response.rebuttal.kind,
-                                     text=response.rebuttal.text, statement_type=response.rebuttal.statement_type,
+                                     text=name_papers(response.rebuttal.text, outcome.papers),
+                                     statement_type=response.rebuttal.statement_type,
                                      inferred=response.rebuttal.inferred, status=response.rebuttal.status,
                                      author_agent="novelty")
                     session.add(rebuttal)
@@ -422,18 +428,30 @@ async def revision_step(
 
         evaluation = await session.get(Evaluation, evaluation_id)
         await session.refresh(evaluation)
-        outcome.next_step = loop_next(evaluation)
+        investigation = await session.get(Investigation, investigation_id)
+        await session.refresh(investigation)
+        has_budget = budget_left(investigation)
+        outcome.next_step = loop_next(evaluation, budget_left=has_budget)
+        rounds = (evaluation.counters or {}).get("skeptic_rounds", [])
+        stopped_by_budget = (not has_budget and len(rounds) < MAX_ROUNDS[evaluation.depth]
+                             and not (rounds and rounds[-1].get("saturated")))
+        if stopped_by_budget:
+            evaluation.counters = {**evaluation.counters, "budgets_hit": [
+                *evaluation.counters.get("budgets_hit", []),
+                f"cost cap ${cost_cap(investigation)} reached: the Skeptic stopped after {len(rounds)} round(s)"]}
         evaluation = await advance_evaluation(session, evaluation_id, to=outcome.next_step,
                                               expected_from=EvaluationStep.REVISING_NOVELTY)
         if reading is not None:
             assessment = dict(evaluation.novelty_assessment or {})
             assessment.update({
                 "closest_works": [
-                    {"paper_id": str(outcome.papers[w.paper].id), "what_they_did": w.what_they_did,
-                     "how_the_idea_differs": w.how_the_idea_differs, "minor_difference_only": w.minor_difference_only}
+                    {"paper_id": str(outcome.papers[w.paper].id),
+                     "what_they_did": name_papers(w.what_they_did, outcome.papers),
+                     "how_the_idea_differs": name_papers(w.how_the_idea_differs, outcome.papers),
+                     "minor_difference_only": w.minor_difference_only}
                     for w in reading.output.closest_works if w.paper in outcome.papers],
                 "proposed_verdict": reading.output.proposed_verdict,
-                "uncertainties": reading.output.uncertainties,
+                "uncertainties": name_papers(reading.output.uncertainties, outcome.papers),
                 "revisions": int(assessment.get("revisions", 0)) + 1,
             })
             evaluation.novelty_assessment = assessment

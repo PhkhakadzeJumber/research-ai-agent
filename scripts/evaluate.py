@@ -18,7 +18,7 @@ So far (steps 4.2-4.4):
   4. screening: every paper found is scored 0-3 for relevance (by the model in
      EUREKA_LLM_MODEL_RELEVANCE_SCREENING, e.g. Haiku: a few cents for ~600 papers);
   5. reading: the most relevant papers (scores 3, then 2; at most --max-read, default
-     25) are read by the Paper Reader with quote verification (about 3.4 cents each on
+     30) are read by the Paper Reader with quote verification (about 3.4 cents each on
      Opus; papers already in the library are free);
   6. novelty: the Novelty Investigator compares the idea with the 12 closest read papers
      facet by facet (one Opus call, about 25 cents); code verifies its quotes and the
@@ -31,7 +31,13 @@ So far (steps 4.2-4.4):
   8. value and feasibility: one Opus call (about 30 cents) judges significance and
      feasibility for you; code checks datasets against the papers read and the timeline
      against your available time, then shows every verdict, the recommendation and the
-     triage rule (a preview until `concluding`, step 4.9).
+     triage rule;
+  9. concluding: the coverage and the verdicts are frozen, triage decides (finalist,
+     rejected, or a refinement suggested for step 5), and the investigation completes.
+     The full report: python -m scripts.report <investigation id> [--out report.md].
+Budget: --budget (default $5) caps the investigation's Claude cost. The Skeptic loop stops
+at the cap, and the command stops before any further paid step (resume with --continue and
+a higher --budget).
 If Eureka had to propose a KEY facet, you must confirm the reading yourself: --yes is
 refused. Quitting at the confirmation keeps everything; resume with --continue.
 Later steps extend this until the whole evaluation runs (step 4.8).
@@ -41,7 +47,7 @@ plus one or two for the query plan; roughly 4-5 cents each; screening and readin
 as above, so a first-time full evaluation costs up to about $1) and the free arXiv and
 OpenAlex APIs (a small share of OpenAlex's daily allowance).
 Exit code: 0 ok, 1 an Idea Analyst call failed, 2 invalid input, a confirmation that
---yes can't give, or an unavailable database.
+--yes can't give, or an unavailable database, 3 the budget is used up.
 """
 
 from __future__ import annotations
@@ -54,6 +60,7 @@ import uuid
 from collections.abc import Callable
 
 from src.ai.schemas.structured_idea import StructuredIdeaOutput
+from src.ai.workflows.budget import DEFAULT_COST_CAP_USD, budget_left, cost_cap, set_cost_cap
 from src.ai.workflows.clarification import (
     ConfirmationRequired,
     NotWaitingForClarification,
@@ -79,6 +86,7 @@ from src.ai.workflows.evaluation import (
     selected_papers,
 )
 from src.ai.workflows.skeptic_round import revision_step, skeptic_round_step
+from src.ai.workflows.concluding import conclude_step, finish_investigation
 from src.ai.workflows.states import EvaluationStep, Stage
 from src.ai.workflows.value_feasibility import value_step, verdicts_for
 from src.ai.workflows.understanding import understand_idea
@@ -119,6 +127,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="a paper you already know: DOI, arXiv ID or title (repeatable)")
     parser.add_argument("--constraint", action="append", default=[], type=parse_constraint, metavar="NAME=VALUE",
                         help='a constraint, e.g. "available time=8 weeks" (repeatable)')
+    parser.add_argument("--budget", type=float, default=None, metavar="USD",
+                        help="cost cap for the investigation's Claude calls (default: 5; with --continue, "
+                             "changes the stored cap)")
     parser.add_argument("--max-read", type=int, default=None, metavar="N",
                         help="papers the Paper Reader reads at most (default: 25 for a full evaluation)")
     parser.add_argument("--yes", action="store_true",
@@ -130,6 +141,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def check_max_read(args: argparse.Namespace) -> None:
     if args.max_read is not None and not 0 <= args.max_read <= 100:
         raise InputError("--max-read must be between 0 and 100.")
+    if args.budget is not None and args.budget <= 0:
+        raise InputError("--budget must be more than 0.")
 
 
 def investigation_input(args: argparse.Namespace) -> dict:
@@ -301,9 +314,19 @@ async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read:
             evaluation = await session.get(Evaluation, evaluation_id)
             await session.refresh(evaluation)
             step, status = evaluation.step, evaluation.status
+        if status == "failed":
+            print(f"\nThe evaluation failed (at {step}).")
+            return 1
         if status != "running":
-            print(f"\nThe evaluation ended: {status} (at {step}).")
-            return 1 if status == "failed" else 0
+            return await finish(sessions, investigation_id, status)
+        if step in PAID_STEPS:
+            async with sessions() as session:
+                investigation = await session.get(Investigation, investigation_id)
+                if not budget_left(investigation):
+                    print(f"\nBudget used up: ${investigation.cost_usd:.2f} of ${cost_cap(investigation)}. Stopped "
+                          f"before {step}. Resume with: python -m scripts.evaluate --continue {investigation_id} "
+                          "--budget <more>")
+                    return 3
 
         if step == EvaluationStep.PLANNING_QUERIES:
             print("\nPlanning the searches (one Idea Analyst call)...")
@@ -395,6 +418,11 @@ async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read:
                 async with sessions() as session:
                     verdict, coverage = await novelty_verdict_for(session, evaluation_id)
                 print("\n" + format_verdict(verdict, coverage))
+        elif step == EvaluationStep.CONCLUDING:
+            print("\nConcluding: freezing the coverage and the verdicts...")
+            verdicts = await conclude_step(sessions, evaluation_id)
+            print("\n" + format_verdict(verdicts.novelty, verdicts.coverage, final=True))
+            print(format_all_verdicts(verdicts, final=True))
         elif step == EvaluationStep.ASSESSING_VALUE_FEASIBILITY:
             print("\nJudging significance and feasibility for you (Value & Feasibility Evaluator, one call)...")
             outcome = await value_step(sessions, evaluation_id, settings=value_settings, model=value_model)
@@ -532,25 +560,51 @@ def format_value(outcome) -> str:
     return "\n".join(lines)
 
 
-def format_all_verdicts(verdicts) -> str:
+PAID_STEPS = {EvaluationStep.PLANNING_QUERIES, EvaluationStep.SCREENING, EvaluationStep.READING,
+              EvaluationStep.ASSESSING_NOVELTY, EvaluationStep.SKEPTIC_REVIEW, EvaluationStep.REVISING_NOVELTY,
+              EvaluationStep.ASSESSING_VALUE_FEASIBILITY}
+
+
+async def finish(sessions: Sessions, investigation_id: uuid.UUID, evaluation_status: str) -> int:
+    """After the evaluation: triage, ranking, reporting, results ready."""
+    async with sessions() as session:
+        investigation = await session.get(Investigation, investigation_id)
+        stage, cost = investigation.stage, investigation.cost_usd
+    if stage == Stage.FULL_EVALUATION:
+        outcome = await finish_investigation(sessions, investigation_id)
+        decision = outcome.decision
+        print(f"\nTriage: rule {decision.rule_number}: {decision.action} ({decision.reason})")
+        print(f"Your idea's status: {outcome.candidate_status.replace('_', ' ')}"
+              f" | evaluation {evaluation_status}")
+        if outcome.not_executed:
+            print(f"  {outcome.not_executed}")
+    print(f"\nDone. Total cost: ${cost:.2f}")
+    print(f"Full report: python -m scripts.report {investigation_id} [--out report.md]")
+    return 0
+
+
+def format_all_verdicts(verdicts, *, final: bool = False) -> str:
     lines = []
     for name, verdict in (("Significance", verdicts.significance), ("Feasibility", verdicts.feasibility)):
         lines.append(f"{name}: {LABELS[verdict.category]}   [{verdict.rules_version}, rule {verdict.rule}]")
         lines.extend(f"  {line}" for line in verdict.trace)
     rec = verdicts.recommendation
     flag = "   + needs further investigation" if rec.needs_further_investigation else ""
-    lines.append(f"\nRecommendation (preview): {rec.label}{flag}   [{rec.rules_version}, rule {rec.rule}]")
+    kind = "" if final else " (preview)"
+    lines.append(f"\nRecommendation{kind}: {rec.label}{flag}   [{rec.rules_version}, rule {rec.rule}]")
     lines.extend(f"  {line}" for line in rec.trace)
-    lines.append(f"Triage (preview): rule {verdicts.triage.number}: {verdicts.triage.action} "
-                 f"({verdicts.triage.reason})")
+    if not final:
+        lines.append(f"Triage (preview): rule {verdicts.triage.number}: {verdicts.triage.action} "
+                     f"({verdicts.triage.reason})")
     return "\n".join(lines)
 
 
-def format_verdict(verdict, coverage) -> str:
+def format_verdict(verdict, coverage, *, final: bool = False) -> str:
     funnel = coverage["funnel"]
     rounds = len(coverage.get("skeptic_rounds", []))
     when = "before the Skeptic" if not rounds else f"after {rounds} Skeptic round{'s' if rounds > 1 else ''}"
-    lines = [f"Novelty (preliminary, {when}): {verdict.label}   [{verdict.rules_version}, rule {verdict.rule}]"]
+    state = "final" if final else f"preliminary, {when}"
+    lines = [f"Novelty ({state}): {verdict.label}   [{verdict.rules_version}, rule {verdict.rule}]"]
     lines.extend(f"  {line}" for line in verdict.trace)
     if verdict.weaknesses:
         lines.append("  Limits of the search behind this:")
@@ -577,13 +631,16 @@ async def run(args: argparse.Namespace) -> int:
         if not await database.ping():
             raise InputError("The database isn't reachable: start it with `docker compose up -d db`.")
         if args.continue_id is not None:
-            return await resume(database.session, args.continue_id, yes=args.yes, max_read=args.max_read)
+            return await resume(database.session, args.continue_id, yes=args.yes, max_read=args.max_read,
+                                budget=args.budget)
 
         async with database.session() as session:
             investigation = await create_investigation(session, mode="evaluate", complexity=args.complexity,
                                                        input=data, constraints=dict(args.constraint))
+            set_cost_cap(investigation, args.budget if args.budget is not None else DEFAULT_COST_CAP_USD)
             investigation_id = investigation.id
-        print(f"Investigation {investigation_id} | complexity {args.complexity}\n")
+        print(f"Investigation {investigation_id} | complexity {args.complexity} | "
+              f"budget ${args.budget if args.budget is not None else DEFAULT_COST_CAP_USD}\n")
 
         outcome = await understand_idea(database.session, investigation_id)
 
@@ -612,10 +669,13 @@ async def evaluate_if_confirmed(sessions: Sessions, investigation_id: uuid.UUID,
     return await evaluate(sessions, investigation_id, max_read=max_read)
 
 
-async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, max_read: int | None = None) -> int:
+async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, max_read: int | None = None,
+                 budget: float | None = None) -> int:
     """--continue: picks the investigation up where it stopped."""
     async with sessions() as session:
         investigation = await session.get(Investigation, investigation_id)
+        if investigation is not None and budget is not None:
+            set_cost_cap(investigation, budget)
     if investigation is None:
         raise InputError(f"No investigation {investigation_id}.")
     print(f"Investigation {investigation_id} | stage {investigation.stage} ({investigation.status})")
@@ -629,6 +689,9 @@ async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, 
         return await evaluate_if_confirmed(sessions, investigation_id, code, max_read=max_read)
     if investigation.stage == Stage.FULL_EVALUATION and investigation.status == "running":
         return await evaluate(sessions, investigation_id, max_read=max_read)
+    if investigation.stage == Stage.RESULTS_READY:
+        print(f"Completed. Full report: python -m scripts.report {investigation_id}")
+        return 0
     raise InputError(f"Investigation {investigation_id} can't be continued from stage {investigation.stage} "
                      f"({investigation.status}).")
 

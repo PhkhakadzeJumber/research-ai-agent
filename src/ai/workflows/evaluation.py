@@ -53,6 +53,7 @@ from src.ai.context import (
     FacetForPlanning,
     PaperForNovelty,
     PaperForScreening,
+    name_papers,
 )
 from src.ai.evidence.coverage import compute_coverage, coverage_note
 from src.ai.evidence.verdicts import MatchFact, NoveltyInputs, VerdictResult, novelty_verdict
@@ -278,7 +279,9 @@ async def retrieve_step(
 
 # --- screening ------------------------------------------------------------------------------------------
 
-MAX_READ = {"light": 12, "full": 25}  # papers read per evaluation by default (step 4.5: about 3.4 cents each on Opus)
+# Papers read per evaluation by default (about 3 cents each on Opus). Full: 30, above the 25
+# "Supported" needs, so one failed reading doesn't drop below it (step 4.9).
+MAX_READ = {"light": 12, "full": 30}
 READ_THRESHOLD = 2  # scores 2 and 3 are worth reading; 1 and 0 never are
 SCREEN_CONCURRENCY = 4
 
@@ -595,9 +598,10 @@ async def novelty_step(
             quote = stored.get((match.paper, f"matrix:{match.facet}"))
             session.add(FacetMatch(evaluation_id=evaluation_id, facet_id=facets[match.facet - 1].id,
                                    paper_id=papers[match.paper].id, overlap=match.overlap,
-                                   quote_id=quote.id if quote else None, rationale=match.rationale))
+                                   quote_id=quote.id if quote else None,
+                                   rationale=name_papers(match.rationale, papers)))
         for n, claim in enumerate(reading.claims):
-            row = Claim(evaluation_id=evaluation_id, kind=claim.kind, text=claim.text,
+            row = Claim(evaluation_id=evaluation_id, kind=claim.kind, text=name_papers(claim.text, papers),
                         statement_type=claim.statement_type, inferred=claim.inferred, status=claim.status,
                         author_agent="novelty")
             session.add(row)
@@ -618,13 +622,13 @@ async def novelty_step(
             "prompt_version": reading.prompt_version,
             "papers_examined": [str(paper.id) for paper in papers.values()],
             "closest_works": [
-                {"paper_id": str(papers[work.paper].id), "what_they_did": work.what_they_did,
-                 "how_the_idea_differs": work.how_the_idea_differs,
+                {"paper_id": str(papers[work.paper].id), "what_they_did": name_papers(work.what_they_did, papers),
+                 "how_the_idea_differs": name_papers(work.how_the_idea_differs, papers),
                  "minor_difference_only": work.minor_difference_only}
                 for work in reading.output.closest_works if work.paper in papers
             ],
             "proposed_verdict": reading.output.proposed_verdict,
-            "uncertainties": reading.output.uncertainties,
+            "uncertainties": name_papers(reading.output.uncertainties, papers),
             "dropped": reading.dropped,
         }
         evaluation.counters = {**evaluation.counters, "novelty_papers": len(papers),
@@ -676,5 +680,6 @@ async def novelty_verdict_for(session: AsyncSession, evaluation_id: uuid.UUID) -
         retrieval_failed=evaluation.status == "failed", assessment_failed=not assessment or "error" in assessment,
         skeptic_ran=bool(rounds), skeptic_saturated=bool(rounds) and rounds[-1].get("saturated", False),
         skeptic_override_papers=frozenset(override),
+        skeptic_budget_stopped=any("Skeptic" in hit for hit in (evaluation.counters or {}).get("budgets_hit", [])),
     )
     return novelty_verdict(inputs), coverage

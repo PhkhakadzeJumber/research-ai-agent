@@ -107,7 +107,7 @@ async def compute_coverage(session: AsyncSession, evaluation_id: uuid.UUID) -> d
             {"round": r["round"], "new_relevant": r.get("new_relevant", 0), "challenges": r.get("challenges", 0)}
             for r in counters.get("skeptic_rounds", [])
         ],
-        "budgets_hit": [],
+        "budgets_hit": list(counters.get("budgets_hit", [])),
         "blind_spots": blind_spots,
     }
 

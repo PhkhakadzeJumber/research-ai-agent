@@ -121,3 +121,16 @@ def test_labels_must_be_unique():
     with pytest.raises(ValueError, match="unique"):
         asyncio.run(assess_novelty(CANDIDATE, (P1, P1), coverage="x", settings=SETTINGS,
                                    model=ScriptedLlm.with_answers()))
+
+
+def test_labels_in_stored_text_become_titles():
+    from types import SimpleNamespace
+
+    from src.ai.context import name_papers
+
+    papers = {"P1": SimpleNamespace(title="RAG for Georgian QA", year=2026),
+              "P3": SimpleNamespace(title="x" * 80, year=None)}
+    assert name_papers("P1 differs from P3/P9.", papers) == (
+        '"RAG for Georgian QA" (2026) differs from "' + "x" * 59 + '…" (n.d.)/P9.')  # unknown P9 kept
+    assert name_papers({"a": ["see P1"], "b": 3}, papers) == {"a": ['see "RAG for Georgian QA" (2026)'], "b": 3}
+    assert name_papers("APP1 and P12x stay", papers) == "APP1 and P12x stay"  # whole labels only

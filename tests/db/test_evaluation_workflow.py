@@ -324,13 +324,15 @@ async def test_the_command_runs_the_evaluation_up_to_the_novelty_assessment(db_s
     assert "Round 1" in output and "attribution low-resource qa" in output
     assert "4 searches -> 0 papers new to this evaluation -> 0 relevant -> 0 read" in output
     assert "Saturation statistic: 0 new relevant papers (saturated)" in output
-    assert "Novelty (preliminary, after 1 Skeptic round)" in output
     assert "Judging significance and feasibility for you" in output
     assert "timeline: experiments 6w = 6 weeks (available: ?)" in output
+    assert "Concluding: freezing the coverage and the verdicts" in output
+    assert "Novelty (final): Insufficient evidence" in output
     assert "Significance: Unclear" in output and "Feasibility: Feasible" in output
-    assert "Recommendation (preview): Reconsider   + needs further investigation" in output  # novelty insufficient
-    assert "Triage (preview): rule 7: expand_search" in output
-    assert "come with step 4.9 (now at concluding)" in output
+    assert "Recommendation: Reconsider   + needs further investigation" in output  # novelty insufficient
+    assert "Triage: rule 7: expand_search" in output and "carried out with step 5" in output
+    assert "Done. Total cost:" in output and f"python -m scripts.report {investigation.id}" in output
+    assert (await db_session.get(Investigation, investigation.id)).stage == "results_ready"
 
 
 async def test_the_command_resumes_where_the_evaluation_stopped(db_session, capsys):
@@ -343,4 +345,4 @@ async def test_the_command_resumes_where_the_evaluation_stopped(db_session, caps
     assert code == 0 and llm.requests == []
     assert "Planning the searches" not in capsys.readouterr().out
     assert (await db_session.get(Candidate, (await db_session.get(Evaluation, evaluation_id)).candidate_id))
-    assert (await db_session.get(Investigation, investigation.id)).stage == "full_evaluation"
+    assert (await db_session.get(Investigation, investigation.id)).stage == "results_ready"  # ran to the end

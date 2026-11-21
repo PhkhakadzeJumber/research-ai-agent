@@ -501,3 +501,33 @@ def render_value_feasibility(candidate: CandidateForPlanning, *, complexity: str
         novelty = render_novelty_task(candidate, papers, coverage="")
         lines.append(novelty[novelty.index("<papers>"):novelty.index("</papers>") + len("</papers>")])
     return "\n".join(lines)
+
+
+
+# --- paper labels in stored text ----------------------------------------------------------------------------
+#
+# Agents refer to papers by labels (P1, P2, ...) that mean something only inside one call. Text
+# that is stored (claims, closest works, uncertainties, challenges, rationales, assessments)
+# gets the labels replaced by the paper's short title and year first, so a reader of the
+# report never sees "P35" (step 4.9 live run).
+
+_PAPER_LABEL = re.compile(r"\bP(\d{1,3})\b")
+LABEL_TITLE_CHARS = 60
+
+
+def name_papers(value, papers: dict):
+    """`value` (a string, or lists/dicts of strings) with every known paper label replaced by
+    '"Short title" (year)'. `papers` maps labels to objects with .title and .year."""
+    if isinstance(value, str):
+        def replace(match: re.Match) -> str:
+            paper = papers.get(match.group(0))
+            if paper is None:
+                return match.group(0)
+            title = paper.title if len(paper.title) <= LABEL_TITLE_CHARS else paper.title[:LABEL_TITLE_CHARS - 1] + "…"
+            return f'"{title}" ({paper.year or "n.d."})'
+        return _PAPER_LABEL.sub(replace, value)
+    if isinstance(value, list):
+        return [name_papers(item, papers) for item in value]
+    if isinstance(value, dict):
+        return {key: name_papers(item, papers) for key, item in value.items()}
+    return value

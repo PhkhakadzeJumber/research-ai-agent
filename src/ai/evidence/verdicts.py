@@ -66,6 +66,7 @@ class NoveltyInputs:
     skeptic_saturated: bool = False
     skeptic_ran: bool = False
     skeptic_override_papers: frozenset[str] = frozenset()
+    skeptic_budget_stopped: bool = False
     """Papers cited by prior_work_found challenges that qualify for N1S (checked by the caller)."""
 
 
@@ -148,7 +149,8 @@ def novelty_verdict(inputs: NoveltyInputs) -> VerdictResult:
         if value < minimum:
             weaknesses.append(f"{name}: {value} (at least {minimum} needed)")
     if not inputs.skeptic_saturated:
-        weaknesses.append("the Skeptic hasn't reached saturation" if inputs.skeptic_ran
+        weaknesses.append("the Skeptic was stopped by the budget before saturation" if inputs.skeptic_budget_stopped
+                          else "the Skeptic hasn't reached saturation" if inputs.skeptic_ran
                           else "the Skeptic hasn't reviewed the idea yet")
     unverified_gaps = sum(1 for status in inputs.gap_claim_statuses if status not in ("verified", "defended"))
     if unverified_gaps:

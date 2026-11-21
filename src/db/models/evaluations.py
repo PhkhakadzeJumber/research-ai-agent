@@ -13,7 +13,8 @@ Step 4.6 adds the novelty evidence (doc 10 §7.2-7.3):
 and two JSON columns on Evaluation: the Novelty Investigator's remaining output
 (closest works, proposed verdict, uncertainties) and the coverage snapshot (frozen at
 `concluding`). Step 4.7 adds Challenge: one objection raised by the Skeptic (doc 10 §7.4).
-Verdicts arrive with `concluding`.
+Step 4.9 adds Verdict (doc 10 §7.5: the frozen result per dimension, written at
+`concluding`) and TriageDecision (doc 10 §7.6: what was decided about the candidate, and why).
 """
 
 from __future__ import annotations
@@ -45,6 +46,9 @@ STANCES = ("supports", "contradicts", "qualifies")
 CHALLENGE_TYPES = ("prior_work_found", "weak_assumption", "methodological_flaw", "overstated_contribution",
                    "alternative_explanation", "feasibility_risk")
 CHALLENGE_RESOLUTIONS = ("unresolved", "accepted", "rebutted")
+# doc 10 §7.5-7.6
+VERDICT_DIMENSIONS = ("novelty", "significance", "feasibility", "recommendation")
+TRIAGE_ACTIONS = ("advance", "refine", "reject", "expand_search", "finalize", "screen_out")
 
 
 class Evaluation(UUIDPrimaryKey, Timestamps, Base):
@@ -163,3 +167,46 @@ class Challenge(UUIDPrimaryKey, Timestamps, Base):
     same_on_facets: Mapped[list[int]] = mapped_column(ARRAY(Integer), default=list, server_default=sql_text("'{}'"))
     resolution: Mapped[str] = mapped_column(String(16), default="unresolved", server_default="unresolved")
     rebuttal_claim_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("claims.id"))
+
+
+
+class Verdict(UUIDPrimaryKey, Timestamps, Base):
+    """The official conclusion for one dimension of an evaluation (doc 10 §7.5). Computed by code
+    from stored evidence, written once at `concluding`, never changed afterwards."""
+
+    __tablename__ = "verdicts"
+    __table_args__ = (
+        UniqueConstraint("evaluation_id", "dimension"),
+        CheckConstraint(one_of("dimension", VERDICT_DIMENSIONS), name="dimension_valid"),
+    )
+
+    evaluation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("evaluations.id", ondelete="CASCADE"), index=True)
+    dimension: Mapped[str] = mapped_column(String(16))
+    category: Mapped[str] = mapped_column(String(32))
+    rule: Mapped[str] = mapped_column(String(16))
+    rule_trace: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default=sql_text("'[]'::jsonb"))
+    uncertainties: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default=sql_text("'[]'::jsonb"))
+    blocking_requirements: Mapped[list[str]] = mapped_column(JSONB, default=list,
+                                                            server_default=sql_text("'[]'::jsonb"))
+    rules_version: Mapped[str] = mapped_column(String(32))
+
+
+class TriageDecision(UUIDPrimaryKey, Timestamps, Base):
+    """What was decided about a candidate after an evaluation, and why (doc 10 §7.6)."""
+
+    __tablename__ = "triage_decisions"
+    __table_args__ = (
+        CheckConstraint(one_of("action", TRIAGE_ACTIONS), name="action_valid"),
+        CheckConstraint("rule_number BETWEEN 1 AND 9", name="rule_number_valid"),
+    )
+
+    candidate_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"), index=True)
+    # Empty for pre-screen decisions (Workflow B, step 5).
+    evaluation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("evaluations.id", ondelete="CASCADE"))
+    rule_number: Mapped[int] = mapped_column(SmallInteger)
+    action: Mapped[str] = mapped_column(String(16))
+    reason: Mapped[str] = mapped_column(Text)
+    # The verdicts behind the decision: {"verdict_ids": [...]}
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default=sql_text("'{}'::jsonb"))
+    # The new version created by a `refine` decision (with the Scout, step 5).
+    created_candidate_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("candidates.id"))
