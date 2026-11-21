@@ -324,6 +324,8 @@ stateDiagram-v2
 
 **As built (step 4.5):** screening scores every found paper 0–3 against the candidate (3 direct prior work, 2 shares a key facet, 1 tangential, 0 unrelated) with the `relevance_screening` role, in batches of 25 on a small model (`EUREKA_LLM_MODEL_RELEVANCE_SCREENING`, e.g. Haiku). Code selects scores 3, then 2, most-found first, up to a reading limit (light 12, full 25, `--max-read`); how many relevant papers the limit left out is recorded for the coverage snapshot. A failed screening batch leaves its papers unscreened and marks the step degraded. Snowballing and full text come later.
 
+**As built (step 4.6):** `assessing_novelty` runs A4 on the 12 closest read papers and stores the facet matrix (`facet_matches`), claims and their evidence; the novelty verdict is computed by the verdict engine from that evidence and the coverage snapshot. It is shown as *preliminary* until the Skeptic has run (step 4.7) and is frozen at `concluding` (step 4.9).
+
 The evaluation's separate **status** (`running` / `done` / `partial` / `failed`) records *how* it ended. A failed step degrades the evaluation to `partial` instead of stopping the investigation. Example: all sources fail → novelty becomes "insufficient evidence".
 
 ### 11.5 Candidate statuses

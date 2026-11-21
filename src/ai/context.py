@@ -1,7 +1,8 @@
 """Context packets: exactly what an agent sees, built by code (doc 08 §5). Papers for the
 Paper Reader (render_paper); ideas, revisions and query-planning tasks for the Idea
 Analyst (render_idea, render_revision, render_query_task); batches of papers for the
-relevance screener (render_screening_batch).
+relevance screener (render_screening_batch); the closest papers with their readings for
+the Novelty Investigator (render_novelty_task).
 
 Agents never read the database themselves. The orchestrator gives each one a curated
 packet, rendered as clearly labelled blocks so the model knows what it may cite:
@@ -29,7 +30,7 @@ ABSTRACT_ONLY_NOTE = (
 )
 FULL_TEXT_NOTE = "Passages from the full text are included as chunks, each with its ID and section."
 
-_TAGS = re.compile(r"<(/?)(paper|title|authors|note|abstract|chunk)\b", re.IGNORECASE)
+_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage)\b", re.IGNORECASE)
 _QUOTE_IN_ATTRIBUTE = re.compile(r'["<>]')
 
 
@@ -271,4 +272,74 @@ def render_screening_batch(candidate: CandidateForPlanning, papers: tuple[PaperF
         lines.append(f'<paper label="{_attribute(paper.label)}"{year}><title>{_contain(paper.title)}</title>'
                      f"{abstract}</paper>")
     lines.append("</papers>")
+    return "\n".join(lines)
+
+
+
+# --- the Novelty Investigator's packet ------------------------------------------------------------------
+#
+#     (the candidate block)
+#     <papers>
+#     <paper label="P1" year="2026" type="preprint" text="abstract only">
+#     <title>...</title>
+#     <abstract>...</abstract>
+#     <reading>contribution: ...; methods: ...; findings: ...</reading>
+#     </paper>
+#     </papers>
+#     <coverage>614 papers found, 614 screened, 24 read ...</coverage>
+
+_READING_FIELDS = (("setting", "setting"), ("tasks", "tasks"), ("methods", "methods"), ("datasets", "datasets"),
+                   ("metrics", "metrics"), ("baselines", "baselines"))
+
+
+@dataclass(frozen=True)
+class PaperForNovelty:
+    label: str
+    title: str
+    tier: int
+    year: int | None = None
+    abstract: str | None = None
+    chunks: tuple[ChunkForReading, ...] = ()
+    reading: dict | None = None
+    """The stored Paper Reader analysis content (doc 10 §5.3), if any."""
+
+
+def summarize_reading(content: dict | None) -> str:
+    """A compact, quote-free summary of a stored analysis: what the paper does and finds."""
+    if not content:
+        return "(no reading available)"
+    parts = [f"contribution: {content.get('contribution_type', 'unknown')}"]
+    for label, field in _READING_FIELDS:
+        value = content.get(field)
+        if isinstance(value, list) and value:
+            parts.append(f"{label}: {', '.join(value)}")
+        elif isinstance(value, str) and value:
+            parts.append(f"{label}: {value}")
+    for item in content.get("findings", [])[:4]:
+        parts.append(f"finding ({item.get('direction', '?')}): {item.get('claim', '')}")
+    for item in content.get("limitations", [])[:3]:
+        parts.append(f"admitted limitation: {item.get('statement', '')}")
+    return "; ".join(parts)
+
+
+def render_novelty_task(candidate: CandidateForPlanning, papers: tuple[PaperForNovelty, ...], *, coverage: str) -> str:
+    """The Novelty Investigator's input: the idea, the closest papers, and the search coverage."""
+    if not papers:
+        raise ValueError("The Novelty Investigator needs at least one paper.")
+    lines = [render_query_task(candidate, task="Compare the idea with every paper below, facet by facet."), "<papers>"]
+    for paper in papers:
+        year = f' year="{paper.year}"' if paper.year else ""
+        kind = "peer-reviewed" if paper.tier == 1 else "preprint"
+        level = "full text" if paper.chunks else "abstract only"
+        lines.append(f'<paper label="{_attribute(paper.label)}"{year} type="{kind}" text="{level}">')
+        lines.append(f"<title>{_contain(paper.title)}</title>")
+        if paper.abstract:
+            lines.append(f"<abstract>\n{_contain(paper.abstract)}\n</abstract>")
+        for chunk in paper.chunks:
+            section = f' section="{_attribute(chunk.section_title)}"' if chunk.section_title else ""
+            lines.append(f'<chunk id="{_attribute(chunk.chunk_id)}"{section}>\n{_contain(chunk.text)}\n</chunk>')
+        lines.append(f"<reading>{_contain(summarize_reading(paper.reading))}</reading>")
+        lines.append("</paper>")
+    lines.append("</papers>")
+    lines.append(f"<coverage>{_contain(coverage)}</coverage>")
     return "\n".join(lines)

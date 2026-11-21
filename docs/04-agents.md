@@ -211,6 +211,7 @@ Model settings use Claude through ADK (doc 08). *Effort* is the model's reasonin
 **Rules:**
 
 - "Not found in our sample" must never be written as "not studied".
+- As built (step 4.6, `src/ai/agents/novelty_investigator.py`): one call with the 12 closest read papers (selection order), each with its abstract or chunks and a summary of its Paper Reader analysis, plus a coverage note. Papers are labels (P1, …); A4 quotes only the text, and code finds and verifies each quote in that paper's abstract or chunks. "same"/"similar" cells require a quote. Claim status is computed by code (verified if ≥1 verified supporting/qualifying quote; unverified quote; no evidence). Cells naming unknown papers or facets are dropped and counted.
 - When the closest work differs only in a minor facet (e.g. a different dataset of the same kind), say so explicitly. That is the "incremental variation" signal.
 - Rebuttals must cite evidence. An opinion alone doesn't count.
 

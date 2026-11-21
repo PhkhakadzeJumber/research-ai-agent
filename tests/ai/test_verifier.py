@@ -144,3 +144,23 @@ def test_long_texts_are_checked_quickly():
     result = match_quote(quote, chunk)
     assert time.perf_counter() - start < 2.0
     assert result.verified and result.method == "fuzzy"
+
+
+
+# --- numbers (step 4.6: a fuzzy match accepted "70B" for "7B") --------------------------------------------
+
+@pytest.mark.parametrize(("quote", "source"), [
+    ("We fine-tune a 70B model on Kazakh data", "We fine-tune a 7B model on Kazakh data."),
+    ("accuracy improved from 0.59 to 0.71 on the test set", "accuracy improved from 0.95 to 0.71 on the test set"),
+    ("we evaluate 12 languages in the benchmark suite", "we evaluate 21 languages in the benchmark suite"),
+])
+def test_a_changed_number_is_never_a_match(quote, source):
+    result = match_quote(quote, source)
+    assert result.verified is False and result.reason == "a number differs from the source text"
+
+
+def test_numbers_that_agree_still_allow_small_wording_differences():
+    source = "In this work we fine-tune a 7B model on publicly available Kazakh question answering data."
+    result = match_quote("In this work we fine-tune a 7B modle on publicly available Kazakh question answering data",
+                         source)  # a typo, same numbers
+    assert (result.verified, result.method) == (True, "fuzzy")

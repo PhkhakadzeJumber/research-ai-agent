@@ -1,5 +1,5 @@
 """The evaluation sub-graph (doc 05 §11.4), first steps: normalizing -> planning_queries ->
-retrieving -> screening -> reading.
+retrieving -> screening -> reading -> assessing_novelty.
 
   begin_evaluation()  a new evaluation of a candidate. Mode 1's v1 skips `normalizing`:
                       its facets come from the confirmed Intake.
@@ -21,8 +21,14 @@ retrieving -> screening -> reading.
   read_step()         the Paper Reader reads the selected papers into the library (stored
                       analyses are reused for free) with quote verification.
 
-Each step's results commit together with the step change. Snowballing (4.5b) and full
-text come later.
+  novelty_step()      the Novelty Investigator compares the candidate with the closest
+                      read papers (facet matrix, closest works, claims); code verifies
+                      every quote, sets claim statuses and stores the evidence.
+  novelty_verdict_for() the verdict engine's novelty verdict from what is stored, with the
+                      coverage snapshot (preliminary until the Skeptic and `concluding`).
+
+Each step's results commit together with the step change. Snowballing and full text
+come later.
 """
 
 from __future__ import annotations
@@ -39,8 +45,17 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.ai.agents.idea_analyst import plan_queries
+from src.ai.agents.novelty_investigator import NoveltyReading, assess_novelty
 from src.ai.agents.relevance_screener import BATCH_SIZE, BatchScreening, screen_batch
-from src.ai.context import CandidateForPlanning, FacetForPlanning, PaperForScreening
+from src.ai.context import (
+    CandidateForPlanning,
+    ChunkForReading,
+    FacetForPlanning,
+    PaperForNovelty,
+    PaperForScreening,
+)
+from src.ai.evidence.coverage import compute_coverage, coverage_note
+from src.ai.evidence.verdicts import MatchFact, NoveltyInputs, VerdictResult, novelty_verdict
 from src.ai.schemas.query_plan import PlannedQuery, QueryPlanOutput
 from src.ai.workflows.reading import LibraryOutcome, read_into_library
 from src.ai.workflows.states import EvaluationStep
@@ -53,7 +68,20 @@ from src.ai.workflows.transitions import (
     start_evaluation,
 )
 from src.config import RoleLlmSettings
-from src.db.models import Candidate, Chunk, Evaluation, Paper, RetrievalHit
+from src.db.models import (
+    Candidate,
+    Chunk,
+    Claim,
+    ClaimEvidence,
+    Evaluation,
+    Facet,
+    FacetMatch,
+    Paper,
+    PaperAnalysis,
+    Quote,
+    RetrievalHit,
+)
+from src.db.repositories.analyses import QuoteToStore, store_quotes
 from src.db.repositories.candidates import candidate_facets
 from src.db.repositories.evaluations import count_hits
 from src.db.repositories.llm_calls import record_llm_calls
@@ -437,3 +465,178 @@ async def read_step(
                                "read_failed": result.failed, "quotes": sum(o.quotes or 0 for o in ok),
                                "verified_quotes": sum(o.verified_quotes or 0 for o in ok)}
     return result
+
+
+
+# --- assessing_novelty ----------------------------------------------------------------------------------
+
+NOVELTY_PAPERS = 12  # the closest read papers shown to the Novelty Investigator (step 4.6: about 25 cents)
+
+
+@dataclass(frozen=True)
+class NoveltyOutcome:
+    reading: NoveltyReading | None
+    papers: dict[str, Paper]
+    """label (P1, P2, ...) -> the paper it stood for."""
+    error: str | None = None
+
+
+async def papers_for_novelty(
+    session: AsyncSession, evaluation_id: uuid.UUID, *, limit: int = NOVELTY_PAPERS
+) -> list[tuple[Paper, PaperAnalysis, list[Chunk]]]:
+    """The most relevant read papers (selection order), each with its latest analysis and chunks."""
+    chosen = []
+    for paper, _ in await selected_papers(session, evaluation_id):
+        analysis = (await session.execute(
+            select(PaperAnalysis).where(PaperAnalysis.paper_id == paper.id)
+            .order_by(PaperAnalysis.created_at.desc()).limit(1)
+        )).scalar_one_or_none()
+        if analysis is None:
+            continue
+        chunks = (await session.execute(
+            select(Chunk).where(Chunk.paper_id == paper.id).order_by(Chunk.position)
+        )).scalars().all()
+        chosen.append((paper, analysis, list(chunks)))
+        if len(chosen) == limit:
+            break
+    return chosen
+
+
+async def _finish_without_assessment(sessions, evaluation_id, investigation_id, reason, records=()):
+    async with sessions() as session:
+        await record_llm_calls(session, list(records), investigation_id=investigation_id, evaluation_id=evaluation_id)
+        await note_degraded(session, evaluation_id, "assessing_novelty", reason)
+        evaluation = await advance_evaluation(session, evaluation_id, to=EvaluationStep.SKEPTIC_REVIEW,
+                                              expected_from=EvaluationStep.ASSESSING_NOVELTY)
+        evaluation.novelty_assessment = {"error": reason}
+
+
+async def novelty_step(
+    sessions: Sessions,
+    evaluation_id: uuid.UUID,
+    *,
+    limit: int = NOVELTY_PAPERS,
+    settings: RoleLlmSettings | None = None,
+    model: Any | None = None,
+) -> NoveltyOutcome:
+    async with sessions() as session:
+        evaluation = await _at_step(session, evaluation_id, EvaluationStep.ASSESSING_NOVELTY)
+        candidate = await session.get(Candidate, evaluation.candidate_id)
+        investigation_id = candidate.investigation_id
+        view = await candidate_for_planning(session, candidate)
+        facets = list((await session.execute(
+            select(Facet).where(Facet.candidate_id == candidate.id).order_by(Facet.position)
+        )).scalars())
+        chosen = await papers_for_novelty(session, evaluation_id, limit=limit)
+        coverage = await compute_coverage(session, evaluation_id)
+
+    papers = {f"P{n}": paper for n, (paper, _, _) in enumerate(chosen, start=1)}
+    views = tuple(
+        PaperForNovelty(label=label, title=paper.title, tier=paper.tier, year=paper.year, abstract=paper.abstract,
+                        chunks=tuple(ChunkForReading(str(c.id), c.section_title, c.text) for c in chunks),
+                        reading=analysis.content)
+        for label, (paper, analysis, chunks) in zip(papers, chosen)
+    )
+    if not views:
+        await _finish_without_assessment(sessions, evaluation_id, investigation_id, "no read papers to compare with")
+        return NoveltyOutcome(None, {}, error="no read papers to compare with")
+
+    try:
+        reading = await assess_novelty(view, views, coverage=coverage_note(coverage), settings=settings, model=model)
+    except LlmError as error:
+        reason = f"the Novelty Investigator failed ({type(error).__name__}: {error})"
+        await _finish_without_assessment(sessions, evaluation_id, investigation_id, reason,
+                                         getattr(error, "records", []))
+        return NoveltyOutcome(None, papers, error=reason)
+
+    async with sessions() as session:
+        await record_llm_calls(session, reading.records, investigation_id=investigation_id,
+                               evaluation_id=evaluation_id)
+        # Quotes: one global row per (paper, chunk, text), with the code's verification result.
+        to_store: dict[str, list[QuoteToStore]] = {}
+        for match in reading.matches:
+            if match.quote:
+                to_store.setdefault(match.paper, []).append(QuoteToStore(
+                    f"matrix:{match.facet}", match.quote.text, match.quote.chunk_id, match.quote.verified,
+                    match.quote.score))
+        for n, claim in enumerate(reading.claims):
+            for m, item in enumerate(claim.evidence):
+                to_store.setdefault(item.paper, []).append(QuoteToStore(
+                    f"claim{n}:{m}", item.quote.text, item.quote.chunk_id, item.quote.verified, item.quote.score))
+        stored: dict[tuple[str, str], Quote | None] = {}
+        for label, quotes in to_store.items():
+            for location, quote in (await store_quotes(session, papers[label].id, quotes)).items():
+                stored[(label, location)] = quote
+
+        for match in reading.matches:
+            quote = stored.get((match.paper, f"matrix:{match.facet}"))
+            session.add(FacetMatch(evaluation_id=evaluation_id, facet_id=facets[match.facet - 1].id,
+                                   paper_id=papers[match.paper].id, overlap=match.overlap,
+                                   quote_id=quote.id if quote else None, rationale=match.rationale))
+        for n, claim in enumerate(reading.claims):
+            row = Claim(evaluation_id=evaluation_id, kind=claim.kind, text=claim.text,
+                        statement_type=claim.statement_type, inferred=claim.inferred, status=claim.status,
+                        author_agent="novelty")
+            session.add(row)
+            await session.flush()
+            linked = set()
+            for m, item in enumerate(claim.evidence):
+                quote = stored.get((item.paper, f"claim{n}:{m}"))
+                if quote is not None and quote.id not in linked:
+                    linked.add(quote.id)
+                    session.add(ClaimEvidence(claim_id=row.id, quote_id=quote.id, stance=item.stance))
+        await session.flush()
+
+        if reading.dropped:
+            logger.info("evaluation %s: novelty output named unknown papers/facets: %s", evaluation_id, reading.dropped)
+        evaluation = await advance_evaluation(session, evaluation_id, to=EvaluationStep.SKEPTIC_REVIEW,
+                                              expected_from=EvaluationStep.ASSESSING_NOVELTY)
+        evaluation.novelty_assessment = {
+            "prompt_version": reading.prompt_version,
+            "papers_examined": [str(paper.id) for paper in papers.values()],
+            "closest_works": [
+                {"paper_id": str(papers[work.paper].id), "what_they_did": work.what_they_did,
+                 "how_the_idea_differs": work.how_the_idea_differs,
+                 "minor_difference_only": work.minor_difference_only}
+                for work in reading.output.closest_works if work.paper in papers
+            ],
+            "proposed_verdict": reading.output.proposed_verdict,
+            "uncertainties": reading.output.uncertainties,
+            "dropped": reading.dropped,
+        }
+        evaluation.counters = {**evaluation.counters, "novelty_papers": len(papers),
+                               "novelty_cells": len(reading.matches),
+                               "novelty_verified_cells": sum(1 for m in reading.matches if m.quote and m.quote.verified),
+                               "claims": len(reading.claims)}
+    return NoveltyOutcome(reading, papers)
+
+
+async def novelty_verdict_for(session: AsyncSession, evaluation_id: uuid.UUID) -> tuple[VerdictResult, dict]:
+    """The verdict engine's novelty verdict from the stored evidence, and the coverage it rests on.
+    Preliminary while the Skeptic hasn't run (step 4.7); frozen at `concluding` (step 4.9)."""
+    evaluation = await session.get(Evaluation, evaluation_id)
+    await session.refresh(evaluation)
+    facets = list((await session.execute(
+        select(Facet).where(Facet.candidate_id == evaluation.candidate_id).order_by(Facet.position)
+    )).scalars())
+    number = {facet.id: facet.position + 1 for facet in facets}
+    rows = (await session.execute(
+        select(FacetMatch, Quote.verified).outerjoin(Quote, Quote.id == FacetMatch.quote_id)
+        .where(FacetMatch.evaluation_id == evaluation_id)
+    )).all()
+    matches = tuple(MatchFact(str(match.paper_id), number[match.facet_id], match.overlap, bool(verified))
+                    for match, verified in rows)
+    gap_statuses = tuple((await session.execute(
+        select(Claim.status).where(Claim.evaluation_id == evaluation_id, Claim.kind == "gap")
+    )).scalars())
+    assessment = evaluation.novelty_assessment or {}
+    minor = frozenset(work["paper_id"] for work in assessment.get("closest_works", [])
+                      if work.get("minor_difference_only"))
+    coverage = await compute_coverage(session, evaluation_id)
+    inputs = NoveltyInputs(
+        depth=evaluation.depth, key_facets=tuple(f.position + 1 for f in facets if f.is_key), matches=matches,
+        minor_difference_papers=minor, gap_claim_statuses=gap_statuses, relevant=coverage["funnel"]["relevant"],
+        screened=coverage["funnel"]["screened"], read=coverage["funnel"]["read"], sources_ok=coverage["sources_ok"],
+        retrieval_failed=evaluation.status == "failed", assessment_failed=not assessment or "error" in assessment,
+    )
+    return novelty_verdict(inputs), coverage

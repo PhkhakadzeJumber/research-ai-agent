@@ -255,6 +255,15 @@ async def test_if_nothing_could_be_searched_the_investigation_fails(db_session):
 SCREEN_SETTINGS = RoleLlmSettings(role="relevance_screening", model="claude-haiku-5-5", effort="low",
                                   max_tokens=16000)
 READ_SETTINGS = RoleLlmSettings(role="paper_reader", model="claude-opus-5-5", effort="low", max_tokens=16000)
+NOVELTY_SETTINGS = RoleLlmSettings(role="novelty", model="claude-opus-5-5", effort="high", max_tokens=16000)
+
+
+def novelty_answer(cells=(), **extra):
+    """A Novelty Investigator answer with the given (paper, facet, overlap, quote) cells."""
+    return answer(json.dumps({
+        "facet_matches": [{"paper": paper, "facet": facet, "overlap": overlap, "quote": quote, "rationale": "r"}
+                          for paper, facet, overlap, quote in cells],
+        "proposed_verdict": "potential_opportunity", **extra}))
 
 
 def screening_answer(*scores):
@@ -268,11 +277,13 @@ async def test_the_command_runs_the_evaluation_up_to_the_novelty_assessment(db_s
     planner = ScriptedLlm.with_answers(answer(json.dumps(full_plan())))
     screener = ScriptedLlm.with_answers(screening_answer(3, 1))  # Paper A direct prior work, Paper B tangential
     reader = ScriptedLlm.with_answers(answer(json.dumps({"contribution_type": "empirical_study"})))
+    novelty = ScriptedLlm.with_answers(novelty_answer([("P1", 1, "same", "We study Paper A")]))
     search = FakeSearch({"rag hallucination georgian question answering": ["Paper A", "Paper B"]})
 
     code = await evaluate(sessions_on(db_session), investigation.id, search_factory=lambda: search,
                           settings=SETTINGS, model=planner, screen_settings=SCREEN_SETTINGS, screen_model=screener,
-                          read_settings=READ_SETTINGS, read_model=reader)
+                          read_settings=READ_SETTINGS, read_model=reader, novelty_settings=NOVELTY_SETTINGS,
+                          novelty_model=novelty)
 
     assert code == 0
     output = capsys.readouterr().out
@@ -283,7 +294,10 @@ async def test_the_command_runs_the_evaluation_up_to_the_novelty_assessment(db_s
     assert "selected for reading: 1" in output
     assert "[3] Paper A" in output and "reason 1 | read, quotes verified 0/0" in output
     assert "1 read now, 0 reused, 0 failed" in output
-    assert "novelty assessment comes with step 4.6" in output
+    assert "Prior-work matrix" in output and "P1 Paper A" in output
+    assert "Novelty (preliminary, before the Skeptic): Insufficient evidence" in output  # 1 relevant paper < 20
+    assert "Blind spots:" in output and "semantic_scholar was not searched." in output
+    assert "the Skeptic reviews this with step 4.7" in output
 
 
 async def test_the_command_resumes_where_the_evaluation_stopped(db_session, capsys):

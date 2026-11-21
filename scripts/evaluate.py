@@ -19,7 +19,10 @@ So far (steps 4.2-4.4):
      EUREKA_LLM_MODEL_RELEVANCE_SCREENING, e.g. Haiku: a few cents for ~600 papers);
   5. reading: the most relevant papers (scores 3, then 2; at most --max-read, default
      25) are read by the Paper Reader with quote verification (about 3.4 cents each on
-     Opus; papers already in the library are free).
+     Opus; papers already in the library are free);
+  6. novelty: the Novelty Investigator compares the idea with the 12 closest read papers
+     facet by facet (one Opus call, about 25 cents); code verifies its quotes and the
+     verdict engine gives a preliminary novelty verdict with the coverage snapshot.
 If Eureka had to propose a KEY facet, you must confirm the reading yourself: --yes is
 refused. Quitting at the confirmation keeps everything; resume with --continue.
 Later steps extend this until the whole evaluation runs (step 4.8).
@@ -52,6 +55,8 @@ from src.ai.workflows.clarification import (
     confirm_idea,
     load_pending,
 )
+from sqlalchemy import select
+
 from src.ai.schemas.query_plan import QueryPlanOutput
 from src.ai.workflows.evaluation import (
     begin_evaluation,
@@ -59,12 +64,14 @@ from src.ai.workflows.evaluation import (
     read_step,
     retrieve_step,
     screen_step,
+    novelty_step,
+    novelty_verdict_for,
     selected_papers,
 )
 from src.ai.workflows.states import EvaluationStep, Stage
 from src.ai.workflows.understanding import understand_idea
 from src.config import ConfigError
-from src.db.models import Evaluation, Investigation
+from src.db.models import Evaluation, Facet, Investigation
 from src.db.repositories.cache import DbResponseCache
 from src.db.repositories.candidates import investigation_candidates
 from src.db.repositories.evaluations import latest_evaluation, top_hits
@@ -261,7 +268,7 @@ def _short(text: str, width: int = TITLE_WIDTH) -> str:
 
 async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read: int | None = None,
                    search_factory=None, settings=None, model=None, screen_settings=None, screen_model=None,
-                   read_settings=None, read_model=None) -> int:
+                   read_settings=None, read_model=None, novelty_settings=None, novelty_model=None) -> int:
     """Runs the full evaluation of the investigation's confirmed idea, from wherever it stands."""
     async with sessions() as session:
         candidates = [c for c in await investigation_candidates(session, investigation_id)
@@ -343,9 +350,86 @@ async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read:
                 cost = (await session.get(Investigation, investigation_id)).cost_usd
             print(f"  {outcome.read_now} read now, {outcome.reused} reused, {outcome.failed} failed | "
                   f"cost so far: ${cost:.4f}")
+        elif step == EvaluationStep.ASSESSING_NOVELTY:
+            print("\nComparing the idea with the closest papers (Novelty Investigator, one call)...")
+            outcome = await novelty_step(sessions, evaluation_id, settings=novelty_settings, model=novelty_model)
+            if outcome.error:
+                print(f"  {outcome.error}")
+            else:
+                async with sessions() as session:
+                    facets = list((await session.execute(
+                        select(Facet).join(Evaluation, Evaluation.candidate_id == Facet.candidate_id)
+                        .where(Evaluation.id == evaluation_id).order_by(Facet.position)
+                    )).scalars())
+                print(format_novelty(outcome, facets))
         else:
-            print(f"\nNext: the novelty assessment comes with step 4.6 (now at {step}).")
+            async with sessions() as session:
+                verdict, coverage = await novelty_verdict_for(session, evaluation_id)
+                cost = (await session.get(Investigation, investigation_id)).cost_usd
+            print("\n" + format_verdict(verdict, coverage))
+            print(f"\nCost so far: ${cost:.4f}")
+            print(f"Next: the Skeptic reviews this with step 4.7 (now at {step}).")
             return 0
+
+
+OVERLAP_MARKS = {"same": "=", "similar": "~", "different": "x", "not_addressed": ".", "unknown": "?"}
+
+
+def format_novelty(outcome, facets) -> str:
+    """The prior-work matrix, the closest works and the claims, as the Novelty Investigator left them."""
+    reading, papers = outcome.reading, outcome.papers
+    keys = ",".join(str(f.position + 1) for f in facets if f.is_key)
+    numbers = "".join(f"{f.position + 1:>4}" for f in facets)
+    lines = ["Prior-work matrix  (= same, ~ similar, x different, . not addressed, ? unknown;",
+             f"                    a verified quote: +, unverified: !)   key facets: {keys}",
+             f"{'':>42}{numbers}"]
+    cells = {(m.paper, m.facet): m for m in reading.matches}
+    for label, paper in papers.items():
+        row = ""
+        for facet in facets:
+            match = cells.get((label, facet.position + 1))
+            if match is None:
+                row += "   -"
+                continue
+            mark = OVERLAP_MARKS[match.overlap]
+            check = "" if match.quote is None else ("+" if match.quote.verified else "!")
+            row += f"{mark + check:>4}"
+        lines.append(f"  {label:>3} {_short(paper.title, 36):<37}{row}")
+
+    if reading.output.closest_works:
+        lines.append("\nClosest works:")
+        for work in reading.output.closest_works:
+            if work.paper not in papers:
+                continue
+            minor = "  [differs only in a minor facet]" if work.minor_difference_only else ""
+            lines.append(f"  {work.paper} {_short(papers[work.paper].title, 70)}{minor}")
+            lines.append(f"      did: {work.what_they_did}")
+            lines.append(f"      the idea differs: {work.how_the_idea_differs}")
+    if reading.claims:
+        lines.append("\nClaims (status set by code):")
+        for claim in reading.claims:
+            inferred = ", inferred" if claim.inferred else ""
+            lines.append(f"  [{claim.status}] {claim.kind}{inferred}: {claim.text}")
+    if reading.output.uncertainties:
+        lines.append("\nUncertainties:")
+        lines.extend(f"  - {item}" for item in reading.output.uncertainties)
+    return "\n".join(lines)
+
+
+def format_verdict(verdict, coverage) -> str:
+    funnel = coverage["funnel"]
+    lines = [f"Novelty (preliminary, before the Skeptic): {verdict.label}   [{verdict.rules_version}, rule {verdict.rule}]"]
+    lines.extend(f"  {line}" for line in verdict.trace)
+    if verdict.weaknesses:
+        lines.append("  Limits of the search behind this:")
+        lines.extend(f"    - {weakness}" for weakness in verdict.weaknesses)
+    lines.append(f"Coverage: {funnel['unique']} unique papers -> {funnel['screened']} screened -> "
+                 f"{funnel['relevant']} relevant -> {funnel['read']} read "
+                 f"({coverage['read_abstract_only']} abstract only); "
+                 f"peer-reviewed {coverage['tier_mix']['peer_reviewed']}, preprints {coverage['tier_mix']['preprint']}")
+    lines.append("Blind spots:")
+    lines.extend(f"  - {spot}" for spot in coverage["blind_spots"])
+    return "\n".join(lines)
 
 
 # --- main -----------------------------------------------------------------------------------------------

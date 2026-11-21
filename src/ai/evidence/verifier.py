@@ -17,7 +17,9 @@ Not tolerated, because they change what was said:
     95% similar and say the opposite.
 
 Matching: exact match after normalization (score 1.0), otherwise the most similar passage
-of the same length (fuzzy, accepted at >= 0.95 with identical negations).
+of the same length (fuzzy, accepted at >= 0.95 with identical negations and identical
+numbers: '70B' vs '7B' or '0.95' vs '0.59' is a different claim, however similar the text;
+found in step 4.6).
 """
 
 from __future__ import annotations
@@ -63,6 +65,13 @@ def _negations(text: str) -> list[str]:
     return sorted(_NEGATIONS.findall(text))
 
 
+_NUMBERS = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def _numbers(text: str) -> list[str]:
+    return _NUMBERS.findall(text)
+
+
 @dataclass(frozen=True)
 class QuoteMatch:
     verified: bool
@@ -92,6 +101,8 @@ def match_quote(quote: str, source: str | None) -> QuoteMatch:
         return QuoteMatch(False, round(score, 4), "none", f"not found (best similarity {score:.2f})")
     if _negations(needle) != _negations(passage):
         return QuoteMatch(False, round(score, 4), "none", "a negation differs from the source text")
+    if _numbers(needle) != _numbers(passage):
+        return QuoteMatch(False, round(score, 4), "none", "a number differs from the source text")
     return QuoteMatch(True, round(score, 4), "fuzzy")
 
 

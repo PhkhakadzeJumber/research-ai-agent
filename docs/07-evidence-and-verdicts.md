@@ -45,7 +45,7 @@ Every quote records where it came from:
 | # | Guarantee | Mechanism |
 |---|---|---|
 | 1 | No invented papers | Agents reference only internal paper IDs from their context packet. Unknown IDs → the reference is dropped, the claim is downgraded, and a hallucination counter is incremented |
-| 2 | No invented quotes | Every quote is substring-matched against the stored chunk/abstract after normalizing whitespace, Unicode, hyphenation and quote marks, with a fuzzy-match threshold of about 0.95. Failure → status *unverified quote*, excluded from verdicts, warning shown |
+| 2 | No invented quotes | Every quote is substring-matched against the stored chunk/abstract after normalizing whitespace, Unicode, hyphenation and quote marks, with a fuzzy-match threshold of about 0.95; a fuzzy match must also keep every negation and every number ("70B" ≠ "7B", step 4.6). Failure → status *unverified quote*, excluded from verdicts, warning shown |
 | 3 | No invented metadata | References in reports are rendered by the backend from DB records; titles, authors and DOIs are never written by an LLM. DOIs are checked against Crossref/OpenAlex |
 | 4 | No signals as evidence | The verifier rejects tier-3 items in supporting/contradicting evidence lists |
 | 5 | No pretending to have read full text | The source level is stored per quote; any agent statement implying full-paper analysis of an abstract-only paper is flagged |
@@ -74,6 +74,8 @@ The LLM agents produce *structured assessments*: facet matrices, rubric answers 
 | **Potential opportunity** | No "same" match on the key combination, **but** at least one weakness: coverage below threshold, Skeptic stopped by budget before saturation, key evidence abstract-only, or the gap is mostly inferred | "Possibly unexplored. We found no matching work, but our search has limits: [list]." |
 | **Supported opportunity** | No "same" match on the key combination; coverage ≥ thresholds (default: ≥150 screened, ≥25 read, ≥3 sources); the Skeptic loop reached **saturation**; every gap claim verified | "No matching work found under thorough search (N papers, sources, date). This is **not a guarantee of originality**." |
 | **Insufficient evidence** | Retrieval failed or was too thin (e.g. <20 relevant papers, source outages) | "We couldn't gather enough evidence to judge." |
+
+**As built (step 4.6, `src/ai/evidence/verdicts.py`, rules `novelty-rules-v1`):** the rules are checked in this order: Insufficient evidence (assessment failed, retrieval failed, or <20 papers scored relevant); Previously investigated (one paper is a verified "same" on **every** key facet); Incremental variation (one paper verified "same" on all key facets but one, "similar" on that one, and marked a minor difference by A4); Supported opportunity (all thresholds, Skeptic saturation, every gap claim verified); otherwise Potential opportunity with each unmet condition listed. A "same" counts only with a verified quote. With two sources searched (Semantic Scholar pending) and no Skeptic yet, Supported is unreachable, by design.
 
 **Words Eureka never uses** for a novelty result: "original", "novel" (as a verdict), "nobody has studied", "verified gap", "guaranteed".
 
