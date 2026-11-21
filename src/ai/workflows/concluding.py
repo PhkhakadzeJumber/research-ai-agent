@@ -91,6 +91,25 @@ async def stored_verdicts(session, evaluation_id: uuid.UUID) -> dict[str, Verdic
     return {row.dimension: row for row in rows}
 
 
+async def triage_candidate(session, candidate_id: uuid.UUID, evaluation_id: uuid.UUID, *,
+                           expected_from: str) -> TriageDecision:
+    """Doc 05 §4 for one concluded evaluation: the first matching rule becomes a stored TriageDecision
+    and the candidate's status follows it (expand_search leaves it as it is). Both workflows use it."""
+    verdicts = await verdicts_for(session, evaluation_id)
+    rule = verdicts.triage
+    stored = await stored_verdicts(session, evaluation_id)
+    decision = TriageDecision(candidate_id=candidate_id, evaluation_id=evaluation_id, rule_number=rule.number,
+                              action=rule.action, reason=rule.reason,
+                              evidence={"verdict_ids": [str(v.id) for v in stored.values()]})
+    session.add(decision)
+    status = STATUS_FOR_ACTION.get(rule.action)
+    if status is not None:
+        await set_candidate_status(session, candidate_id, to=status, expected_from=expected_from,
+                                   reason=f"Rule {rule.number}: {rule.reason}")
+    await session.flush()
+    return decision
+
+
 async def finish_investigation(sessions: Sessions, investigation_id: uuid.UUID) -> FinishOutcome:
     async with sessions() as session:
         candidates = list((await session.execute(
@@ -104,23 +123,11 @@ async def finish_investigation(sessions: Sessions, investigation_id: uuid.UUID) 
         if evaluation is None or evaluation.status not in ("done", "partial"):
             raise ValueError("The candidate's evaluation hasn't been concluded yet.")
         await advance_investigation(session, investigation_id, to=Stage.TRIAGE, expected_from=Stage.FULL_EVALUATION)
-
-        verdicts = await verdicts_for(session, evaluation.id)
-        rule = verdicts.triage
-        stored = await stored_verdicts(session, evaluation.id)
-        decision = TriageDecision(candidate_id=candidate.id, evaluation_id=evaluation.id, rule_number=rule.number,
-                                  action=rule.action, reason=rule.reason,
-                                  evidence={"verdict_ids": [str(v.id) for v in stored.values()]})
-        session.add(decision)
-        status = STATUS_FOR_ACTION.get(rule.action)
-        if status is not None:
-            await set_candidate_status(session, candidate.id, to=status,
-                                       expected_from=CandidateStatus.FULL_EVALUATING,
-                                       reason=f"Rule {rule.number}: {rule.reason}")
-        await session.flush()
+        decision = await triage_candidate(session, candidate.id, evaluation.id,
+                                          expected_from=CandidateStatus.FULL_EVALUATING)
 
         for current, target in ((Stage.TRIAGE, Stage.RANKING), (Stage.RANKING, Stage.REPORTING),
                                 (Stage.REPORTING, Stage.RESULTS_READY)):
             await advance_investigation(session, investigation_id, to=target, expected_from=current)
         final_status = (await session.get(Candidate, candidate.id)).status
-    return FinishOutcome(decision, final_status, NOT_YET_EXECUTABLE.get(rule.action))
+    return FinishOutcome(decision, final_status, NOT_YET_EXECUTABLE.get(decision.action))

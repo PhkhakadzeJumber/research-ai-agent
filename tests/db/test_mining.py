@@ -218,8 +218,10 @@ async def test_the_command_shows_what_was_mined(db_session, capsys):
                                                       "Judges and Finnish": ["C"]})
     from tests.db.test_scouting import FakeScout, eight  # imported here: test_scouting imports this module
 
+    from tests.db.test_prescreening import QuickJudge
+
     assert await mine(sessions_on(db_session), investigation.id, model=KeywordMiner(),
-                      scout_model=FakeScout.proposing(eight)) == 0
+                      scout_model=FakeScout.proposing(eight), quick_model=QuickJudge.judging(default="not_feasible")) == 0
     output = capsys.readouterr().out
     assert "6 verified statements from 7 papers -> 2 groups" in output
     assert "Recurring open problems: 1" in output and " 3 papers, 3 author groups  judges problem" in output

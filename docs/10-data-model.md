@@ -463,7 +463,7 @@ What each type contains:
 
 *"Signal-only" is not stored.* It's derived: a candidate is signal-only when none of its inspirations resolves to a verified tier-1/2 quote. Storing it could let it drift out of sync.
 
-*As built (step 5.3, migration 0014):* the Scout's fields are nullable columns on `candidates` (`origin_strategy`, `hypothesis`, `motivation`, `potential_contribution`, `change_note`), with complexity fit and constraint notes in one JSON column `scout_notes` (compute tier, data source, weeks, complexity note, risks). A Mode 1 user idea leaves them empty. A screened-out candidate also stores its reason in `rejection_reason`.
+*As built (step 5.3, migration 0014):* the Scout's fields are nullable columns on `candidates` (`origin_strategy`, `hypothesis`, `motivation`, `potential_contribution`, `change_note`), with complexity fit and constraint notes in one JSON column `scout_notes` (compute tier, data source, weeks, complexity note, risks). A Mode 1 user idea leaves them empty. A screened-out candidate also stores its reason in `rejection_reason`. *Step 5.4, migration 0015:* `prescreen` (JSON) records each pre-screening check (duplicate, time, compute, quick feasibility with its prompt version) and the decision (`screened_out` / `light_evaluation` with its order / `reserve`).
 
 ### 6.4 CandidateInspiration
 

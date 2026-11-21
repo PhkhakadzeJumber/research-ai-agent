@@ -8,7 +8,8 @@ Step 5.3 adds the Scout's fields (origin strategy, hypothesis, motivation, poten
 contribution, scout notes: compute tier, data source, weeks, complexity note, risks; and the
 change note for refinements), all empty for a Mode 1 user idea, and CandidateInspiration
 (doc 10 §6.4): one link from a candidate to a quote or an opportunity item that inspired
-it. Signals come later. The current evaluation arrives with the code that fills it.
+it. Signals come later. Step 5.4 adds `prescreen`: the pre-screening checks and decision.
+The current evaluation arrives with the code that fills it.
 """
 
 from __future__ import annotations
@@ -73,6 +74,8 @@ class Candidate(UUIDPrimaryKey, Timestamps, Base):
     potential_contribution: Mapped[str | None] = mapped_column(Text)  # a hypothesis for A6, never trusted
     scout_notes: Mapped[dict[str, Any] | None] = mapped_column(JSONB)  # compute tier, data, weeks, fit, risks
     change_note: Mapped[str | None] = mapped_column(Text)  # refinements: what changed and why
+    # Pre-screening (step 5.4): each check's result and the decision (screened_out / light / reserve).
+    prescreen: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
 class Facet(UUIDPrimaryKey, Timestamps, Base):

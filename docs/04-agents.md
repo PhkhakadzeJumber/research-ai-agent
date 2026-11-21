@@ -297,7 +297,7 @@ It also reports the round's **saturation statistic**: the number of new relevant
 **Rules:**
 
 - **Significance must be supported**: by literature calling it an open problem (≥2 papers or a survey), by evidence of practical demand, or by the size of the gap relative to the closest works. "It is an interesting area" isn't evidence.
-- **Feasibility uses the user's real constraints**, and hard constraints are absolute. (As built, step 4.8: one call for the full task; code verifies the significance quotes, confirms a dataset only if a read paper names it, and turns a timeline longer than the available time into a blocking requirement. The quick-feasibility task comes with the Scout, step 5.) When the verdict is negative, the evaluator should propose concrete simplifications (smaller model, public dataset, narrower scope) for the Scout's Refine task.
+- **Feasibility uses the user's real constraints**, and hard constraints are absolute. (As built, step 4.8: one call for the full task; code verifies the significance quotes, confirms a dataset only if a read paper names it, and turns a timeline longer than the available time into a blocking requirement. As built, step 5.4: the quick-feasibility task is **one batched call** for all candidates in pre-screening (role `feasibility_quick`), proposing a level, blocking requirements and any exclusion conflict per candidate; code decides who is screened out.) When the verdict is negative, the evaluator should propose concrete simplifications (smaller model, public dataset, narrower scope) for the Scout's Refine task.
 - The complexity level sets the expected ambition, and the meaningful-minimum standard applies at every level (doc 02).
 
 **Tests:**

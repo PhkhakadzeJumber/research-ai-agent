@@ -31,3 +31,19 @@ def set_cost_cap(investigation: Investigation, cap_usd: float | Decimal) -> None
     if Decimal(str(cap_usd)) <= 0:
         raise ValueError("The budget must be more than $0.")
     investigation.budget = {**(investigation.budget or {}), "cost_usd": float(cap_usd)}
+
+
+DEFAULT_LIGHT_EVALUATIONS = 5  # Mode 2 allows up to 8 (doc 05 §6); 5 leaves budget for refinements and finalists
+MAX_LIGHT_EVALUATIONS = 8
+
+
+def light_cap(investigation: Investigation) -> int:
+    """How many candidates pre-screening may send to light evaluation (Mode 2)."""
+    value = (investigation.budget or {}).get("light_evaluations")
+    return int(value) if value is not None else DEFAULT_LIGHT_EVALUATIONS
+
+
+def set_light_cap(investigation: Investigation, count: int) -> None:
+    if not 1 <= count <= MAX_LIGHT_EVALUATIONS:
+        raise ValueError(f"The number of light evaluations must be 1-{MAX_LIGHT_EVALUATIONS}.")
+    investigation.budget = {**(investigation.budget or {}), "light_evaluations": int(count)}

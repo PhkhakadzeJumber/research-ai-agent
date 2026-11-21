@@ -155,15 +155,19 @@ async def test_scouting_needs_the_generating_candidates_stage(db_session):
 
 async def test_the_command_lists_the_candidates(db_session, capsys):
     investigation = await mined(db_session)
-    assert await scout(sessions_on(db_session), investigation.id, model=FakeScout.proposing(eight)) == 0
+    from tests.db.test_prescreening import QuickJudge  # imported here: test_prescreening imports this module
+
+    # pre-screening follows (5.4); a quick check that rules everything out ends the run at triage
+    assert await scout(sessions_on(db_session), investigation.id, model=FakeScout.proposing(eight),
+                       quick_model=QuickJudge.judging(default="not_feasible")) == 0
     output = capsys.readouterr().out
     assert "8 candidates, 6 grounded" in output and "unknown labels ignored: 1" in output
     assert "1. Calibrating judges  [limitation; T1, ~8 weeks]" in output
-    assert "SCREENED OUT: Grounding: 1 verified quote(s)" in output and "step 5.4" in output
+    assert "SCREENED OUT: Grounding: 1 verified quote(s)" in output and "Pre-screening:" in output
     stored = (await db_session.execute(select(Candidate).where(Candidate.investigation_id == investigation.id))
               ).scalars().all()
     assert len(stored) == 8
-    assert (await db_session.get(Investigation, investigation.id)).stage == "prescreening"
+    assert (await db_session.get(Investigation, investigation.id)).stage == "triage"
 
 
 async def test_a_failed_scout_stores_nothing(db_session, capsys):

@@ -122,15 +122,17 @@ async def at_step(session: AsyncSession, evaluation_id: uuid.UUID, step: Evaluat
 # --- normalizing ----------------------------------------------------------------------------------------
 
 async def begin_evaluation(sessions: Sessions, candidate_id: uuid.UUID, *, depth: str) -> uuid.UUID:
-    """Starts an evaluation and moves it to planning_queries. Only Mode 1's user idea so far."""
+    """Starts an evaluation and moves it to planning_queries. Normalizing is skipped: a user idea's facets
+    come from the confirmed Intake, a Scout candidate's from the Scout (step 5.3)."""
     async with sessions() as session:
         candidate = await session.get(Candidate, candidate_id)
         if candidate is None:
             raise LookupError(f"No candidate {candidate_id}.")
-        if candidate.origin != "user":
-            raise NotImplementedError("Normalizing Scout candidates into facets comes with Workflow B (step 5).")
+        if not await candidate_facets(session, candidate_id):
+            raise ValueError(f"Candidate {candidate_id} has no facets to evaluate.")
         evaluation = await start_evaluation(session, candidate_id, depth=depth)
-        evaluation.counters = {"normalizing": "skipped: the facets come from the confirmed Intake"}
+        evaluation.counters = {"normalizing": "skipped: the facets come from the confirmed Intake"
+                               if candidate.origin == "user" else "skipped: the facets were written by the Scout"}
         await advance_evaluation(session, evaluation.id, to=EvaluationStep.PLANNING_QUERIES,
                                  expected_from=EvaluationStep.NORMALIZING)
         return evaluation.id

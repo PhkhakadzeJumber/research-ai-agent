@@ -160,13 +160,21 @@ async def test_the_users_idea_skips_normalizing(db_session):
     assert "skipped" in evaluation.counters["normalizing"]
 
 
-async def test_scout_candidates_need_normalizing_which_comes_later(db_session):
+async def test_scout_candidates_skip_normalizing_because_the_scout_wrote_their_facets(db_session):
+    # Step 5.3 (approved design change): the Scout writes facets itself, so there is nothing to normalize.
     investigation = await create_investigation(db_session, mode="discover", complexity="beginner", input={})
     scout = await create_root_candidate(db_session, investigation_id=investigation.id, origin="discover",
                                         title="T", research_question="Q?",
-                                        facets=[FacetToStore("problem", "p", True, True)])
-    with pytest.raises(NotImplementedError, match="step 5"):
-        await begin_evaluation(sessions_on(db_session), scout.id, depth="light")
+                                        facets=[FacetToStore("problem", "p", True, False)])
+    evaluation_id = await begin_evaluation(sessions_on(db_session), scout.id, depth="light")
+    evaluation = await db_session.get(Evaluation, evaluation_id)
+    assert (evaluation.step, evaluation.depth) == ("planning_queries", "light")
+    assert evaluation.counters["normalizing"] == "skipped: the facets were written by the Scout"
+
+    empty = await create_root_candidate(db_session, investigation_id=investigation.id, origin="discover",
+                                        title="No facets", research_question="Q?", facets=[])
+    with pytest.raises(ValueError, match="no facets"):
+        await begin_evaluation(sessions_on(db_session), empty.id, depth="light")
 
 
 async def test_the_plan_is_stored_with_its_cost_and_the_step_moves_on(db_session):

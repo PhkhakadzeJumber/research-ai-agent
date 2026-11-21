@@ -32,7 +32,7 @@ ABSTRACT_ONLY_NOTE = (
 )
 FULL_TEXT_NOTE = "Passages from the full text are included as chunks, each with its ID and section."
 
-_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints|field_brief|subtopic|items|item|pairs|pair|finding|setting|statement|statements|quote|material)\b",
+_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints|field_brief|subtopic|items|item|pairs|pair|finding|setting|statement|statements|quote|material|candidates|candidate|research_question|facets|data|fit)\b",
                    re.IGNORECASE)
 _QUOTE_IN_ATTRIBUTE = re.compile(r'["<>]')
 
@@ -743,4 +743,44 @@ def render_scout_discover(request: FieldRequest, items: tuple[ItemForScout, ...]
         year = f' year="{paper.year}"' if paper.year else ""
         lines.append(f'<paper label="{_attribute(paper.label)}"{year}>{_contain(paper.title)}</paper>')
     lines.append("</papers>")
+    return "\n".join(lines)
+
+
+# --- the quick feasibility packet (Mode 2, pre-screening, step 5.4) -----------------------------------------
+#
+#     <field_request>...</field_request>
+#     <candidates>
+#     <candidate label="C1" compute_tier="T1" weeks="8"><title>...</title><research_question>...</research_question>
+#       <facets>problem: ... | method: ...</facets><data>...</data><fit>...</fit></candidate>
+#     </candidates>
+
+
+@dataclass(frozen=True)
+class CandidateForQuickCheck:
+    label: str
+    title: str
+    research_question: str
+    facets: tuple[tuple[str, str], ...]  # (kind, text)
+    compute_tier: str | None = None
+    weeks: int | None = None
+    data_source: str | None = None
+    complexity_note: str | None = None
+
+
+def render_quick_feasibility(request: FieldRequest, candidates: tuple[CandidateForQuickCheck, ...]) -> str:
+    """The quick feasibility check's input: the user's request, then every candidate to check."""
+    if not candidates:
+        raise ValueError("The quick feasibility check needs candidates.")
+    lines = [render_field_request(request), "<candidates>"]
+    for c in candidates:
+        attributes = (f' compute_tier="{_attribute(c.compute_tier)}"' if c.compute_tier else "") + \
+                     (f' weeks="{c.weeks}"' if c.weeks is not None else "")
+        facets = " | ".join(f"{kind}: {_contain(text)}" for kind, text in c.facets)
+        lines.append(f'<candidate label="{_attribute(c.label)}"{attributes}><title>{_contain(c.title)}</title>'
+                     f"<research_question>{_contain(c.research_question)}</research_question>"
+                     f"<facets>{facets}</facets>"
+                     + (f"<data>{_contain(c.data_source)}</data>" if c.data_source else "")
+                     + (f"<fit>{_contain(c.complexity_note)}</fit>" if c.complexity_note else "")
+                     + "</candidate>")
+    lines.append("</candidates>")
     return "\n".join(lines)

@@ -60,7 +60,7 @@ import uuid
 from collections.abc import Callable
 
 from src.ai.schemas.structured_idea import StructuredIdeaOutput
-from src.ai.workflows.budget import DEFAULT_COST_CAP_USD, budget_left, cost_cap, set_cost_cap
+from src.ai.workflows.budget import DEFAULT_COST_CAP_USD, cost_cap, set_cost_cap
 from src.ai.workflows.clarification import (
     ConfirmationRequired,
     NotWaitingForClarification,
@@ -75,29 +75,17 @@ from sqlalchemy import select
 
 from src.ai.evidence.verdicts import LABELS
 from src.ai.schemas.query_plan import QueryPlanOutput
-from src.ai.workflows.evaluation import (
-    begin_evaluation,
-    plan_step,
-    read_step,
-    retrieve_step,
-    screen_step,
-    novelty_step,
-    novelty_verdict_for,
-    selected_papers,
-)
-from src.ai.workflows.skeptic_round import revision_step, skeptic_round_step
-from src.ai.workflows.concluding import conclude_step, finish_investigation
+from src.ai.workflows.evaluation import begin_evaluation, novelty_verdict_for, selected_papers
+from src.ai.workflows.concluding import finish_investigation
+from src.ai.workflows.runner import EvaluationModels, run_evaluation
 from src.ai.workflows.states import EvaluationStep, Stage
-from src.ai.workflows.value_feasibility import value_step, verdicts_for
 from src.ai.workflows.understanding import understand_idea
 from src.config import ConfigError
 from src.db.models import Evaluation, Facet, Investigation
-from src.db.repositories.cache import DbResponseCache
 from src.db.repositories.candidates import investigation_candidates
 from src.db.repositories.evaluations import latest_evaluation, top_hits
 from src.db.models.run import COMPLEXITY_LEVELS
 from src.db.repositories.runs import create_investigation
-from src.retrieval.search import LiteratureSearch
 from src.db.session import Database
 
 MAX_IDEA_CHARS = 2000  # doc 02 §2.1
@@ -309,134 +297,131 @@ async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read:
         evaluation_id = await begin_evaluation(sessions, candidate_id, depth="full")
         print(f"\nFull evaluation {evaluation_id} started.")
 
-    while True:
-        async with sessions() as session:
-            evaluation = await session.get(Evaluation, evaluation_id)
-            await session.refresh(evaluation)
-            step, status = evaluation.step, evaluation.status
-        if status == "failed":
-            print(f"\nThe evaluation failed (at {step}).")
-            return 1
-        if status != "running":
-            return await finish(sessions, investigation_id, status)
-        if step in PAID_STEPS:
-            async with sessions() as session:
-                investigation = await session.get(Investigation, investigation_id)
-                if not budget_left(investigation):
-                    print(f"\nBudget used up: ${investigation.cost_usd:.2f} of ${cost_cap(investigation)}. Stopped "
-                          f"before {step}. Resume with: python -m scripts.evaluate --continue {investigation_id} "
-                          "--budget <more>")
-                    return 3
+    models = EvaluationModels(
+        max_read=max_read, settings=settings, model=model, screen_settings=screen_settings, screen_model=screen_model,
+        read_settings=read_settings, read_model=read_model, novelty_settings=novelty_settings,
+        novelty_model=novelty_model, skeptic_settings=skeptic_settings, skeptic_model=skeptic_model,
+        value_settings=value_settings, value_model=value_model)
 
-        if step == EvaluationStep.PLANNING_QUERIES:
-            print("\nPlanning the searches (one Idea Analyst call)...")
-            outcome = await plan_step(sessions, evaluation_id, settings=settings, model=model)
-            if outcome.regenerated:
-                print("  (the first plan missed a quota and was rewritten once)")
-            if outcome.fallback_reason:
-                print(f"  The Idea Analyst failed ({outcome.fallback_reason}); using a simple plan from the facets.")
-            for problem in outcome.problems:
-                print(f"  quota still missed: {problem}")
-            print(format_plan(outcome.plan))
-        elif step == EvaluationStep.RETRIEVING:
+    async def report(step: str, phase: str, outcome) -> None:
+        if phase == "start":
+            await _report_start(sessions, evaluation_id, step)
+        else:
+            await _report_done(sessions, evaluation_id, investigation_id, step, outcome)
+
+    result = await run_evaluation(sessions, evaluation_id, investigation_id, models=models,
+                                  search_factory=search_factory, report=report)
+    if result.ended == "failed":
+        print(f"\nThe evaluation failed (at {result.step}).")
+        return 1
+    if result.ended == "retrieval_failed":
+        return 1
+    if result.ended == "budget":
+        async with sessions() as session:
+            investigation = await session.get(Investigation, investigation_id)
+        print(f"\nBudget used up: ${investigation.cost_usd:.2f} of ${cost_cap(investigation)}. Stopped "
+              f"before {result.step}. Resume with: python -m scripts.evaluate --continue {investigation_id} "
+              "--budget <more>")
+        return 3
+    return await finish(sessions, investigation_id, result.ended)
+
+
+async def _report_start(sessions: Sessions, evaluation_id: uuid.UUID, step: str) -> None:
+    if step == EvaluationStep.PLANNING_QUERIES:
+        print("\nPlanning the searches (one Idea Analyst call)...")
+    elif step == EvaluationStep.RETRIEVING:
+        async with sessions() as session:
+            planned = len((await session.get(Evaluation, evaluation_id)).query_plan["queries"])
+        print(f"\nSearching arXiv and OpenAlex ({planned} queries)...")
+    elif step == EvaluationStep.SCREENING:
+        print("\nScreening the papers for relevance (relevance screener, batches of 25)...")
+    elif step == EvaluationStep.READING:
+        async with sessions() as session:
+            chosen = await selected_papers(session, evaluation_id)
+        print(f"\nReading the {len(chosen)} selected papers (Paper Reader; papers already in the library are free)...")
+    elif step == EvaluationStep.ASSESSING_NOVELTY:
+        print("\nComparing the idea with the closest papers (Novelty Investigator, one call)...")
+    elif step == EvaluationStep.SKEPTIC_REVIEW:
+        print("\nSkeptic round: searching for evidence against the idea...")
+    elif step == EvaluationStep.REVISING_NOVELTY:
+        print("\nThe Novelty Investigator answers the challenges...")
+    elif step == EvaluationStep.ASSESSING_VALUE_FEASIBILITY:
+        print("\nJudging significance and feasibility for you (Value & Feasibility Evaluator, one call)...")
+    elif step == EvaluationStep.CONCLUDING:
+        print("\nConcluding: freezing the coverage and the verdicts...")
+
+
+async def _report_done(sessions: Sessions, evaluation_id: uuid.UUID, investigation_id: uuid.UUID, step: str,
+                       outcome) -> None:
+    if step == EvaluationStep.PLANNING_QUERIES:
+        if outcome.regenerated:
+            print("  (the first plan missed a quota and was rewritten once)")
+        if outcome.fallback_reason:
+            print(f"  The Idea Analyst failed ({outcome.fallback_reason}); using a simple plan from the facets.")
+        for problem in outcome.problems:
+            print(f"  quota still missed: {problem}")
+        print(format_plan(outcome.plan))
+    elif step == EvaluationStep.RETRIEVING:
+        print(f"  {outcome.searches} searches -> {outcome.retrieved} results -> {outcome.unique_papers} unique papers"
+              + (f" | failed source searches: {outcome.failed_source_searches}"
+                 if outcome.failed_source_searches else ""))
+        if outcome.failed:
+            print("  Every search failed on every source: nothing could be looked at.")
+            return
+        async with sessions() as session:
+            top = await top_hits(session, evaluation_id, limit=10)
+        print("\nMost-found papers (a rough order; screening comes next):")
+        for number, (paper, hit) in enumerate(top, start=1):
+            found = len(hit.found_by_query_ids)
+            print(f"  {number:>2}. {_short(paper.title)} ({paper.year or 'n.d.'}) | found {found} times")
+    elif step == EvaluationStep.SCREENING:
+        counts = outcome.score_counts
+        print(f"  scores: 3 (direct prior work) {counts[3]} | 2 (shares a key facet) {counts[2]} | "
+              f"1 {counts[1]} | 0 {counts[0]}")
+        if outcome.not_screened:
+            print(f"  not screened (failed batches): {outcome.not_screened}")
+        more = (f" ({outcome.relevant_not_selected} more relevant papers over the limit; raise it with --max-read)"
+                if outcome.relevant_not_selected else "")
+        print(f"  selected for reading: {outcome.selected}{more}")
+        if outcome.relevant_unreadable:
+            print(f"  relevant but unreadable (no abstract or full text): {outcome.relevant_unreadable}")
+    elif step == EvaluationStep.READING:
+        for number, item in enumerate(outcome.papers, start=1):
+            result = item.outcome
+            status = (f"FAILED: {result.error}" if result.error
+                      else f"{'reused' if result.reused else 'read'}, quotes verified {result.verified_quotes}/{result.quotes}")
+            print(f"  {number:>2}. [{item.hit.llm_score}] {_short(item.paper.title, 70)} ({item.paper.year or 'n.d.'})")
+            print(f"      {item.hit.llm_reason} | {status}")
+        async with sessions() as session:
+            cost = (await session.get(Investigation, investigation_id)).cost_usd
+        print(f"  {outcome.read_now} read now, {outcome.reused} reused, {outcome.failed} failed | "
+              f"cost so far: ${cost:.4f}")
+    elif step == EvaluationStep.ASSESSING_NOVELTY:
+        if outcome.error:
+            print(f"  {outcome.error}")
+        else:
             async with sessions() as session:
-                planned = len((await session.get(Evaluation, evaluation_id)).query_plan["queries"])
-            print(f"\nSearching arXiv and OpenAlex ({planned} queries)...")
-            factory = search_factory or (lambda: LiteratureSearch.from_settings(cache=DbResponseCache(sessions)))
-            async with factory() as search:
-                outcome = await retrieve_step(sessions, evaluation_id, search)
-            print(f"  {outcome.searches} searches -> {outcome.retrieved} results -> {outcome.unique_papers} unique papers"
-                  + (f" | failed source searches: {outcome.failed_source_searches}"
-                     if outcome.failed_source_searches else ""))
-            if outcome.failed:
-                print("  Every search failed on every source: nothing could be looked at.")
-                return 1
-            async with sessions() as session:
-                top = await top_hits(session, evaluation_id, limit=10)
-            print("\nMost-found papers (a rough order; screening comes next):")
-            for number, (paper, hit) in enumerate(top, start=1):
-                found = len(hit.found_by_query_ids)
-                print(f"  {number:>2}. {_short(paper.title)} ({paper.year or 'n.d.'}) | found {found} times")
-        elif step == EvaluationStep.SCREENING:
-            print("\nScreening the papers for relevance (relevance screener, batches of 25)...")
-            outcome = await screen_step(sessions, evaluation_id, max_read=max_read, settings=screen_settings,
-                                        model=screen_model)
-            counts = outcome.score_counts
-            print(f"  scores: 3 (direct prior work) {counts[3]} | 2 (shares a key facet) {counts[2]} | "
-                  f"1 {counts[1]} | 0 {counts[0]}")
-            if outcome.not_screened:
-                print(f"  not screened (failed batches): {outcome.not_screened}")
-            more = (f" ({outcome.relevant_not_selected} more relevant papers over the limit; raise it with --max-read)"
-                    if outcome.relevant_not_selected else "")
-            print(f"  selected for reading: {outcome.selected}{more}")
-            if outcome.relevant_unreadable:
-                print(f"  relevant but unreadable (no abstract or full text): {outcome.relevant_unreadable}")
-        elif step == EvaluationStep.READING:
-            async with sessions() as session:
-                chosen = await selected_papers(session, evaluation_id)
-            print(f"\nReading the {len(chosen)} selected papers (Paper Reader; papers already in the library are free)...")
-            outcome = await read_step(sessions, evaluation_id, settings=read_settings, model=read_model)
-            for number, item in enumerate(outcome.papers, start=1):
-                result = item.outcome
-                status = (f"FAILED: {result.error}" if result.error
-                          else f"{'reused' if result.reused else 'read'}, quotes verified {result.verified_quotes}/{result.quotes}")
-                print(f"  {number:>2}. [{item.hit.llm_score}] {_short(item.paper.title, 70)} ({item.paper.year or 'n.d.'})")
-                print(f"      {item.hit.llm_reason} | {status}")
-            async with sessions() as session:
-                cost = (await session.get(Investigation, investigation_id)).cost_usd
-            print(f"  {outcome.read_now} read now, {outcome.reused} reused, {outcome.failed} failed | "
-                  f"cost so far: ${cost:.4f}")
-        elif step == EvaluationStep.ASSESSING_NOVELTY:
-            print("\nComparing the idea with the closest papers (Novelty Investigator, one call)...")
-            outcome = await novelty_step(sessions, evaluation_id, settings=novelty_settings, model=novelty_model)
-            if outcome.error:
-                print(f"  {outcome.error}")
-            else:
-                async with sessions() as session:
-                    facets = list((await session.execute(
-                        select(Facet).join(Evaluation, Evaluation.candidate_id == Facet.candidate_id)
-                        .where(Evaluation.id == evaluation_id).order_by(Facet.position)
-                    )).scalars())
-                print(format_novelty(outcome, facets))
+                facets = list((await session.execute(
+                    select(Facet).join(Evaluation, Evaluation.candidate_id == Facet.candidate_id)
+                    .where(Evaluation.id == evaluation_id).order_by(Facet.position)
+                )).scalars())
+            print(format_novelty(outcome, facets))
+        async with sessions() as session:
+            verdict, coverage = await novelty_verdict_for(session, evaluation_id)
+        print("\n" + format_verdict(verdict, coverage))
+    elif step == EvaluationStep.SKEPTIC_REVIEW:
+        print(format_round(outcome))
+    elif step == EvaluationStep.REVISING_NOVELTY:
+        print(format_revision(outcome))
+        if outcome.next_step == EvaluationStep.SKEPTIC_REVIEW:  # otherwise the final summary shows it
             async with sessions() as session:
                 verdict, coverage = await novelty_verdict_for(session, evaluation_id)
             print("\n" + format_verdict(verdict, coverage))
-        elif step == EvaluationStep.SKEPTIC_REVIEW:
-            print("\nSkeptic round: searching for evidence against the idea...")
-            factory = search_factory or (lambda: LiteratureSearch.from_settings(cache=DbResponseCache(sessions)))
-            async with factory() as search:
-                outcome = await skeptic_round_step(
-                    sessions, evaluation_id, search, settings=skeptic_settings, model=skeptic_model,
-                    screen_settings=screen_settings, screen_model=screen_model, read_settings=read_settings,
-                    read_model=read_model)
-            print(format_round(outcome))
-        elif step == EvaluationStep.REVISING_NOVELTY:
-            print("\nThe Novelty Investigator answers the challenges...")
-            outcome = await revision_step(sessions, evaluation_id, settings=novelty_settings, model=novelty_model)
-            print(format_revision(outcome))
-            if outcome.next_step == EvaluationStep.SKEPTIC_REVIEW:  # otherwise the final summary shows it
-                async with sessions() as session:
-                    verdict, coverage = await novelty_verdict_for(session, evaluation_id)
-                print("\n" + format_verdict(verdict, coverage))
-        elif step == EvaluationStep.CONCLUDING:
-            print("\nConcluding: freezing the coverage and the verdicts...")
-            verdicts = await conclude_step(sessions, evaluation_id)
-            print("\n" + format_verdict(verdicts.novelty, verdicts.coverage, final=True))
-            print(format_all_verdicts(verdicts, final=True))
-        elif step == EvaluationStep.ASSESSING_VALUE_FEASIBILITY:
-            print("\nJudging significance and feasibility for you (Value & Feasibility Evaluator, one call)...")
-            outcome = await value_step(sessions, evaluation_id, settings=value_settings, model=value_model)
-            print(format_value(outcome))
-        else:
-            async with sessions() as session:
-                verdicts = await verdicts_for(session, evaluation_id)
-                cost = (await session.get(Investigation, investigation_id)).cost_usd
-            print("\n" + format_verdict(verdicts.novelty, verdicts.coverage))
-            print(format_all_verdicts(verdicts))
-            print(f"\nCost so far: ${cost:.4f}")
-            print(f"Next: concluding (verdicts frozen, triage applied) and the full report come with step 4.9 "
-                  f"(now at {step}).")
-            return 0
+    elif step == EvaluationStep.ASSESSING_VALUE_FEASIBILITY:
+        print(format_value(outcome))
+    elif step == EvaluationStep.CONCLUDING:
+        print("\n" + format_verdict(outcome.novelty, outcome.coverage, final=True))
+        print(format_all_verdicts(outcome, final=True))
 
 
 OVERLAP_MARKS = {"same": "=", "similar": "~", "different": "x", "not_addressed": ".", "unknown": "?"}
@@ -558,11 +543,6 @@ def format_value(outcome) -> str:
             lines.append(f"  {title}:")
             lines.extend(f"    - {item}" for item in items)
     return "\n".join(lines)
-
-
-PAID_STEPS = {EvaluationStep.PLANNING_QUERIES, EvaluationStep.SCREENING, EvaluationStep.READING,
-              EvaluationStep.ASSESSING_NOVELTY, EvaluationStep.SKEPTIC_REVIEW, EvaluationStep.REVISING_NOVELTY,
-              EvaluationStep.ASSESSING_VALUE_FEASIBILITY}
 
 
 async def finish(sessions: Sessions, investigation_id: uuid.UUID, evaluation_status: str) -> int:

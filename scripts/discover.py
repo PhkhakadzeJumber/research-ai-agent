@@ -8,7 +8,7 @@ Usage (from the repo root, venv active, database running, Anthropic key in .env)
     python -m scripts.discover --continue <investigation id>      resume where it stopped
     python -m scripts.discover "NLP" --yes                        skip the questions
 
-So far (steps 5.1a-5.3):
+So far (steps 5.1a-5.4):
   1. the Idea Analyst's field brief (4-8 subtopics of your field, each with why it fits
      you and its landscape searches); you answer its questions (Enter skips one), may
      remove subtopics, and confirm;
@@ -22,12 +22,18 @@ So far (steps 5.1a-5.3):
      by a small model, kept by code only if 3+ papers from 2+ author groups), confirmed
      contradictions, subtopic summaries and datasets, stored for the Scout;
   5. the Scout proposes 8-12 candidate ideas from that material; code keeps an idea only if
-     it is grounded in at least 2 verified quotes (others are screened out, with the reason).
-Pre-screening and evaluating the candidates come with step 5.4.
+     it is grounded in at least 2 verified quotes (others are screened out, with the reason);
+  6. pre-screening: near-duplicates, your time limit and compute ceiling (code), and one quick
+     feasibility call for all candidates; the best --max-light (default 5) go on, varied by
+     origin strategy, the rest wait in reserve;
+  7. light evaluation, one candidate at a time: Mode 1's evaluation at depth light (about
+     $1-1.30 each), then triage: advanced, needs refinement or rejected.
+Refinements, replenishing, full evaluation of the best and the ranking come with steps 5.5-5.6.
 
 This calls the paid Anthropic API (the brief: a few cents per call; screening the landscape:
 a few cents; reading: about 3 cents per paper not already in the library; mining: a few
-cents; the Scout: one call, roughly 20-40 cents) and the free
+cents; the Scout: one call, roughly 20-40 cents; quick feasibility: about 15 cents; light
+evaluations as above) and the free
 OpenAlex and arXiv APIs.
 Exit code: 0 ok, 1 a step failed, 2 invalid input or an unavailable database, 3 the budget
 is used up (resume with --continue and a higher --budget).
@@ -43,12 +49,15 @@ import uuid
 from collections.abc import Callable
 
 from src.ai.schemas.field_brief import FieldBriefOutput
-from src.ai.workflows.budget import budget_left, cost_cap, set_cost_cap
+from src.ai.workflows.budget import budget_left, cost_cap, set_cost_cap, set_light_cap
 from src.ai.workflows.clarification import NotWaitingForClarification, answers_for
 from src.ai.workflows.evaluation import Sessions
 from src.ai.workflows.landscape import LandscapeOutcome, LandscapeReading, landscape_reading_step, landscape_step
 from src.ai.workflows.mining import MiningOutcome, mining_step
 from src.ai.workflows.scouting import NothingToGround, ScoutingOutcome, scouting_step
+from src.ai.workflows.prescreening import PrescreenOutcome, prescreen_step
+from src.ai.workflows.light_evaluation import LightOutcome, light_evaluation_step, short_step_line
+from src.ai.workflows.runner import EvaluationModels
 from src.ai.workflows.field import (
     apply_brief_answers,
     confirm_brief,
@@ -100,6 +109,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--count", type=int, default=3, help="how many research ideas you want (default: 3)")
     parser.add_argument("--budget", type=float, default=None, metavar="USD",
                         help=f"cost cap for the investigation's Claude calls (default: {DEFAULT_BUDGET_USD:g})")
+    parser.add_argument("--max-light", type=int, default=None, metavar="N",
+                        help="how many candidates get a light evaluation (1-8, default 5; about $1-1.30 each)")
     parser.add_argument("--yes", action="store_true", help="skip the questions and confirm the brief")
     parser.add_argument("--verbose", action="store_true", help="show logs")
     return parser.parse_args(argv)
@@ -306,7 +317,8 @@ def format_mining(outcome: MiningOutcome) -> str:
     return "\n".join(lines)
 
 
-async def mine(sessions: Sessions, investigation_id: uuid.UUID, *, model=None, scout_model=None) -> int:
+async def mine(sessions: Sessions, investigation_id: uuid.UUID, *, model=None, scout_model=None,
+               quick_model=None) -> int:
     if await over_budget(sessions, investigation_id, "mining the landscape"):
         return 3
     print("\nMining the landscape: recurring problems, contradictions, subtopics, datasets...")
@@ -316,7 +328,7 @@ async def mine(sessions: Sessions, investigation_id: uuid.UUID, *, model=None, s
         print(f"  The opportunity miner failed: {error}. Nothing was stored; run --continue to try again.")
         return 1
     print(format_mining(outcome))
-    return await scout(sessions, investigation_id, model=scout_model)
+    return await scout(sessions, investigation_id, model=scout_model, quick_model=quick_model)
 
 
 # --- generating candidates ------------------------------------------------------------------------------
@@ -336,7 +348,8 @@ def format_scouting(outcome: ScoutingOutcome) -> str:
     return "\n".join(lines)
 
 
-async def scout(sessions: Sessions, investigation_id: uuid.UUID, *, model=None) -> int:
+async def scout(sessions: Sessions, investigation_id: uuid.UUID, *, model=None, quick_model=None,
+                evaluation_models: EvaluationModels | None = None, search_factory=None) -> int:
     if await over_budget(sessions, investigation_id, "generating candidates"):
         return 3
     print("\nGenerating candidate ideas (the Scout, one call)...")
@@ -349,8 +362,77 @@ async def scout(sessions: Sessions, investigation_id: uuid.UUID, *, model=None) 
         print(f"  The Scout failed: {error}. Nothing was stored; run --continue to try again.")
         return 1
     print(format_scouting(outcome))
-    print("\nNext: pre-screening and evaluating the candidates comes with step 5.4.")
+    return await prescreen(sessions, investigation_id, model=quick_model, evaluation_models=evaluation_models,
+                           search_factory=search_factory)
+
+
+# --- pre-screening and light evaluation -----------------------------------------------------------------
+
+def format_prescreen(outcome: PrescreenOutcome) -> str:
+    lines = [f"  {outcome.considered} candidates: {len(outcome.light)} to light evaluation, "
+             f"{len(outcome.reserve)} in reserve, {len(outcome.screened_out)} screened out"]
+    for candidate, reason in outcome.screened_out:
+        lines.append(f"    out: {candidate.title}\n         {reason}")
+    for n, candidate in enumerate(outcome.light, start=1):
+        level = outcome.quick.get(candidate.id, {}).get("level", "?").replace("_", " ")
+        lines.append(f"    {n}. {candidate.title}  [{candidate.origin_strategy}; quick feasibility: {level}]")
+    for candidate in outcome.reserve:
+        level = outcome.quick.get(candidate.id, {}).get("level", "?").replace("_", " ")
+        lines.append(f"    reserve: {candidate.title}  [{candidate.origin_strategy}; {level}]")
+    return "\n".join(lines)
+
+
+async def prescreen(sessions: Sessions, investigation_id: uuid.UUID, *, model=None,
+                    evaluation_models: EvaluationModels | None = None, search_factory=None) -> int:
+    if await over_budget(sessions, investigation_id, "pre-screening"):
+        return 3
+    print("\nPre-screening: duplicates, your constraints, a quick feasibility check (one call)...")
+    try:
+        outcome = await prescreen_step(sessions, investigation_id, model=model)
+    except LlmError as error:
+        print(f"  The quick feasibility check failed: {error}. Nothing was stored; run --continue to try again.")
+        return 1
+    print(format_prescreen(outcome))
+    return await evaluate_light(sessions, investigation_id, models=evaluation_models, search_factory=search_factory)
+
+
+async def evaluate_light(sessions: Sessions, investigation_id: uuid.UUID, *,
+                         models: EvaluationModels | None = None, search_factory=None) -> int:
+    async def on_candidate(candidate, number, total) -> None:
+        print(f"\nLight evaluation {number}/{total}: {candidate.title}")
+
+    async def report(step, phase, outcome) -> None:
+        line = short_step_line(step, outcome) if phase == "done" else None
+        if line:
+            print(f"  {line}")
+
+    outcome = await light_evaluation_step(sessions, investigation_id, models=models, search_factory=search_factory,
+                                          report=report, on_candidate=on_candidate)
+    print(format_light(outcome))
+    async with sessions() as session:
+        investigation = await session.get(Investigation, investigation_id)
+    if outcome.stopped == "budget":
+        print(f"\nBudget used up: ${investigation.cost_usd:.2f} of ${cost_cap(investigation)}. Stopped at "
+              f"{outcome.stopped_at}. Resume with: python -m scripts.discover --continue {investigation_id} "
+              "--budget <more>")
+        return 3
+    if outcome.stopped:
+        print(f"\nThe light evaluation stopped ({outcome.stopped}) at {outcome.stopped_at}. "
+              f"Run --continue to try again.")
+        return 1
+    print(f"\nTotal cost so far: ${investigation.cost_usd:.2f}")
+    print("Next: refinements, replenishing, full evaluation of the best and the ranking come with steps 5.5-5.6.")
     return 0
+
+
+def format_light(outcome: LightOutcome) -> str:
+    if not outcome.triaged:
+        return ""
+    lines = ["\nTriage after light evaluation:"]
+    for candidate, decision in outcome.triaged:
+        lines.append(f"  {candidate.title}\n    rule {decision.rule_number}: {decision.action} -> "
+                     f"{candidate.status.replace('_', ' ')} ({decision.reason})")
+    return "\n".join(lines)
 
 
 async def continue_after_brief(sessions: Sessions, investigation_id: uuid.UUID, code: int, *, search_for=None) -> int:
@@ -364,11 +446,14 @@ async def continue_after_brief(sessions: Sessions, investigation_id: uuid.UUID, 
 
 # --- main -----------------------------------------------------------------------------------------------
 
-async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, budget: float | None) -> int:
+async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, budget: float | None,
+                 max_light: int | None = None) -> int:
     async with sessions() as session:
         investigation = await session.get(Investigation, investigation_id)
         if investigation is not None and budget is not None:
             set_cost_cap(investigation, budget)
+        if investigation is not None and max_light is not None:
+            set_light_cap(investigation, max_light)
     if investigation is None or investigation.mode != "discover":
         raise InputError(f"No Mode 2 investigation {investigation_id}.")
     print(f"Investigation {investigation_id} | stage {investigation.stage} ({investigation.status})")
@@ -390,12 +475,19 @@ async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, 
     if investigation.stage == Stage.GENERATING_CANDIDATES:
         return await scout(sessions, investigation_id)
     if investigation.stage == Stage.PRESCREENING:
-        print("The candidates are generated. Next: pre-screening and evaluating them comes with step 5.4.")
+        return await prescreen(sessions, investigation_id)
+    if investigation.stage == Stage.LIGHT_EVALUATION:
+        return await evaluate_light(sessions, investigation_id)
+    if investigation.stage == Stage.TRIAGE:
+        print("The light evaluations are triaged. Next: refinements, replenishing, full evaluation of the best "
+              "and the ranking come with steps 5.5-5.6.")
         return 0
     raise InputError(f"Investigation {investigation_id} can't be continued from stage {investigation.stage}.")
 
 
 async def run(args: argparse.Namespace) -> int:
+    if args.max_light is not None and not 1 <= args.max_light <= 8:
+        raise InputError("--max-light must be 1-8.")
     data = investigation_input(args) if args.continue_id is None else None
     try:
         database = Database.from_settings()
@@ -405,12 +497,15 @@ async def run(args: argparse.Namespace) -> int:
         if not await database.ping():
             raise InputError("The database isn't reachable: start it with `docker compose up -d db`.")
         if args.continue_id is not None:
-            return await resume(database.session, args.continue_id, yes=args.yes, budget=args.budget)
+            return await resume(database.session, args.continue_id, yes=args.yes, budget=args.budget,
+                                max_light=args.max_light)
         budget = args.budget if args.budget is not None else DEFAULT_BUDGET_USD
         async with database.session() as session:
             investigation = await create_investigation(session, mode="discover", complexity=args.complexity,
                                                        input=data, constraints=dict(args.constraint))
             set_cost_cap(investigation, budget)
+            if args.max_light is not None:
+                set_light_cap(investigation, args.max_light)
             investigation_id = investigation.id
         print(f"Investigation {investigation_id} | field {data['field']} | complexity {args.complexity} | "
               f"budget ${budget:g}\n")
