@@ -11,6 +11,7 @@
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 
+import { FacetGroups } from "@/components/facets";
 import { ButtonLink, Card, ErrorNote, MonoLabel, Pill, buttonClass, cx, type Tone } from "@/components/ui";
 import { API, type Schemas } from "@/lib/api/client";
 import {
@@ -177,16 +178,7 @@ function Overview({ idea }: { idea: CandidateDetail }) {
         </Section>
       ) : null}
       <Section title="The idea, in parts">
-        {idea.facets.map((f) => (
-          <div key={f.position} className="flex flex-col gap-1.5 border-t border-line pt-3 sm:flex-row sm:gap-4">
-            <span className="label-mono w-32 shrink-0 text-ink-2">{KIND_LABELS[f.kind] ?? f.kind}</span>
-            <span className="body-m flex-1">{f.text}</span>
-            <span className="flex gap-1.5">
-              {f.is_key ? <Pill tone="spark">key</Pill> : null}
-              {f.from_section ? <Pill tone="indigo">from {f.from_section}</Pill> : null}
-            </span>
-          </div>
-        ))}
+        <FacetGroups facets={idea.facets} />
       </Section>
       {idea.closest_works.length ? <ClosestWorks idea={idea} /> : null}
     </>

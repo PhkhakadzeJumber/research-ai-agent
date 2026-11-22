@@ -10,13 +10,9 @@
 
 import { useState } from "react";
 
-import { Button, Card, ErrorNote, Input, MonoLabel, Pill, TextArea, cx } from "@/components/ui";
+import { FacetGroups } from "@/components/facets";
+import { Button, Card, ErrorNote, Input, MonoLabel, Pill, cx } from "@/components/ui";
 import { useAnswerClarification, useClarification, type Clarification, type Investigation } from "@/lib/api/hooks";
-
-const KIND_LABELS: Record<string, string> = {
-  problem: "Problem", method: "Method", data_setting: "Data / setting", evaluation: "Evaluation",
-  contribution: "Contribution",
-};
 
 export function ClarificationView({ investigation }: { investigation: Investigation }) {
   const clarification = useClarification(investigation.id);
@@ -110,23 +106,9 @@ function ClarificationForm({ investigation, reading }: { investigation: Investig
                   {editing ? "Done editing" : "✎ Edit"}
                 </button>
               </div>
-              <div className="-mt-2 flex flex-col">
-                {facets.map((facet) => (
-                  <div key={facet.position} className="flex flex-col gap-2 border-t border-line py-3.5 sm:flex-row sm:items-center sm:gap-4">
-                    <span className="label-mono w-32 shrink-0 text-ink-2">{KIND_LABELS[facet.kind] ?? facet.kind}</span>
-                    {editing ? (
-                      <TextArea rows={2} className="flex-1" value={edits[facet.position] ?? facet.text}
-                        onChange={(e) => setEdits({ ...edits, [facet.position]: e.target.value })} aria-label={`${KIND_LABELS[facet.kind]} text`} />
-                    ) : (
-                      <span className="body-m flex-1">{edits[facet.position]?.trim() || facet.text}</span>
-                    )}
-                    <span className="flex flex-wrap gap-1.5">
-                      {facet.is_key ? <Pill tone="spark">key</Pill> : null}
-                      {!facet.stated_by_user ? <Pill tone="amber">proposed</Pill> : null}
-                      {facet.from_section ? <Pill tone="indigo">from {facet.from_section}</Pill> : null}
-                    </span>
-                  </div>
-                ))}
+              <div className="-mt-2">
+                <FacetGroups facets={facets} edits={edits} editing={editing}
+                  onEdit={(position, text) => setEdits({ ...edits, [position]: text })} />
               </div>
               {proposed ? (
                 <p className="body-s text-amber">A key part was proposed by Eureka: check it, because the verdicts depend on it.</p>

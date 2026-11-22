@@ -61,3 +61,14 @@ describe("a Mode 1 result", () => {
     expect(ownIdea(results)?.id).toBe("mine");
   });
 });
+
+describe("the idea, in parts", () => {
+  it("groups by kind in the design's order, key parts first", async () => {
+    const { groupFacets } = await import("@/components/facets");
+    const facet = (position: number, kind: string, is_key = false) => ({ position, kind, text: `${kind} ${position}`, is_key });
+    const groups = groupFacets([facet(0, "method"), facet(1, "problem"), facet(2, "method", true), facet(3, "contribution"), facet(4, "problem")]);
+    expect(groups.map(([kind, parts]) => [kind, parts.map((p) => p.position)])).toEqual([
+      ["problem", [1, 4]], ["method", [2, 0]], ["contribution", [3]],
+    ]);
+  });
+});
