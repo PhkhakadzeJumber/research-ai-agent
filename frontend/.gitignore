@@ -40,3 +40,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 !.env.example
+
+# browser tests (Playwright)
+/e2e/.auth.json
+/test-results/
+/playwright-report/

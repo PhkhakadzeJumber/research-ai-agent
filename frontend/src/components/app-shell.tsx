@@ -35,8 +35,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
   return (
     <div className="min-h-screen">
+      {/* keyboard users can jump past the nav */}
+      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-30 focus:rounded-pill focus:bg-ink focus:px-4 focus:py-2 focus:text-paper">
+        Skip to content
+      </a>
       <TopNav />
-      <main className="mx-auto w-full max-w-[1440px] px-4 pb-24 pt-10 sm:px-10 lg:px-[120px] lg:pt-14">{children}</main>
+      <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1440px] px-4 pb-24 pt-10 outline-none sm:px-10 lg:px-[120px] lg:pt-14">{children}</main>
     </div>
   );
 }

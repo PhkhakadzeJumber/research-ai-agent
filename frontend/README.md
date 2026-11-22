@@ -21,7 +21,11 @@ first-party. Set `BACKEND_URL` in `.env.local` if the API runs elsewhere (see `.
 
 ```bash
 npm run lint && npm run typecheck && npm test && npm run build
+npm run e2e        # browser tests against the running site (first time: npx playwright install chromium)
 ```
+
+The browser tests (`e2e/`) log in as their own account (`E2E_EMAIL`, default `e2e@eureka.test`, created on the
+first run), never a real user's, and never start a run, so they cost nothing.
 
 ## After changing the API
 

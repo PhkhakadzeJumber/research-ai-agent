@@ -225,6 +225,33 @@ export function useWritePackage(ideaId: string) {
   });
 }
 
+// --- the library (step 10d) -----------------------------------------------------------------------------------------
+
+export type LibraryPaper = Schemas["LibraryPaper"];
+export type PaperDetail = Schemas["PaperDetail"];
+export type LibraryFilters = { q: string; read: boolean | null; used: boolean | null; yearFrom: number | null };
+
+export function libraryQuery(f: LibraryFilters, offset: number, limit = 20) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (f.q.trim()) params.set("q", f.q.trim());
+  if (f.read !== null) params.set("read", String(f.read));
+  if (f.used !== null) params.set("used", String(f.used));
+  if (f.yearFrom) params.set("year_from", String(f.yearFrom));
+  return `/papers?${params}`;
+}
+
+export function useLibrary(filters: LibraryFilters, pages: number) {
+  return useQuery({
+    queryKey: ["library", filters, pages],
+    queryFn: () => api<Schemas["Page_LibraryPaper_"]>(libraryQuery(filters, 0, 20 * pages)),
+    placeholderData: (previous) => previous, // keep the list on screen while a new search loads
+  });
+}
+
+export function usePaper(id: string) {
+  return useQuery({ queryKey: ["paper", id], queryFn: () => api<PaperDetail>(`/papers/${id}`) });
+}
+
 export function useResume(id: string) {
   const refresh = useRefreshInvestigation();
   return useMutation({

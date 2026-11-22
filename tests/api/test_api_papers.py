@@ -5,7 +5,7 @@ import uuid
 
 import pytest
 
-from src.db.models import Paper
+from src.db.models import Paper, PaperAnalysis, Quote
 from tests.api.test_api_investigations import with_package
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
@@ -52,3 +52,33 @@ async def test_one_paper_with_eurekas_reading(client, db_session):
 
     missing = await client.get(f"/api/v1/papers/{uuid.uuid4()}")
     assert missing.status_code == 404 and missing.json()["error"]["message"] == "Paper not found."
+
+
+async def test_the_findings_come_with_their_quotes(client, db_session):
+    # found in step 10d: a stored analysis keeps each point's quote as a reference (quote_id), and the API read a
+    # text field that isn't there, so every quote came out empty
+    paper = Paper(title="Tokenizers and low-resource languages", abstract="French needs 31% more tokens.", year=2026,
+                  openalex_id="W2", tier=2)
+    db_session.add(paper)
+    await db_session.flush()
+    good = Quote(paper_id=paper.id, text="French needs 31% more tokens", text_hash="a", source_level="abstract",
+                 verified=True)
+    bad = Quote(paper_id=paper.id, text="a sentence the abstract doesn't contain", text_hash="b",
+                source_level="abstract", verified=False)
+    db_session.add_all([good, bad])
+    await db_session.flush()
+    db_session.add(PaperAnalysis(paper_id=paper.id, extractor_version="v", model="m", source_level="abstract", content={
+        "findings": [{"claim": "French costs more tokens.", "setting": "seven tokenizers", "direction": "positive",
+                      "quote": {"quote_id": str(good.id), "verified": True, "reason": None}}],
+        "limitations": [{"statement": "Only seven tokenizers.", "quote": {"quote_id": str(bad.id), "verified": False}}],
+        "future_work": [{"statement": "No quote here.", "quote": None}],
+    }))
+    await db_session.flush()
+
+    analysis = (await client.get(f"/api/v1/papers/{paper.id}")).json()["analysis"]
+    [finding] = analysis["findings"]
+    assert (finding["text"], finding["quote"], finding["verified"]) == (
+        "French costs more tokens.", "French needs 31% more tokens", True)
+    [limitation] = analysis["limitations"]
+    assert (limitation["quote"], limitation["verified"]) == ("a sentence the abstract doesn't contain", False)
+    assert analysis["future_work"] == [{"text": "No quote here.", "quote": "", "verified": False}]

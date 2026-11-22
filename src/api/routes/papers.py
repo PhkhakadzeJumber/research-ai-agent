@@ -102,14 +102,19 @@ async def list_papers(
     return Page(items=[LibraryPaper(**_library_paper(*row)) for row in rows], total=total)
 
 
-def _analysis(row: PaperAnalysis | None, verified_texts: set[str]) -> Analysis | None:
+def _analysis(row: PaperAnalysis | None, quotes: dict[str, Quote]) -> Analysis | None:
+    """Eureka's reading of the paper. A stored analysis keeps each point's quote as a reference (quote_id) to the
+    quotes table, whose text and verified flag code set (fixed in step 10d: the text was read from the point itself,
+    which holds none, so every quote came out empty)."""
     if row is None:
         return None
     c = row.content or {}
 
     def point(item: dict, text_key: str) -> dict:
-        quote = (item.get("quote") or {}).get("text", "")
-        return dict(text=item.get(text_key, ""), quote=quote, verified=quote in verified_texts)
+        ref = item.get("quote") or {}
+        quote = quotes.get(str(ref.get("quote_id"))) if ref.get("quote_id") else None
+        text = quote.text if quote is not None else ref.get("text", "")
+        return dict(text=item.get(text_key, ""), quote=text, verified=bool(quote is not None and quote.verified))
 
     return Analysis(
         source_level=row.source_level, created_at=row.created_at, contribution_type=c.get("contribution_type"),
@@ -171,7 +176,7 @@ async def get_paper(paper_id: uuid.UUID, session: SessionDep, user: CurrentUser)
                                       .order_by(PaperAnalysis.created_at.desc()).limit(1))).scalar_one_or_none()
     links = PaperLinks(**paper_links(paper), open_access_pdf=paper.open_access_pdf_url)
     return PaperDetail(**_library_paper(*row), authors=list(paper.authors or []), abstract=paper.abstract,
-                       links=links, analysis=_analysis(analysis, {q.text for q in quotes if q.verified}),
+                       links=links, analysis=_analysis(analysis, {str(q.id): q for q in quotes}),
                        quotes=[PaperQuote(id=q.id, text=q.text, verified=q.verified, source_level=q.source_level)
                                for q in quotes],
                        used_in=await _uses(session, paper_id, user.id))

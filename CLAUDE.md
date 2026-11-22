@@ -54,6 +54,7 @@ ruff check . && ruff format --check .        # (planned)
 # Frontend (Next.js; the backend must be running: /api/* is forwarded to BACKEND_URL, default http://127.0.0.1:8000)
 cd frontend && npm install && npm run dev    # http://localhost:3000
 cd frontend && npm run lint && npm run typecheck && npm test && npm run build
+cd frontend && npm run e2e                  # browser tests (Playwright, Chromium) against the running site; own test account (E2E_EMAIL); free
 python -m scripts.openapi && (cd frontend && npm run api:types)  # after changing the API: regenerate the frontend's types
 ```
 
