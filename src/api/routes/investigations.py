@@ -19,6 +19,7 @@ from src.ai.workflows.budget import cost_cap
 from src.ai.workflows.landscape import confirmed_brief
 from src.ai.workflows.ranking import FINALIST_STATUSES, Ranked, ranked_results
 from src.ai.workflows.transitions import StaleState
+from src.api.auth import CurrentUser
 from src.api.deps import RunsDep, SessionDep
 from src.api.errors import ApiError, not_found
 from src.api.runs import Runs
@@ -55,6 +56,7 @@ from src.db.models import (
     OpportunityItem,
     ResearchPackage,
     RetrievalHit,
+    User,
     UserDocument,
 )
 from src.db.repositories.intakes import find_intake
@@ -72,9 +74,10 @@ async def last_run(session: AsyncSession, investigation_id: uuid.UUID) -> LastRu
                    at=row.created_at)
 
 
-async def get_investigation(session: AsyncSession, investigation_id: uuid.UUID) -> Investigation:
+async def get_investigation(session: AsyncSession, investigation_id: uuid.UUID, user: User) -> Investigation:
+    """The investigation if it is the user's; someone else's is "not found" too, so nothing leaks (step 9d)."""
     investigation = await session.get(Investigation, investigation_id)
-    if investigation is None:
+    if investigation is None or investigation.user_id != user.id:
         raise not_found("Investigation")
     return investigation
 
@@ -120,14 +123,14 @@ async def summary_of(session: AsyncSession, investigation: Investigation, runs: 
 
 @router.get("", response_model=Page[InvestigationSummary])
 async def list_investigations(
-    session: SessionDep,
+    session: SessionDep, user: CurrentUser,
     runs: RunsDep,
     status: str | None = None,
     mode: Literal["evaluate", "discover"] | None = None,
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> Page[InvestigationSummary]:
-    where = [c for c in (Investigation.status == status if status else None,
+    where = [c for c in (Investigation.user_id == user.id, Investigation.status == status if status else None,
                          Investigation.mode == mode if mode else None) if c is not None]
     total = (await session.execute(select(func.count()).select_from(Investigation).where(*where))).scalar_one()
     rows = (await session.execute(select(Investigation).where(*where).order_by(Investigation.updated_at.desc())
@@ -136,9 +139,9 @@ async def list_investigations(
 
 
 @router.get("/{investigation_id}", response_model=InvestigationDetail, responses=ERRORS)
-async def get_investigation_detail(investigation_id: uuid.UUID, session: SessionDep,
+async def get_investigation_detail(investigation_id: uuid.UUID, session: SessionDep, user: CurrentUser,
                                    runs: RunsDep) -> InvestigationDetail:
-    investigation = await get_investigation(session, investigation_id)
+    investigation = await get_investigation(session, investigation_id, user)
     document = await find_document(session, investigation_id)
     card = None
     if document is not None:
@@ -154,8 +157,8 @@ async def get_investigation_detail(investigation_id: uuid.UUID, session: Session
 
 
 @router.get("/{investigation_id}/clarification", response_model=Clarification, responses=ERRORS)
-async def get_clarification(investigation_id: uuid.UUID, session: SessionDep) -> Clarification:
-    investigation = await get_investigation(session, investigation_id)
+async def get_clarification(investigation_id: uuid.UUID, session: SessionDep, user: CurrentUser) -> Clarification:
+    investigation = await get_investigation(session, investigation_id, user)
     intake = await find_intake(session, investigation_id)
     if intake is None:
         raise ApiError(409, "not_ready", "Eureka hasn't read this request yet.")
@@ -201,8 +204,8 @@ def _ranked(rows: list[Ranked], depth: str, with_package: set[uuid.UUID]) -> lis
 
 
 @router.get("/{investigation_id}/results", response_model=Results, responses=ERRORS)
-async def get_results(investigation_id: uuid.UUID, session: SessionDep) -> Results:
-    await get_investigation(session, investigation_id)
+async def get_results(investigation_id: uuid.UUID, session: SessionDep, user: CurrentUser) -> Results:
+    await get_investigation(session, investigation_id, user)
     results = await ranked_results(session, investigation_id)
     with_package = set((await session.execute(
         select(ResearchPackage.candidate_id).join(Candidate, Candidate.id == ResearchPackage.candidate_id)
@@ -213,8 +216,8 @@ async def get_results(investigation_id: uuid.UUID, session: SessionDep) -> Resul
 
 
 @router.get("/{investigation_id}/landscape", response_model=Landscape, responses=ERRORS)
-async def get_landscape(investigation_id: uuid.UUID, session: SessionDep) -> Landscape:
-    investigation = await get_investigation(session, investigation_id)
+async def get_landscape(investigation_id: uuid.UUID, session: SessionDep, user: CurrentUser) -> Landscape:
+    investigation = await get_investigation(session, investigation_id, user)
     if investigation.mode != "discover":
         raise ApiError(409, "wrong_mode", "Only 'find me an idea' investigations have a landscape.")
     try:
@@ -245,8 +248,8 @@ async def get_landscape(investigation_id: uuid.UUID, session: SessionDep) -> Lan
 
 
 @router.get("/{investigation_id}/cost", response_model=Cost, responses=ERRORS)
-async def get_cost(investigation_id: uuid.UUID, session: SessionDep) -> Cost:
-    investigation = await get_investigation(session, investigation_id)
+async def get_cost(investigation_id: uuid.UUID, session: SessionDep, user: CurrentUser) -> Cost:
+    investigation = await get_investigation(session, investigation_id, user)
     rows = (await session.execute(
         select(LlmCall.role, func.count(), func.coalesce(func.sum(LlmCall.cost_usd), Decimal(0)))
         .where(LlmCall.investigation_id == investigation_id).group_by(LlmCall.role).order_by(LlmCall.role))).all()

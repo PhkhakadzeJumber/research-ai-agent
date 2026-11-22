@@ -32,12 +32,17 @@ async def test_every_error_has_the_same_shape(bare_client):
     assert set(error) == {"code", "message", "request_id"} and error["code"] == "not_found"
     assert error["request_id"] == missing.headers["X-Request-ID"]
 
-    invalid = await bare_client.get("/api/v1/investigations/not-a-uuid")
+
+@pytest.mark.db
+async def test_invalid_requests_are_422_once_logged_in(client):
+    # since step 9d the login is checked first: these ran without one before (an anonymous request is now a 401,
+    # tested in test_api_accounts.py)
+    invalid = await client.get("/api/v1/investigations/not-a-uuid")
     assert invalid.status_code == 422
     assert invalid.json()["error"]["code"] == "invalid_request"
     assert "investigation_id" in invalid.json()["error"]["message"]
 
-    too_many = await bare_client.get("/api/v1/papers?limit=1000")
+    too_many = await client.get("/api/v1/papers?limit=1000")
     assert too_many.status_code == 422 and "limit" in too_many.json()["error"]["message"]
 
 

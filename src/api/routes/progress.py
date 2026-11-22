@@ -16,13 +16,15 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Header, Query
+from fastapi import APIRouter, Header, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.ai.workflows.budget import cost_cap
 from src.ai.workflows.ranking import FINALIST_STATUSES
+from src.api.auth import COOKIE_NAME, CurrentUser, authenticate
+from src.api.errors import ApiError
 from src.api.deps import RunsDep, SessionDep
 from src.api.routes.investigations import get_investigation, last_run
 from src.api.runs import Runs
@@ -132,10 +134,10 @@ async def counters(session: AsyncSession, investigation_id: uuid.UUID) -> Counte
 # --- routes -----------------------------------------------------------------------------------------------
 
 @router.get("/{investigation_id}/progress", response_model=Progress, responses=ERRORS)
-async def get_progress(investigation_id: uuid.UUID, session: SessionDep, runs: RunsDep) -> Progress:
+async def get_progress(investigation_id: uuid.UUID, session: SessionDep, user: CurrentUser, runs: RunsDep) -> Progress:
     """Everything the progress screen shows at once: the stage rail, counters from the database, cost against the
     budget, the run state and how the last run ended."""
-    investigation = await get_investigation(session, investigation_id)
+    investigation = await get_investigation(session, investigation_id, user)
     run = runs.state(investigation_id)
     stages, step = await rail(session, investigation, run)
     newest = await last_event(session, investigation_id)
@@ -146,10 +148,10 @@ async def get_progress(investigation_id: uuid.UUID, session: SessionDep, runs: R
 
 
 @router.get("/{investigation_id}/activity", response_model=Activity, responses=ERRORS)
-async def get_activity(investigation_id: uuid.UUID, session: SessionDep, after: int = Query(0, ge=0),
+async def get_activity(investigation_id: uuid.UUID, session: SessionDep, user: CurrentUser, after: int = Query(0, ge=0),
                        limit: int = Query(200, ge=1, le=500)) -> Activity:
     """The progress events after `after`, oldest first."""
-    await get_investigation(session, investigation_id)
+    await get_investigation(session, investigation_id, user)
     rows = await events_after(session, investigation_id, after, limit)
     newest = await last_event(session, investigation_id)
     return Activity(items=[event_out(r) for r in rows], last_seq=newest.seq if newest else 0)
@@ -194,12 +196,15 @@ async def event_stream(runs: Runs, investigation_id: uuid.UUID, after: int,
 
 
 @router.get("/{investigation_id}/events", response_class=StreamingResponse, responses=ERRORS)
-async def stream_events(investigation_id: uuid.UUID, runs: RunsDep, after: int = Query(0, ge=0),
+async def stream_events(investigation_id: uuid.UUID, request: Request, runs: RunsDep, after: int = Query(0, ge=0),
                         last_event_id: Annotated[str | None, Header()] = None) -> StreamingResponse:
     """Live progress (Server-Sent Events): stored events after `after` (or Last-Event-ID), then new ones as they
     happen, until the run ends."""
     async with runs.sessions() as session:  # a short session: the stream may stay open for many minutes
-        await get_investigation(session, investigation_id)
+        user = await authenticate(session, request.cookies.get(COOKIE_NAME))
+        if user is None:
+            raise ApiError(401, "not_logged_in", "Log in to continue.")
+        await get_investigation(session, investigation_id, user)
     if last_event_id and last_event_id.isdigit():
         after = max(after, int(last_event_id))
     return StreamingResponse(event_stream(runs, investigation_id, after), media_type="text/event-stream",

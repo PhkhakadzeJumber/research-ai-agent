@@ -95,7 +95,13 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     )
 
     email: Mapped[str] = mapped_column(String(320))
+    name: Mapped[str | None] = mapped_column(String(120))
+    password_hash: Mapped[str | None] = mapped_column(String(255))
+    """An Argon2 hash (src/api/auth.py), never the password. Empty for accounts without a password (e.g. a future
+    Google sign-in)."""
+    last_login_at: Mapped[datetime | None] = mapped_column(AwareDateTime())
     profile: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default=sql_text("'{}'::jsonb"))
+    """The research limits (doc 10 §2.1; edited on the profile page, step 9d); copied into each new investigation."""
 
 
 class Investigation(UUIDPrimaryKey, Timestamps, Base):

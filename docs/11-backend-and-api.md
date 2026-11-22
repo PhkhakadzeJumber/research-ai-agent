@@ -121,8 +121,20 @@ All routes are under `/api/v1`. They require authentication, except health check
 | GET | `/investigations/{id}/report?format=md` ✅ | Investigation report as Markdown (PDF later) |
 | GET | `/candidates/{cid}/proposal/export?format=md` ✅ | Package export as Markdown (PDF, docx later) |
 | POST | `/investigations/{id}/messages` | "Ask about this investigation" (optional feature) |
-| GET/PUT | `/profile` | Constraints profile |
-| GET | `/health`, `/ready` | Health checks |
+| GET/PUT | `/profile` ✅ | Your name and research limits (doc 10 §2.1); new investigations copy the limits, and what is typed for one run overrides them for that run |
+| GET | `/health`, `/ready` ✅ | Health checks (no login) |
+
+### 3.5 Accounts ✅ (step 9d)
+
+| Method | Route | Purpose |
+|---|---|---|
+| POST | `/auth/signup` ✅ | `{name, email, password}` (10+ characters); creates the account and logs in; `409` if the email has an account |
+| POST | `/auth/login` ✅ | `{email, password}`; the same `401` for a wrong email or password; 5 failures in 15 minutes (per email or address) give `429` |
+| POST | `/auth/logout` ✅ | Ends the session (its cookie stops working at once) |
+| GET | `/auth/me` ✅ | `{id, name, email, created_at}` |
+| POST | `/auth/password` ✅ | `{current, new}`; logs out your other sessions |
+
+Every other route needs a login (`401 not_logged_in`). Someone else's investigation, idea or export is `404`, exactly like one that doesn't exist. The paper library is shared, but its counts and "used in" only ever show your own investigations. Runs started from the command line have no owner until `python -m scripts.users claim <email>`.
 
 ### 3.4 Progress events ✅ (step 9c)
 
@@ -165,8 +177,9 @@ Events are stored (doc 10 §3.3) by the driver's recorder (`src/ai/progress.py`)
 ## 7. Security
 
 - Keys only in environment variables / Secret Manager. Never in the repo, the image or the frontend.
-- Simple authentication for the demo (Firebase Auth or Google IAP in front of Cloud Run).
-- Per-user rate limits and per-investigation cost caps, so a public URL can't drain the Anthropic budget.
+- Accounts (step 9d, `src/api/auth.py`): our own email + password, no outside service. Passwords hashed with Argon2; a login is a random token in an HttpOnly, Secure, SameSite=Lax cookie, and only its SHA-256 is stored (`user_sessions`, 30 days, extended while used, deleted at logout). Cookies, not tokens in the browser: the SSE stream can't send headers, and page scripts can't read an HttpOnly cookie. In deployment the frontend forwards `/api/*` to the API so the cookie is first-party. Google sign-in, email verification and password reset can come later.
+- Cross-site request forgery: SameSite=Lax, and state-changing requests whose Origin isn't `FRONTEND_ORIGIN` are refused (`403`).
+- Per-investigation cost caps (with a ceiling, `EUREKA_MAX_BUDGET_USD`), a login attempt limit, and at most 2 runs at once, so a public URL can't drain the Anthropic budget. A monthly cap per user can come later.
 - Retrieved text is treated as untrusted (doc 08). Agents have no dangerous tools.
 - CORS limited to the frontend origin.
 - Never log full prompts containing user input in production logs; store them in the call tables with access control.

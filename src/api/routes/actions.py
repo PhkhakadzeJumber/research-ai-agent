@@ -28,11 +28,13 @@ from src.ai.workflows.field import remove_subtopics
 from src.ai.workflows.proposal import package_sections
 from src.ai.workflows.states import FINAL_INVESTIGATION_STATUSES, CandidateStatus, Stage
 from src.ai.workflows.user_document import DocumentError, attach_document, prepare_document_bytes
+from src.api.auth import CurrentUser
 from src.api.deps import RunsDep, SessionDep
 from src.api.errors import ApiError, not_found
 from src.api.routes.candidates import get_candidate
 from src.api.routes.investigations import get_investigation, summary_of
 from src.api.runs import Clarified, RunConflict, Runs
+from src.api.schemas.accounts import profile_constraints
 from src.api.schemas.common import ERRORS
 from src.api.schemas.investigations import InvestigationSummary
 from src.api.schemas.requests import (
@@ -44,7 +46,7 @@ from src.api.schemas.requests import (
     ResumeRequest,
 )
 from src.config import get_api_settings
-from src.db.models import Investigation, ResearchPackage
+from src.db.models import Investigation, ResearchPackage, User
 from src.db.repositories.intakes import find_intake
 from src.db.repositories.runs import create_investigation
 from src.timeutil import now
@@ -64,6 +66,11 @@ def checked_budget(budget: float | None, default: float) -> float:
     return value
 
 
+def limits_for(user: User, typed: dict[str, str]) -> dict[str, str]:
+    """The run's limits: the user's profile, with what they typed for this run taking precedence (step 9d)."""
+    return {**profile_constraints(user.profile), **dict(typed)}
+
+
 def start(runs: Runs, investigation_id: uuid.UUID, what: str, work) -> None:
     try:
         runs.start(investigation_id, what, work)
@@ -78,7 +85,7 @@ async def started(session: AsyncSession, investigation: Investigation, runs: Run
 # --- new investigations -----------------------------------------------------------------------------------
 
 @router.post("/investigations", status_code=202, response_model=InvestigationSummary, responses=RUN_ERRORS)
-async def create(body: NewInvestigation, session: SessionDep, runs: RunsDep) -> InvestigationSummary:
+async def create(body: NewInvestigation, session: SessionDep, user: CurrentUser, runs: RunsDep) -> InvestigationSummary:
     """Starts a new investigation: Eureka's first reading of the idea or field runs in the background (a few
     cents), then the investigation waits for the clarification."""
     if isinstance(body, DiscoverRequest):
@@ -96,7 +103,7 @@ async def create(body: NewInvestigation, session: SessionDep, runs: RunsDep) -> 
         if body.seed_papers:
             data["seed_papers"] = list(body.seed_papers)
     investigation = await create_investigation(session, mode=body.mode, complexity=body.complexity, input=data,
-                                               constraints=dict(body.constraints))
+                                               user_id=user.id, constraints=limits_for(user, body.constraints))
     set_cost_cap(investigation, budget)
     if isinstance(body, DiscoverRequest) and body.max_light is not None:
         set_light_cap(investigation, body.max_light)
@@ -108,7 +115,7 @@ async def create(body: NewInvestigation, session: SessionDep, runs: RunsDep) -> 
 @router.post("/investigations/document", status_code=202, response_model=InvestigationSummary,
              responses={**RUN_ERRORS, 413: {"model": ERRORS[404]["model"], "description": "File too large"}})
 async def create_from_document(
-    session: SessionDep,
+    session: SessionDep, user: CurrentUser,
     runs: RunsDep,
     file: Annotated[UploadFile, File(description="Your draft or proposal: .pdf, .md or .txt")],
     consent: Annotated[bool, Form(description="You agree to send the document's text to Claude to read it")],
@@ -140,7 +147,7 @@ async def create_from_document(
     budget = checked_budget(budget_usd, float(DEFAULT_COST_CAP_USD))
     request = {"idea": ""} | ({"field": field.strip()} if field and field.strip() else {})
     investigation = await create_investigation(session, mode="evaluate", complexity=complexity, input=request,
-                                               constraints=limits)
+                                               user_id=user.id, constraints=limits_for(user, limits))
     set_cost_cap(investigation, budget)
     ids = {key: value.strip() for key, value in (("doi", doi), ("arxiv", arxiv)) if value and value.strip()}
     await attach_document(session, investigation.id, prepared, consent_at=now(),
@@ -155,10 +162,10 @@ async def create_from_document(
 @router.post("/investigations/{investigation_id}/clarification", status_code=202,
              response_model=InvestigationSummary, responses=RUN_ERRORS)
 async def answer_clarification(investigation_id: uuid.UUID, body: ClarificationAnswer, session: SessionDep,
-                               runs: RunsDep) -> InvestigationSummary:
+                               user: CurrentUser, runs: RunsDep) -> InvestigationSummary:
     """The user's answers, edits and confirmation. Answers are applied by one Idea Analyst call (only if any were
     given); then the evaluation (Mode 1) or the discovery (Mode 2) runs in the background."""
-    investigation = await get_investigation(session, investigation_id)
+    investigation = await get_investigation(session, investigation_id, user)
     intake = await find_intake(session, investigation_id)
     if investigation.stage != Stage.AWAITING_CLARIFICATION or intake is None or intake.confirmed_at is not None:
         raise ApiError(409, "not_waiting", "This investigation isn't waiting for a clarification.")
@@ -193,9 +200,10 @@ async def answer_clarification(investigation_id: uuid.UUID, body: ClarificationA
 
 @router.post("/investigations/{investigation_id}/stop", status_code=202, response_model=InvestigationSummary,
              responses=RUN_ERRORS)
-async def stop(investigation_id: uuid.UUID, session: SessionDep, runs: RunsDep) -> InvestigationSummary:
+async def stop(investigation_id: uuid.UUID, session: SessionDep, user: CurrentUser,
+               runs: RunsDep) -> InvestigationSummary:
     """Stops the run at the next step boundary: nothing is lost, and it can be resumed."""
-    investigation = await get_investigation(session, investigation_id)
+    investigation = await get_investigation(session, investigation_id, user)
     if not runs.stop(investigation_id):
         raise ApiError(409, "not_running", "Nothing is running for this investigation.")
     return await started(session, investigation, runs)
@@ -203,10 +211,10 @@ async def stop(investigation_id: uuid.UUID, session: SessionDep, runs: RunsDep) 
 
 @router.post("/investigations/{investigation_id}/resume", status_code=202, response_model=InvestigationSummary,
              responses=RUN_ERRORS)
-async def resume(investigation_id: uuid.UUID, session: SessionDep, runs: RunsDep,
+async def resume(investigation_id: uuid.UUID, session: SessionDep, user: CurrentUser, runs: RunsDep,
                  body: ResumeRequest | None = None) -> InvestigationSummary:
     """Continues where it stopped: after Stop, the budget running out, an account refusal or a server restart."""
-    investigation = await get_investigation(session, investigation_id)
+    investigation = await get_investigation(session, investigation_id, user)
     if runs.state(investigation_id) != "idle":
         raise ApiError(409, "already_running", "Eureka is already working on this investigation.")
     if investigation.status in FINAL_INVESTIGATION_STATUSES:
@@ -231,11 +239,12 @@ async def resume(investigation_id: uuid.UUID, session: SessionDep, runs: RunsDep
 
 @router.post("/candidates/{candidate_id}/proposal", status_code=202, response_model=InvestigationSummary,
              responses=RUN_ERRORS)
-async def write_package(candidate_id: uuid.UUID, session: SessionDep, runs: RunsDep) -> InvestigationSummary:
+async def write_package(candidate_id: uuid.UUID, session: SessionDep, user: CurrentUser,
+                        runs: RunsDep) -> InvestigationSummary:
     """Writes the research package for a finalist in the background (the Proposal Designer, one call, about 35
     cents). A second call writes a new revision."""
-    candidate = await get_candidate(session, candidate_id)
-    investigation = await get_investigation(session, candidate.investigation_id)
+    candidate = await get_candidate(session, candidate_id, user)
+    investigation = await get_investigation(session, candidate.investigation_id, user)
     if candidate.status not in FINALISTS:
         raise ApiError(409, "not_a_finalist", f"A research package is written for a finalist; this idea is "
                                               f"{candidate.status.replace('_', ' ')}.")
@@ -254,17 +263,18 @@ def _markdown(text: str, name: str) -> Response:
 
 
 @router.get("/investigations/{investigation_id}/report", response_class=Response, responses=ERRORS)
-async def export_report(investigation_id: uuid.UUID, session: SessionDep,
+async def export_report(investigation_id: uuid.UUID, session: SessionDep, user: CurrentUser,
                         format: Literal["md"] = "md") -> Response:
     """The full report as Markdown (PDF later), built from stored data: free."""
-    await get_investigation(session, investigation_id)
+    await get_investigation(session, investigation_id, user)
     return _markdown(await build_report(session, investigation_id), f"eureka-report-{investigation_id}")
 
 
 @router.get("/candidates/{candidate_id}/proposal/export", response_class=Response, responses=ERRORS)
-async def export_package(candidate_id: uuid.UUID, session: SessionDep, format: Literal["md"] = "md") -> Response:
+async def export_package(candidate_id: uuid.UUID, session: SessionDep, user: CurrentUser,
+                         format: Literal["md"] = "md") -> Response:
     """The latest research package as Markdown (PDF later)."""
-    candidate = await get_candidate(session, candidate_id)
+    candidate = await get_candidate(session, candidate_id, user)
     package = (await session.execute(select(ResearchPackage).where(ResearchPackage.candidate_id == candidate_id)
                                      .order_by(ResearchPackage.revision.desc()).limit(1))).scalar_one_or_none()
     if package is None:

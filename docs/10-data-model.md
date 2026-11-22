@@ -139,7 +139,12 @@ Deferred: ConversationMessage, ToolCall (section 8)
 | Field | Meaning | Why we need it | Example |
 |---|---|---|---|
 | user id | Internal unique identifier | Every user-owned row points to it | `u_17` |
-| email | Login identity | Authentication | (from the auth provider) |
+| email | Login identity (stored lowercase, unique) | Authentication | ana@example.com |
+| name | What the user is called | The avatar, the profile page | Ana Beridze |
+| password hash | An Argon2 hash, never the password; empty for an account without a password (e.g. a future Google sign-in) | Logging in (step 9d) | `$argon2id$...` |
+| last login | When they last logged in | Basic auditing | 2026-11-22 |
+
+Logins are **UserSession** rows (step 9d, migration 0019): the user, the SHA-256 of the cookie's random token (never the token), when it expires (30 days, extended while used) and when it was last used. Logging out deletes the row.
 | created at | When the account was created | Basic auditing | 2026-11-10 |
 
 **Profile fields**

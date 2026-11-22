@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.ai.workflows.concluding import stored_verdicts
 from src.ai.workflows.proposal import TYPE_WORDS, WRITTEN, package_sections
 from src.ai.workflows.value_feasibility import verdicts_for
+from src.api.auth import CurrentUser
 from src.api.deps import SessionDep
 from src.api.errors import not_found
 from src.api.schemas.candidates import (
@@ -48,10 +49,12 @@ from src.db.models import (
     ClaimEvidence,
     Evaluation,
     FacetMatch,
+    Investigation,
     Paper,
     Quote,
     ResearchPackage,
     TriageDecision,
+    User,
     UserDocument,
 )
 from src.db.models import Facet as FacetRow
@@ -66,9 +69,11 @@ WRITTEN_SECTIONS = {2: "background", 4: "motivation", 5: "contribution", 9: "met
 assert set(WRITTEN_SECTIONS.values()) == set(WRITTEN)
 
 
-async def get_candidate(session: AsyncSession, candidate_id: uuid.UUID) -> Candidate:
+async def get_candidate(session: AsyncSession, candidate_id: uuid.UUID, user: User) -> Candidate:
+    """The idea if its investigation is the user's; otherwise "not found" (step 9d)."""
     candidate = await session.get(Candidate, candidate_id)
-    if candidate is None:
+    owner = (await session.get(Investigation, candidate.investigation_id)).user_id if candidate else None
+    if candidate is None or owner != user.id:
         raise not_found("Idea")
     return candidate
 
@@ -146,8 +151,8 @@ def _feasibility(value: dict | None) -> Feasibility | None:
 
 
 @router.get("/{candidate_id}", response_model=CandidateDetail, responses=ERRORS)
-async def get_candidate_detail(candidate_id: uuid.UUID, session: SessionDep) -> CandidateDetail:
-    candidate = await get_candidate(session, candidate_id)
+async def get_candidate_detail(candidate_id: uuid.UUID, session: SessionDep, user: CurrentUser) -> CandidateDetail:
+    candidate = await get_candidate(session, candidate_id, user)
     evaluation = await shown_evaluation(session, candidate)
     verdicts, preliminary, live_coverage, decision, works, brief = [], True, None, None, [], None
     if evaluation is not None:
@@ -179,8 +184,8 @@ async def get_candidate_detail(candidate_id: uuid.UUID, session: SessionDep) -> 
 
 
 @router.get("/{candidate_id}/matrix", response_model=Matrix, responses=ERRORS)
-async def get_matrix(candidate_id: uuid.UUID, session: SessionDep) -> Matrix:
-    candidate = await get_candidate(session, candidate_id)
+async def get_matrix(candidate_id: uuid.UUID, session: SessionDep, user: CurrentUser) -> Matrix:
+    candidate = await get_candidate(session, candidate_id, user)
     facets = await candidate_facets(session, candidate)
     evaluation = await shown_evaluation(session, candidate)
     if evaluation is None:
@@ -199,8 +204,8 @@ async def get_matrix(candidate_id: uuid.UUID, session: SessionDep) -> Matrix:
 
 
 @router.get("/{candidate_id}/claims", response_model=list[ClaimOut], responses=ERRORS)
-async def get_claims(candidate_id: uuid.UUID, session: SessionDep) -> list[ClaimOut]:
-    candidate = await get_candidate(session, candidate_id)
+async def get_claims(candidate_id: uuid.UUID, session: SessionDep, user: CurrentUser) -> list[ClaimOut]:
+    candidate = await get_candidate(session, candidate_id, user)
     evaluation = await shown_evaluation(session, candidate)
     if evaluation is None:
         return []
@@ -222,8 +227,8 @@ async def get_claims(candidate_id: uuid.UUID, session: SessionDep) -> list[Claim
 
 
 @router.get("/{candidate_id}/challenges", response_model=SkepticLog, responses=ERRORS)
-async def get_challenges(candidate_id: uuid.UUID, session: SessionDep) -> SkepticLog:
-    candidate = await get_candidate(session, candidate_id)
+async def get_challenges(candidate_id: uuid.UUID, session: SessionDep, user: CurrentUser) -> SkepticLog:
+    candidate = await get_candidate(session, candidate_id, user)
     evaluation = await shown_evaluation(session, candidate)
     if evaluation is None:
         return SkepticLog(rounds=[], challenges=[])
@@ -265,8 +270,8 @@ async def _statements(session: AsyncSession, items: list[dict], evaluation_id: u
 
 
 @router.get("/{candidate_id}/proposal", response_model=ResearchPackageOut, responses=ERRORS)
-async def get_proposal(candidate_id: uuid.UUID, session: SessionDep) -> ResearchPackageOut:
-    await get_candidate(session, candidate_id)
+async def get_proposal(candidate_id: uuid.UUID, session: SessionDep, user: CurrentUser) -> ResearchPackageOut:
+    await get_candidate(session, candidate_id, user)
     package = (await session.execute(select(ResearchPackage).where(ResearchPackage.candidate_id == candidate_id)
                                      .order_by(ResearchPackage.revision.desc()).limit(1))).scalar_one_or_none()
     if package is None:

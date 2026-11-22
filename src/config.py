@@ -308,6 +308,10 @@ class ApiSettings:
     max_budget_usd: float = DEFAULT_MAX_BUDGET_USD
     """The most one investigation may be given to spend (EUREKA_MAX_BUDGET_USD), so no request can ask for more."""
 
+    cookie_secure: bool = True
+    """The login cookie is sent over HTTPS only (EUREKA_COOKIE_SECURE). Browsers accept it on http://localhost too;
+    set false only for a local browser that doesn't."""
+
 
 def load_api_settings(environ: Mapping[str, str]) -> ApiSettings:
     raw = environ.get("FRONTEND_ORIGIN", "").strip() or DEFAULT_FRONTEND_ORIGIN
@@ -323,7 +327,10 @@ def load_api_settings(environ: Mapping[str, str]) -> ApiSettings:
         max_budget = 0.0
     if max_budget <= 0:
         raise ConfigError(f"EUREKA_MAX_BUDGET_USD must be a number of dollars above 0, e.g. 20; got {raw_max!r}.")
-    return ApiSettings(frontend_origins=origins, max_budget_usd=max_budget)
+    raw_secure = environ.get("EUREKA_COOKIE_SECURE", "").strip().lower() or "true"
+    if raw_secure not in ("true", "false"):
+        raise ConfigError(f"EUREKA_COOKIE_SECURE must be true or false; got {raw_secure!r}.")
+    return ApiSettings(frontend_origins=origins, max_budget_usd=max_budget, cookie_secure=raw_secure == "true")
 
 
 @lru_cache(maxsize=1)

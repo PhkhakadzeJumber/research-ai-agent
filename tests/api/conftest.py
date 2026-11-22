@@ -8,11 +8,15 @@ straight into the app (httpx's ASGI transport), no server is started.
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
 import httpx
 import pytest
 
+from src.api.auth import COOKIE_NAME, hash_password, new_token, token_hash
 from src.api.deps import get_database, get_session
+from src.db.repositories.users import claim_unowned, create_session, create_user
+from src.timeutil import now
 from src.api.main import create_app
 from src.api.runs import RunModels, Runs
 from src.config import RoleLlmSettings
@@ -39,7 +43,8 @@ class FakeDatabase:
 def make_client(app) -> httpx.AsyncClient:
     # raise_app_exceptions=False: an unexpected error becomes the app's 500 response, as a real client sees it
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-    return httpx.AsyncClient(transport=transport, base_url="http://test")
+    # https: the login cookie is Secure, so the client only sends it over https (as a browser would)
+    return httpx.AsyncClient(transport=transport, base_url="https://test")
 
 
 @pytest.fixture
@@ -55,15 +60,41 @@ async def bare_client(app) -> AsyncIterator[httpx.AsyncClient]:
         yield client
 
 
+TESTER = {"email": "tester@example.com", "name": "Test Person", "password": "correct horse battery"}
+
+
+async def logged_in(db_session, client: httpx.AsyncClient, user) -> None:  # noqa: F811
+    """Gives the client a valid session cookie for this user (as logging in would)."""
+    token, moment = new_token(), now()
+    await create_session(db_session, user_id=user.id, token_hash=token_hash(token),
+                         expires_at=moment + timedelta(days=30), now=moment, user_agent="tests")
+    client.cookies.set(COOKIE_NAME, token)
+
+
 @pytest.fixture
-async def client(app, db_session) -> AsyncIterator[httpx.AsyncClient]:  # noqa: F811  (the shared fixture)
+async def user(db_session):  # noqa: F811  (the shared fixture)
+    """The test user the client is logged in as."""
+    return await create_user(db_session, email=TESTER["email"], name=TESTER["name"],
+                             password_hash=hash_password(TESTER["password"]))
+
+
+@pytest.fixture
+async def client(app, db_session, user) -> AsyncIterator[httpx.AsyncClient]:  # noqa: F811  (the shared fixture)
+    """Logged in as `user`. Investigations the test data builders create have no owner (like command-line runs);
+    before each request they are given to `user`, as `scripts.users claim` would, so the routes see them."""
     async def session():
+        await claim_unowned(db_session, user.id)
         yield db_session
         await db_session.flush()
 
     app.dependency_overrides[get_session] = session
+    # routes that open their own short sessions (the live stream) use the runs' sessions: the test's session here
+    app.state.runs = ManualRuns(sessions_on(db_session), RunModels(idea_settings=IDEA_SETTINGS))
     async with make_client(app) as client:
+        await logged_in(db_session, client, user)
         yield client
+    if isinstance(app.state.runs, ManualRuns):
+        app.state.runs.discard()
 
 
 class ManualRuns(Runs):

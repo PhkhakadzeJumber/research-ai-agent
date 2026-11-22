@@ -14,6 +14,7 @@ from sqlalchemy import Select, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.ai.citations import paper_links
+from src.api.auth import CurrentUser
 from src.api.deps import SessionDep
 from src.api.errors import not_found
 from src.api.routes.investigations import describe
@@ -43,12 +44,14 @@ from src.db.models import (
 router = APIRouter(prefix="/papers", tags=["papers"])
 
 
-def _library_query() -> tuple[Select, object, object, object]:
-    """Papers with their verified-quote count, investigation count and analysis level (None if not read)."""
+def _library_query(user_id: uuid.UUID) -> tuple[Select, object, object, object]:
+    """Papers with their verified-quote count, how many of THIS user's investigations found them (others' never
+    show: step 9d), and the analysis level (None if not read)."""
     verified = (select(Quote.paper_id, func.count().label("n")).where(Quote.verified.is_(True))
                 .group_by(Quote.paper_id).subquery())
     found_in = (select(RetrievalHit.paper_id, func.count(distinct(RetrievalHit.investigation_id)).label("n"))
-                .group_by(RetrievalHit.paper_id).subquery())
+                .join(Investigation, Investigation.id == RetrievalHit.investigation_id)
+                .where(Investigation.user_id == user_id).group_by(RetrievalHit.paper_id).subquery())
     analysed = (select(PaperAnalysis.paper_id,
                        func.bool_or(PaperAnalysis.source_level == "full_text").label("full_text"))
                 .group_by(PaperAnalysis.paper_id).subquery())
@@ -72,7 +75,7 @@ def _escape_like(text: str) -> str:
 
 @router.get("", response_model=Page[LibraryPaper])
 async def list_papers(
-    session: SessionDep,
+    session: SessionDep, user: CurrentUser,
     q: str | None = Query(None, max_length=200, description="Words to find in titles and abstracts"),
     read: bool | None = Query(None, description="true: only papers Eureka read closely; false: only the others"),
     used: bool | None = Query(None, description="true: only papers found in your investigations"),
@@ -80,7 +83,7 @@ async def list_papers(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> Page[LibraryPaper]:
-    query, verified, found_in, analysed = _library_query()
+    query, verified, found_in, analysed = _library_query(user.id)
     where = []
     if q and q.strip():
         pattern = f"%{_escape_like(q.strip())}%"
@@ -118,10 +121,13 @@ def _analysis(row: PaperAnalysis | None, verified_texts: set[str]) -> Analysis |
         future_work=[QuotedPoint(**point(item, "statement")) for item in c.get("future_work", [])])
 
 
-async def _uses(session: AsyncSession, paper_id: uuid.UUID) -> list[PaperUse]:
+async def _uses(session: AsyncSession, paper_id: uuid.UUID, user_id: uuid.UUID) -> list[PaperUse]:
+    """Where the user's own investigations used the paper (never anyone else's)."""
     hits = (await session.execute(
         select(RetrievalHit.investigation_id, func.bool_or(RetrievalHit.selected_for_reading))
-        .where(RetrievalHit.paper_id == paper_id).group_by(RetrievalHit.investigation_id))).all()
+        .join(Investigation, Investigation.id == RetrievalHit.investigation_id)
+        .where(RetrievalHit.paper_id == paper_id, Investigation.user_id == user_id)
+        .group_by(RetrievalHit.investigation_id))).all()
     if not hits:
         return []
     investigation_ids = [i for i, _ in hits]
@@ -153,8 +159,8 @@ async def _uses(session: AsyncSession, paper_id: uuid.UUID) -> list[PaperUse]:
 
 
 @router.get("/{paper_id}", response_model=PaperDetail, responses=ERRORS)
-async def get_paper(paper_id: uuid.UUID, session: SessionDep) -> PaperDetail:
-    query, *_ = _library_query()
+async def get_paper(paper_id: uuid.UUID, session: SessionDep, user: CurrentUser) -> PaperDetail:
+    query, *_ = _library_query(user.id)
     row = (await session.execute(query.where(Paper.id == paper_id))).one_or_none()
     if row is None:
         raise not_found("Paper")
@@ -168,4 +174,4 @@ async def get_paper(paper_id: uuid.UUID, session: SessionDep) -> PaperDetail:
                        links=links, analysis=_analysis(analysis, {q.text for q in quotes if q.verified}),
                        quotes=[PaperQuote(id=q.id, text=q.text, verified=q.verified, source_level=q.source_level)
                                for q in quotes],
-                       used_in=await _uses(session, paper_id))
+                       used_in=await _uses(session, paper_id, user.id))

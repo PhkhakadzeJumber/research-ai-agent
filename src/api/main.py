@@ -5,7 +5,8 @@ Run it locally (database running):
 
 Routes live under /api/v1 (health checks at the root): reading stored data (step 9a), and starting and controlling
 runs (step 9b: these call Claude, in background runs, src/api/runs.py).
-There is no login yet (step 9d), so run it on your own machine only: uvicorn listens on 127.0.0.1 by default.
+Every route except the health checks and sign up / log in needs a login (step 9d: a session cookie, src/api/auth.py),
+and each user sees only their own investigations.
 """
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api import errors
 from src.api.errors import REQUEST_ID_HEADER
-from src.api.routes import actions, candidates, health, investigations, papers, progress
+from src.api.auth import LoginLimiter, install_origin_check
+from src.api.routes import accounts, actions, candidates, health, investigations, papers, progress
 from src.api.runs import Runs
 from src.config import get_api_settings
 from src.db.session import Database
@@ -45,9 +47,11 @@ def create_app(database: Database | None = None) -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=list(get_api_settings().frontend_origins),
                        allow_methods=["GET", "POST"], allow_headers=["*"], expose_headers=[REQUEST_ID_HEADER])
     errors.install(app)
+    install_origin_check(app)  # refuses state-changing requests from other sites (step 9d)
+    app.state.login_limiter = LoginLimiter()
     app.include_router(health.router)
     v1 = APIRouter(prefix=API_PREFIX)
-    for module in (actions, investigations, progress, candidates, papers):
+    for module in (accounts, actions, investigations, progress, candidates, papers):
         v1.include_router(module.router)
     app.include_router(v1)
     return app

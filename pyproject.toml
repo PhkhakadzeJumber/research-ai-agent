@@ -12,6 +12,7 @@ requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.13",            # database migrations
     "anthropic>=2.6,<3",        # Claude API (used only via src/llm.py)
+    "argon2-cffi>=25.1,<26",    # password hashing for accounts (src/api/auth.py; MIT)
     "asyncpg>=0.29",            # async PostgreSQL driver
     "fastapi>=0.160,<1",        # the HTTP API (src/api; step 9)
     "uvicorn>=0.50,<1",         # the server that runs the API

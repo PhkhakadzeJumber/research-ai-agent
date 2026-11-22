@@ -37,7 +37,9 @@ python -m scripts.proposal <investigation id> --show  # the latest stored packag
 python -m scripts.discover "NLP" [--interests ...] [--exclude ...] [--complexity beginner] [--count 3] [--budget 12] [--max-light 5 (light evaluations in all)]  # Workflow B, end to end: field brief, clarification, landscape, mining, the Scout's candidates, pre-screening, light evaluation (about $1-1.40 per candidate), refinements, replenishing, full evaluation of the best (about $1.60-2.20 each), ranking: paid API, ask first
 
 # Backend
-uvicorn src.api.main:app --reload            # API on http://127.0.0.1:8000 (docs at /docs); starting a run calls paid APIs, ask first; no login yet (until step 9d)
+uvicorn src.api.main:app --reload            # API on http://127.0.0.1:8000 (docs at /docs); needs a login; starting a run calls paid APIs, ask first
+python -m scripts.users create you@example.com --name "You"  # an account from the terminal (asks for the password): free
+python -m scripts.users claim you@example.com  # give command-line runs (no owner) to this account: free
 
 # Verify your work
 pytest                                       # default run: no network, no paid API calls ("live" tests excluded);
