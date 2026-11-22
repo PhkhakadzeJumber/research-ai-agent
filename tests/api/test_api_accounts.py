@@ -4,13 +4,13 @@ reaching new investigations, the password change, and `scripts.users`. Real test
 network, no cost."""
 
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
 
-from scripts.users import parse_args, run as users_command
+from scripts.users import add_months, parse_args, run as users_command
 from src.api.auth import COOKIE_NAME, token_hash
 from src.ai.workflows.value_feasibility import available_weeks
 from src.api.schemas.accounts import profile_constraints
@@ -222,7 +222,30 @@ async def test_the_users_command(db_session, capsys):
 
     await users_command(parse_args(["list"]), database)
     out = capsys.readouterr().out
-    assert "me@example.com  Me  | 1 investigation(s)" in out and "Without an owner: 0" in out
+    assert "me@example.com  Me  | Free | 1 investigation(s)" in out and "Without an owner: 0" in out
+
+
+async def test_the_users_command_manages_plans_and_credits(db_session, capsys):
+    database = SimpleNamespace(session=sessions_on(db_session))
+    answers = iter(["a good long password", "a good long password"])
+    await users_command(parse_args(["create", "me@example.com"]), database, ask=lambda prompt: next(answers))
+    me = (await db_session.execute(select(User).where(User.email == "me@example.com"))).scalar_one()
+
+    assert await users_command(parse_args(["grant-pro", "me@example.com", "--months", "2"]), database) == 0
+    first = me.plan_until
+    assert me.plan == "pro" and add_months(now(), 2) - first < timedelta(minutes=1)
+    await users_command(parse_args(["grant-pro", "me@example.com"]), database)  # extends the current period
+    assert me.plan_until == add_months(first, 1)
+    assert await users_command(parse_args(["grant-credits", "me@example.com", "50", "--note", "beta"]), database) == 0
+    assert "Gave me@example.com 50 credits" in capsys.readouterr().out
+    await users_command(parse_args(["credits", "me@example.com"]), database)
+    assert "150 credits available (100 monthly, 50 other, 0 reserved)" in capsys.readouterr().out
+
+    assert await users_command(parse_args(["end-pro", "me@example.com"]), database) == 0
+    assert (me.plan, me.plan_until) == ("free", None)
+    assert await users_command(parse_args(["grant-credits", "me@example.com", "0"]), database) == 2
+    assert await users_command(parse_args(["grant-pro", "nobody@example.com"]), database) == 2
+    assert add_months(datetime(2027, 1, 31, tzinfo=now().tzinfo), 1).day == 28  # the month's last day
 
 
 async def test_spent_this_month_counts_only_your_calls_this_month(client, db_session, user):

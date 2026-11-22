@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 from src.api.auth import COOKIE_NAME, hash_password, new_token, token_hash
+from src.api.billing import add_grant
 from src.api.deps import get_database, get_session
 from src.db.repositories.users import claim_unowned, create_session, create_user
 from src.timeutil import now
@@ -71,11 +72,23 @@ async def logged_in(db_session, client: httpx.AsyncClient, user) -> None:  # noq
     client.cookies.set(COOKIE_NAME, token)
 
 
+async def make_pro(db_session, user, credits: int = 1000) -> None:  # noqa: F811
+    """Makes the account Pro for a year with `credits` extra credits (on top of the monthly ones)."""
+    user.plan, user.plan_until = "pro", now() + timedelta(days=365)
+    if credits:
+        await add_grant(db_session, user, credits, source="admin", expires_at=now() + timedelta(days=365),
+                        note="tests")
+    await db_session.flush()
+
+
 @pytest.fixture
 async def user(db_session):  # noqa: F811  (the shared fixture)
-    """The test user the client is logged in as."""
-    return await create_user(db_session, email=TESTER["email"], name=TESTER["name"],
+    """The test user the client is logged in as: a Pro account with plenty of credits, so tests of runs aren't
+    about the plan (tests/api/test_api_billing.py tests plans and credits, with free accounts too)."""
+    user = await create_user(db_session, email=TESTER["email"], name=TESTER["name"],
                              password_hash=hash_password(TESTER["password"]))
+    await make_pro(db_session, user)
+    return user
 
 
 @pytest.fixture

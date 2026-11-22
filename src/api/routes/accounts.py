@@ -19,6 +19,7 @@ from src.api.auth import (
     verify_password,
 )
 from src.api.deps import SessionDep
+from src.api.routes.billing import plan_info
 from src.api.errors import ApiError
 from src.api.schemas.accounts import (
     LoginRequest,
@@ -52,7 +53,7 @@ async def me(session, user: User) -> Me:
         .join(Investigation, Investigation.id == LlmCall.investigation_id)
         .where(Investigation.user_id == user.id, LlmCall.created_at >= month_start))).scalar_one()
     return Me(id=user.id, name=user.name, email=user.email, created_at=user.created_at,
-              spent_this_month_usd=float(spent))
+              spent_this_month_usd=float(spent), plan=await plan_info(session, user))
 
 
 async def log_in(session, request: Request, response: Response, user: User) -> None:

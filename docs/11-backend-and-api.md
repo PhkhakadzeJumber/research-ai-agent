@@ -131,10 +131,27 @@ All routes are under `/api/v1`. They require authentication, except health check
 | POST | `/auth/signup` ✅ | `{name, email, password}` (10+ characters); creates the account and logs in; `409` if the email has an account |
 | POST | `/auth/login` ✅ | `{email, password}`; the same `401` for a wrong email or password; 5 failures in 15 minutes (per email or address) give `429` |
 | POST | `/auth/logout` ✅ | Ends the session (its cookie stops working at once) |
-| GET | `/auth/me` ✅ | `{id, name, email, created_at, spent_this_month_usd}` (the spend: your investigations' Claude calls since the 1st of the month, Tbilisi time; the top nav's chip) |
+| GET | `/auth/me` ✅ | `{id, name, email, created_at, spent_this_month_usd, plan}` (the spend: your investigations' Claude calls since the 1st of the month, Tbilisi time; `plan`: see §3.6) |
 | POST | `/auth/password` ✅ | `{current, new}`; logs out your other sessions |
 
 Every other route needs a login (`401 not_logged_in`). Someone else's investigation, idea or export is `404`, exactly like one that doesn't exist. The paper library is shared, but its counts and "used in" only ever show your own investigations. Runs started from the command line have no owner until `python -m scripts.users claim <email>`.
+
+### 3.6 Plans and credits ✅ (step P2; docs/18)
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/billing` ✅ | `{plan, plan_until, credits: {available, monthly, other, held}, free_evaluations_left, prices, history}`; the history is newest first: grants (+) and one line per action (−, with "price 25, used 22", "failed on our side · refunded", "running · up to 24 reserved") |
+
+`/auth/me` carries the same plan, credits and prices (without the history). Every route that starts a run reserves its credits first (`src/api/billing.py`) and refuses with nothing stored or reserved:
+
+| Status | Code | When |
+|---|---|---|
+| 403 | `pro_only` | Discovery or a research package on the free plan |
+| 403 | `free_limit_reached` | The month's free evaluation is used, or a free evaluation reached its price |
+| 402 | `not_enough_credits` | Pro, but fewer credits than the price ("needs 25 credits; you have 12") |
+| 503 | `free_unavailable` | The free plan's monthly cost cap is reached (Pro works as usual) |
+
+When a run ends (`src/api/runs.py`) its hold is settled: charged what it used (at most its price), or refunded if it failed on our side; at server start, holds of runs a restart interrupted are refunded. A run's cost cap is what the investigation has cost plus its price in dollars × 1.5; a `budget_usd` in a request can only lower it. Prices and limits come from env vars (`.env.example`); Pro and extra credits are granted with `python -m scripts.users grant-pro / grant-credits` until payments (step P5).
 
 ### 3.4 Progress events ✅ (step 9c)
 

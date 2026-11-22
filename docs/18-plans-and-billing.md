@@ -39,6 +39,10 @@ Why these choices:
 
 - **Reserve, then settle.** Starting an action reserves its price. At the end the user is charged
   `min(price, ceil(actual cost / $0.04))`, and the rest goes back. The user never pays more than the price shown.
+  An action can take several runs (an evaluation: the first reading, then the evaluation after the clarification,
+  then any resumes): each later run reserves what is left of the price, so the action as a whole never costs more.
+  If nothing is left (a run that reached its cost cap), a resume reserves a fifth of the price, shown before resuming.
+  Built in step P2: `src/api/billing.py`.
 - **Stops and failures.** If the user stops a run, they pay for what was used (same formula). If a run fails because of us
   (a crash, a provider outage), everything is refunded. Resuming a paused run reserves the remaining price again.
 - **Per-run safety cap.** A run's AI budget is 1.5× its price in dollars (an evaluation: $1.50), so an unusual run can
@@ -98,7 +102,7 @@ script, so everything else is built and tested without payments.
 | Step | What | Needs approval |
 |---|---|---|
 | P1 | Model mix in `.env` | — (the user edits `.env`) |
-| P2 | Backend: plan fields on users, a credits ledger (grant / reserve / charge / refund), entitlement checks on start, resume and package, the free cap, `scripts/users.py grant-pro` / `grant-credits` | Migration, response shapes |
+| P2 ✅ | Backend: plan fields on users, a credits ledger (grant / reserve / charge / refund), entitlement checks on start, resume and package, the free cap, `scripts/users.py grant-pro` / `grant-credits` | Migration, response shapes |
 | P3 | Email verification and password reset | An email-sending service (dependency, env vars) |
 | P4 | UI: Pricing, Plan & billing, Pro badges, credit chip, credit prices instead of dollars | — (design in Figma first) |
 | P5 | Payments: checkout, billing portal, webhooks that grant monthly credits and top-ups | Provider choice, dependency, env vars |

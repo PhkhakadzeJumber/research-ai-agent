@@ -39,7 +39,8 @@ async def test_a_new_idea_is_read_in_the_background_then_waits_for_the_user(clie
     response = await client.post("/api/v1/investigations", json=IDEA)
     assert response.status_code == 202
     started = response.json()
-    assert (started["run"], started["waiting_for"], started["budget_usd"]) == ("running", None, 5.0)
+    # the run's cost cap comes from the plan (step P2): 25 credits x $0.04 x 1.5 = $1.50
+    assert (started["run"], started["waiting_for"], started["budget_usd"]) == ("running", None, 1.5)
 
     await runs.drain()
     now = await get(client, started["id"])
@@ -66,7 +67,7 @@ async def test_a_new_discovery_and_its_clarification(client, runs, db_session):
     body = {"mode": "discover", "field": "NLP", "interests": "LLM agents", "exclusions": ["medical"], "count": 3,
             "max_light": 4}
     started = (await client.post("/api/v1/investigations", json=body)).json()
-    assert started["budget_usd"] == 12.0
+    assert started["budget_usd"] == 3.6  # 60 credits x $0.04 x 1.5 (step P2)
     await runs.drain()
     investigation = await db_session.get(Investigation, uuid.UUID(started["id"]))
     assert investigation.budget["light_evaluations"] == 4
@@ -162,8 +163,10 @@ async def test_resume_runs_on_to_the_results(client, runs, db_session):
     too_much = await client.post(f"{url}/resume", json={"budget_usd": 21})
     assert too_much.json()["error"]["code"] == "budget_too_high"
 
+    # a budget can only lower the cap the plan sets (step P2): asking for $8 leaves cost so far + 25 x $0.04 x 1.5
     response = await client.post(f"{url}/resume", json={"budget_usd": 8})
-    assert response.status_code == 202 and response.json()["budget_usd"] == 8.0
+    resumed = response.json()
+    assert response.status_code == 202 and resumed["budget_usd"] == pytest.approx(resumed["cost_usd"] + 1.5, abs=1e-6)
     assert (await client.post(f"{url}/resume")).json()["error"]["code"] == "already_running"
     stopping = (await client.post(f"{url}/stop")).json()
     assert stopping["run"] == "stopping"

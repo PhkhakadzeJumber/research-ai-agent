@@ -10,7 +10,8 @@ Rules:
   - at most `max_parallel` runs at once: the others wait their turn (they show as running);
   - stop(id) asks the run to stop at the next step boundary (the driver's should_stop); it stays resumable.
 
-What a run did is logged for now; step 9c stores and streams it as progress events.
+What a run did is stored and streamed as progress events (step 9c). When a run ends, its credits are settled
+(src/api/billing.py; step P2).
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ from src.ai.workflows.proposal import write_proposal
 from src.ai.workflows.understanding import understand_idea
 from src.ai.workflows.user_document import understand_document
 from src.ai.workflows.states import Stage
+from src.api import billing
 from src.db.models import Investigation, ProgressEvent, UserDocument
 
 log = logging.getLogger("eureka.runs")
@@ -155,6 +157,8 @@ class Runs:
                 self.last_ended[investigation_id] = f"{type(error).__name__}: {error}"
                 log.exception("run %s (%s) failed", investigation_id, what)
                 ended = None
+            # its credits are settled before anything says it ended: what the user then sees is final
+            await billing.settle_run(self.sessions, investigation_id, ended.reason if ended is not None else None)
             # the run is idle before its last event goes out, so a live stream that sees "ended" can close
             self._active.pop(investigation_id, None)
             self._stopping.discard(investigation_id)

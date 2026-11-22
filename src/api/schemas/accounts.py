@@ -15,6 +15,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from src.api.auth import MAX_PASSWORD, MIN_PASSWORD
+from src.api.schemas.billing import PlanInfo
 from src.api.schemas.common import ApiModel, Timestamp
 
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -60,6 +61,8 @@ class Me(ApiModel):
     created_at: Timestamp
     spent_this_month_usd: float
     """What your investigations' Claude calls cost since the 1st of this month (Tbilisi time): the nav's chip."""
+    plan: PlanInfo
+    """The plan, credits and prices (step P2): the nav's chip and the start buttons."""
 
 
 AcademicLevel = Literal["undergraduate", "master", "phd", "researcher"]

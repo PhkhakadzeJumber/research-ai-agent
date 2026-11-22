@@ -25,6 +25,8 @@ flowchart LR
     U[User] --- I[Investigation] --- IN[Intake]
     I --- PE[ProgressEvent]
     I --- LC[LlmCall]
+    U --- CG[CreditGrant]
+    U --- CHD[CreditHold] --- I
   end
   subgraph R2["2 · Search trail"]
     SQ[SearchQuery] --- RH[RetrievalHit]

@@ -163,6 +163,33 @@ Logins are **UserSession** rows (step 9d, migration 0019): the user, the SHA-256
 | supervision | yes / limited / no | More risk is acceptable with a supervisor; influences the feasibility risk level | limited |
 | other | Free text | Anything not covered above | "must finish before June" |
 
+### 2.2 Plans and credits (docs/18; built in step P2, migration 0020)
+
+**User** gains `plan` (`free` / `pro`) and `plan_until` (the end of the paid Pro period; Pro counts only before it).
+
+**CreditGrant**: credits given to an account.
+
+| Field | Meaning |
+|---|---|
+| source | `monthly` (the Pro allowance, granted the first time it's needed each month), `topup`, `admin` |
+| period | The month of a monthly grant (`2026-11`); unique per account, so it is granted once |
+| amount, remaining | Granted, and left (charges take from the grants that expire first) |
+| expires_at | Monthly: the 1st of next month; top-ups and admin grants: months later |
+| note | Why (admin), or the payment it came from (step P5) |
+
+**CreditHold**: one per run. Reserved when the run starts, settled when it ends.
+
+| Field | Meaning |
+|---|---|
+| investigation_id, candidate_id, action | What the run is for: `evaluate`, `discover` or `package` (with its idea) |
+| price | Credits reserved: the action's price, or what is left of it when a later run continues the action |
+| free | A free account's evaluation: nothing is taken from grants |
+| cost_at_start | The investigation's cost when the run started (the run is charged what it added) |
+| status, outcome | `held` → `settled`; `charged` or `refunded` (a failure on our side) |
+| charged, usd_used | Credits charged (ceil(cost / credit value), at most the price) and the run's cost to us |
+
+Available credits = remaining of unexpired grants − prices of `held` holds. **Code-only:** no agent reads or writes these.
+
 ---
 
 ## 3. Investigation data: the request and the run

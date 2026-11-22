@@ -6,6 +6,7 @@ a model that isn't imported here is invisible to migrations.
 """
 
 from src.db.models.accounts import UserSession  # region 1: login sessions
+from src.db.models.billing import CreditGrant, CreditHold  # region 1: plans and credits
 from src.db.models.documents import UserDocument  # region 1: the user's own document
 from src.db.models.candidates import Candidate, CandidateInspiration, Facet  # region 4: where ideas come from
 from src.db.models.evaluations import (  # region 5: judging a candidate
@@ -25,6 +26,8 @@ from src.db.models.run import Intake, Investigation, LlmCall, User  # region 1: 
 from src.db.models.search_trail import ApiCache, RetrievalHit, SearchQuery  # region 2: search trail
 
 __all__ = [
+    "CreditGrant",
+    "CreditHold",
     "UserSession",
     "ProgressEvent",
     "ApiCache",

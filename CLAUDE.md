@@ -44,6 +44,8 @@ python -m scripts.discover "NLP" [--interests ...] [--exclude ...] [--complexity
 uvicorn src.api.main:app --reload            # API on http://127.0.0.1:8000 (docs at /docs); needs a login; starting a run calls paid APIs, ask first
 python -m scripts.users create you@example.com --name "You"  # an account from the terminal (asks for the password): free
 python -m scripts.users claim you@example.com  # give command-line runs (no owner) to this account: free
+python -m scripts.users grant-pro you@example.com [--months 12]  # Pro until payments exist (step P5): free
+python -m scripts.users grant-credits you@example.com 50 [--note "why"]  # extra credits; `credits <email>` shows them and each run's cost: free
 
 # Verify your work
 pytest                                       # default run: no network, no paid API calls ("live" tests excluded);

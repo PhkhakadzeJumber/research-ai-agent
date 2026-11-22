@@ -92,6 +92,7 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     __table_args__ = (
         UniqueConstraint("email"),
         CheckConstraint("email = lower(email)", name="email_lowercase"),
+        CheckConstraint("plan IN ('free', 'pro')", name="plan_valid"),
     )
 
     email: Mapped[str] = mapped_column(String(320))
@@ -102,6 +103,10 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     last_login_at: Mapped[datetime | None] = mapped_column(AwareDateTime())
     profile: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default=sql_text("'{}'::jsonb"))
     """The research limits (doc 10 §2.1; edited on the profile page, step 9d); copied into each new investigation."""
+    plan: Mapped[str] = mapped_column(String(8), default="free", server_default="free")
+    """free or pro (docs/18). Pro counts only while plan_until is in the future."""
+    plan_until: Mapped[datetime | None] = mapped_column(AwareDateTime())
+    """When the paid Pro period ends (renewed by the payment provider, step P5, or set by scripts/users.py)."""
 
 
 class Investigation(UUIDPrimaryKey, Timestamps, Base):

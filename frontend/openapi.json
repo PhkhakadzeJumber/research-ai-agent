@@ -508,8 +508,38 @@
        }
       }
      },
+     "402": {
+      "description": "Not enough credits",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Not in your plan, or this month's free evaluation is used",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
      "409": {
       "description": "Not possible in this state",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "Free evaluations are paused until next month",
       "content": {
        "application/json": {
         "schema": {
@@ -660,8 +690,38 @@
        }
       }
      },
+     "402": {
+      "description": "Not enough credits",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Not in your plan, or this month's free evaluation is used",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
      "409": {
       "description": "Not possible in this state",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "Free evaluations are paused until next month",
       "content": {
        "application/json": {
         "schema": {
@@ -744,8 +804,38 @@
        }
       }
      },
+     "402": {
+      "description": "Not enough credits",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Not in your plan, or this month's free evaluation is used",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
      "409": {
       "description": "Not possible in this state",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "Free evaluations are paused until next month",
       "content": {
        "application/json": {
         "schema": {
@@ -859,8 +949,38 @@
        }
       }
      },
+     "402": {
+      "description": "Not enough credits",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Not in your plan, or this month's free evaluation is used",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
      "409": {
       "description": "Not possible in this state",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "Free evaluations are paused until next month",
       "content": {
        "application/json": {
         "schema": {
@@ -940,8 +1060,38 @@
        }
       }
      },
+     "402": {
+      "description": "Not enough credits",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Not in your plan, or this month's free evaluation is used",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
      "409": {
       "description": "Not possible in this state",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "Free evaluations are paused until next month",
       "content": {
        "application/json": {
         "schema": {
@@ -1004,8 +1154,38 @@
        }
       }
      },
+     "402": {
+      "description": "Not enough credits",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Not in your plan, or this month's free evaluation is used",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
      "409": {
       "description": "Not possible in this state",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "503": {
+      "description": "Free evaluations are paused until next month",
       "content": {
        "application/json": {
         "schema": {
@@ -2008,6 +2188,38 @@
      }
     }
    }
+  },
+  "/api/v1/billing": {
+   "get": {
+    "tags": [
+     "billing"
+    ],
+    "summary": "Get Billing",
+    "description": "The plan, credits left, prices, and the credit history (grants, and what each action was charged).",
+    "operationId": "get_billing_api_v1_billing_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Billing"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -2140,6 +2352,126 @@
      "future_work"
     ],
     "title": "Analysis"
+   },
+   "Billing": {
+    "properties": {
+     "plan": {
+      "type": "string",
+      "enum": [
+       "free",
+       "pro"
+      ],
+      "title": "Plan"
+     },
+     "plan_until": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Plan Until"
+     },
+     "credits": {
+      "$ref": "#/components/schemas/Credits"
+     },
+     "free_evaluations_left": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Free Evaluations Left"
+     },
+     "prices": {
+      "$ref": "#/components/schemas/Prices"
+     },
+     "history": {
+      "items": {
+       "$ref": "#/components/schemas/BillingEntry"
+      },
+      "type": "array",
+      "title": "History"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "plan",
+     "plan_until",
+     "credits",
+     "free_evaluations_left",
+     "prices",
+     "history"
+    ],
+    "title": "Billing"
+   },
+   "BillingEntry": {
+    "properties": {
+     "at": {
+      "type": "string",
+      "title": "At"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "grant",
+       "run"
+      ],
+      "title": "Kind"
+     },
+     "title": {
+      "type": "string",
+      "title": "Title"
+     },
+     "detail": {
+      "type": "string",
+      "title": "Detail"
+     },
+     "credits": {
+      "type": "integer",
+      "title": "Credits"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "granted",
+       "reserved",
+       "charged",
+       "refunded",
+       "free"
+      ],
+      "title": "Status"
+     },
+     "investigation_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "uuid"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Investigation Id"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "at",
+     "kind",
+     "title",
+     "detail",
+     "credits",
+     "status"
+    ],
+    "title": "BillingEntry"
    },
    "Body_create_from_document_api_v1_investigations_document_post": {
     "properties": {
@@ -2944,6 +3276,35 @@
      "frozen"
     ],
     "title": "Coverage"
+   },
+   "Credits": {
+    "properties": {
+     "available": {
+      "type": "integer",
+      "title": "Available"
+     },
+     "monthly": {
+      "type": "integer",
+      "title": "Monthly"
+     },
+     "other": {
+      "type": "integer",
+      "title": "Other"
+     },
+     "held": {
+      "type": "integer",
+      "title": "Held"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "available",
+     "monthly",
+     "other",
+     "held"
+    ],
+    "title": "Credits"
    },
    "DataCheck": {
     "properties": {
@@ -4227,6 +4588,9 @@
      "spent_this_month_usd": {
       "type": "number",
       "title": "Spent This Month Usd"
+     },
+     "plan": {
+      "$ref": "#/components/schemas/PlanInfo"
      }
     },
     "additionalProperties": false,
@@ -4236,7 +4600,8 @@
      "name",
      "email",
      "created_at",
-     "spent_this_month_usd"
+     "spent_this_month_usd",
+     "plan"
     ],
     "title": "Me"
    },
@@ -4753,6 +5118,80 @@
      "new"
     ],
     "title": "PasswordChange"
+   },
+   "PlanInfo": {
+    "properties": {
+     "plan": {
+      "type": "string",
+      "enum": [
+       "free",
+       "pro"
+      ],
+      "title": "Plan"
+     },
+     "plan_until": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Plan Until"
+     },
+     "credits": {
+      "$ref": "#/components/schemas/Credits"
+     },
+     "free_evaluations_left": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Free Evaluations Left"
+     },
+     "prices": {
+      "$ref": "#/components/schemas/Prices"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "plan",
+     "plan_until",
+     "credits",
+     "free_evaluations_left",
+     "prices"
+    ],
+    "title": "PlanInfo"
+   },
+   "Prices": {
+    "properties": {
+     "evaluate": {
+      "type": "integer",
+      "title": "Evaluate"
+     },
+     "discover": {
+      "type": "integer",
+      "title": "Discover"
+     },
+     "package": {
+      "type": "integer",
+      "title": "Package"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "evaluate",
+     "discover",
+     "package"
+    ],
+    "title": "Prices"
    },
    "ProfileOut": {
     "properties": {

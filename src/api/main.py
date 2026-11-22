@@ -11,6 +11,8 @@ and each user sees only their own investigations.
 
 from __future__ import annotations
 
+import logging
+
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -21,6 +23,8 @@ from src.api import errors
 from src.api.errors import REQUEST_ID_HEADER
 from src.api.auth import LoginLimiter, install_origin_check
 from src.api.routes import accounts, actions, candidates, health, investigations, papers, progress
+from src.api.routes import billing as billing_routes
+from src.api import billing
 from src.api.runs import Runs
 from src.config import get_api_settings
 from src.db.session import Database
@@ -35,6 +39,12 @@ def create_app(database: Database | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.database = database or Database.from_settings()
         try:
+            try:  # runs don't survive a restart: credits they reserved go back (src/api/billing.py)
+                settled = await billing.settle_interrupted(lambda: app.state.database.session())
+                if settled:
+                    logging.getLogger("eureka.billing").info("returned the credits of %d interrupted run(s)", settled)
+            except Exception:  # noqa: BLE001 - a database that isn't up yet must not stop the server starting
+                logging.getLogger("eureka.billing").exception("settling interrupted runs failed")
             yield
         finally:
             await app.state.runs.shutdown()  # runs stop where they stand; their saved state stays resumable
@@ -51,7 +61,7 @@ def create_app(database: Database | None = None) -> FastAPI:
     app.state.login_limiter = LoginLimiter()
     app.include_router(health.router)
     v1 = APIRouter(prefix=API_PREFIX)
-    for module in (accounts, actions, investigations, progress, candidates, papers):
+    for module in (accounts, actions, investigations, progress, candidates, papers, billing_routes):
         v1.include_router(module.router)
     app.include_router(v1)
     return app

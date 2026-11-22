@@ -14,6 +14,7 @@ There are independent groups, so a missing value in one never blocks the others:
 - EmbeddingSettings (get_embedding_settings): the Vertex AI embedding model.
 - RoleLlmSettings (get_role_llm_settings): model and effort per agent role.
 - ApiSettings (get_api_settings): the HTTP API (which frontend origins may call it).
+- BillingSettings (get_billing_settings): plans and credit prices (docs/18).
 """
 
 from __future__ import annotations
@@ -338,3 +339,63 @@ def get_api_settings() -> ApiSettings:
     """Returns the API settings, loading `.env` on first use."""
     load_dotenv()
     return load_api_settings(os.environ)
+
+
+# --- plans and credits (docs/18; step P2) ---------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class BillingSettings:
+    """What credits are worth and what each action costs. All optional: the defaults are docs/18's numbers."""
+
+    credit_usd: float = 0.04
+    """Our AI cost one credit pays for (EUREKA_CREDIT_USD). Runs are charged ceil(cost / this), at most the price."""
+    price_evaluate: int = 25
+    """Credits for "Evaluate my idea" (EUREKA_PRICE_EVALUATE)."""
+    price_discover: int = 60
+    """Credits for "Find me an idea" (EUREKA_PRICE_DISCOVER)."""
+    price_package: int = 5
+    """Credits for a research package (EUREKA_PRICE_PACKAGE)."""
+    pro_monthly_credits: int = 100
+    """Credits a Pro account gets on the 1st of each month (EUREKA_PRO_MONTHLY_CREDITS); they expire at month end."""
+    free_evaluations: int = 1
+    """Full evaluations a free account may start each calendar month (EUREKA_FREE_EVALUATIONS)."""
+    free_monthly_budget_usd: float = 20.0
+    """The most all free accounts together may cost in a month (EUREKA_FREE_MONTHLY_BUDGET_USD); when reached, free
+    evaluations wait until next month."""
+    run_cap_factor: float = 1.5
+    """A run may cost up to this times its price in dollars before it stops (EUREKA_RUN_CAP_FACTOR); we absorb the
+    overrun above the price."""
+
+
+def load_billing_settings(environ: Mapping[str, str]) -> BillingSettings:
+    defaults = BillingSettings()
+    values: dict[str, float | int] = {}
+    for name, attribute, kind in (
+            ("EUREKA_CREDIT_USD", "credit_usd", float), ("EUREKA_PRICE_EVALUATE", "price_evaluate", int),
+            ("EUREKA_PRICE_DISCOVER", "price_discover", int), ("EUREKA_PRICE_PACKAGE", "price_package", int),
+            ("EUREKA_PRO_MONTHLY_CREDITS", "pro_monthly_credits", int),
+            ("EUREKA_FREE_EVALUATIONS", "free_evaluations", int),
+            ("EUREKA_FREE_MONTHLY_BUDGET_USD", "free_monthly_budget_usd", float),
+            ("EUREKA_RUN_CAP_FACTOR", "run_cap_factor", float)):
+        raw = environ.get(name, "").strip()
+        if not raw:
+            continue
+        try:
+            value = kind(raw)
+        except ValueError:
+            value = -1
+        floor = 0 if attribute in ("free_evaluations", "free_monthly_budget_usd") else 1 if kind is int else 0
+        if value < floor or (attribute in ("credit_usd", "run_cap_factor") and value <= 0):
+            raise ConfigError(f"{name} must be a {'whole ' if kind is int else ''}number"
+                              f"{' of at least ' + str(floor) if floor else ' above 0'}; got {raw!r}.")
+        values[attribute] = value
+    if values.get("run_cap_factor", defaults.run_cap_factor) < 1:
+        raise ConfigError("EUREKA_RUN_CAP_FACTOR must be at least 1 (a run must be able to cost its price).")
+    return BillingSettings(**values)
+
+
+@lru_cache(maxsize=1)
+def get_billing_settings() -> BillingSettings:
+    """Returns the billing settings, loading `.env` on first use."""
+    load_dotenv()
+    return load_billing_settings(os.environ)

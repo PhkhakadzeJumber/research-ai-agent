@@ -2,7 +2,13 @@
 
 import pytest
 
-from src.config import ConfigError, load_database_settings, load_retrieval_settings, load_settings
+from src.config import (
+    ConfigError,
+    load_billing_settings,
+    load_database_settings,
+    load_retrieval_settings,
+    load_settings,
+)
 
 
 def test_database_url_is_built_from_postgres_variables_with_defaults():
@@ -84,3 +90,21 @@ def test_invalid_effort_is_an_error():
 def test_invalid_max_tokens_is_an_error(value):
     with pytest.raises(ConfigError, match="EUREKA_LLM_MAX_TOKENS"):
         load_settings({"EUREKA_LLM_MODEL": "model-x", "EUREKA_LLM_MAX_TOKENS": value})
+
+
+# --- billing (docs/18; step P2) -------------------------------------------------------------------------------
+
+def test_billing_settings_default_to_the_documented_plan():
+    s = load_billing_settings({})
+    assert (s.credit_usd, s.price_evaluate, s.price_discover, s.price_package) == (0.04, 25, 60, 5)
+    assert (s.pro_monthly_credits, s.free_evaluations, s.free_monthly_budget_usd, s.run_cap_factor) == (100, 1, 20.0, 1.5)
+
+
+def test_billing_settings_can_be_changed_and_are_checked():
+    s = load_billing_settings({"EUREKA_PRICE_EVALUATE": "30", "EUREKA_FREE_EVALUATIONS": "0",
+                               "EUREKA_CREDIT_USD": "0.05"})
+    assert (s.price_evaluate, s.free_evaluations, s.credit_usd) == (30, 0, 0.05)
+    for name, value in [("EUREKA_PRICE_DISCOVER", "0"), ("EUREKA_PRICE_PACKAGE", "five"), ("EUREKA_CREDIT_USD", "0"),
+                        ("EUREKA_RUN_CAP_FACTOR", "0.8"), ("EUREKA_FREE_MONTHLY_BUDGET_USD", "-1")]:
+        with pytest.raises(ConfigError, match=name):
+            load_billing_settings({name: value})

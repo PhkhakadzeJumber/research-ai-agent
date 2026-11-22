@@ -556,6 +556,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/billing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Billing
+         * @description The plan, credits left, prices, and the credit history (grants, and what each action was charged).
+         */
+        get: operations["get_billing_api_v1_billing_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -593,6 +613,45 @@ export interface components {
             limitations: components["schemas"]["QuotedPoint"][];
             /** Future Work */
             future_work: components["schemas"]["QuotedPoint"][];
+        };
+        /** Billing */
+        Billing: {
+            /**
+             * Plan
+             * @enum {string}
+             */
+            plan: "free" | "pro";
+            /** Plan Until */
+            plan_until: string | null;
+            credits: components["schemas"]["Credits"];
+            /** Free Evaluations Left */
+            free_evaluations_left: number | null;
+            prices: components["schemas"]["Prices"];
+            /** History */
+            history: components["schemas"]["BillingEntry"][];
+        };
+        /** BillingEntry */
+        BillingEntry: {
+            /** At */
+            at: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "grant" | "run";
+            /** Title */
+            title: string;
+            /** Detail */
+            detail: string;
+            /** Credits */
+            credits: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "granted" | "reserved" | "charged" | "refunded" | "free";
+            /** Investigation Id */
+            investigation_id?: string | null;
         };
         /** Body_create_from_document_api_v1_investigations_document_post */
         Body_create_from_document_api_v1_investigations_document_post: {
@@ -859,6 +918,17 @@ export interface components {
             budgets_hit: string[];
             /** Frozen */
             frozen: boolean;
+        };
+        /** Credits */
+        Credits: {
+            /** Available */
+            available: number;
+            /** Monthly */
+            monthly: number;
+            /** Other */
+            other: number;
+            /** Held */
+            held: number;
         };
         /** DataCheck */
         DataCheck: {
@@ -1308,6 +1378,7 @@ export interface components {
             created_at: string;
             /** Spent This Month Usd */
             spent_this_month_usd: number;
+            plan: components["schemas"]["PlanInfo"];
         };
         /** NoveltyClaim */
         NoveltyClaim: {
@@ -1465,6 +1536,29 @@ export interface components {
             current: string;
             /** New */
             new: string;
+        };
+        /** PlanInfo */
+        PlanInfo: {
+            /**
+             * Plan
+             * @enum {string}
+             */
+            plan: "free" | "pro";
+            /** Plan Until */
+            plan_until: string | null;
+            credits: components["schemas"]["Credits"];
+            /** Free Evaluations Left */
+            free_evaluations_left: number | null;
+            prices: components["schemas"]["Prices"];
+        };
+        /** Prices */
+        Prices: {
+            /** Evaluate */
+            evaluate: number;
+            /** Discover */
+            discover: number;
+            /** Package */
+            package: number;
         };
         /** ProfileOut */
         ProfileOut: {
@@ -2217,6 +2311,24 @@ export interface operations {
                     "application/json": components["schemas"]["InvestigationSummary"];
                 };
             };
+            /** @description Not enough credits */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not in your plan, or this month's free evaluation is used */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Not found */
             404: {
                 headers: {
@@ -2244,6 +2356,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Free evaluations are paused until next month */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     create_from_document_api_v1_investigations_document_post: {
@@ -2266,6 +2387,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvestigationSummary"];
+                };
+            };
+            /** @description Not enough credits */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not in your plan, or this month's free evaluation is used */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Not found */
@@ -2302,6 +2441,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Free evaluations are paused until next month */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2370,6 +2518,24 @@ export interface operations {
                     "application/json": components["schemas"]["InvestigationSummary"];
                 };
             };
+            /** @description Not enough credits */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not in your plan, or this month's free evaluation is used */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Not found */
             404: {
                 headers: {
@@ -2395,6 +2561,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Free evaluations are paused until next month */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2419,6 +2594,24 @@ export interface operations {
                     "application/json": components["schemas"]["InvestigationSummary"];
                 };
             };
+            /** @description Not enough credits */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not in your plan, or this month's free evaluation is used */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Not found */
             404: {
                 headers: {
@@ -2444,6 +2637,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Free evaluations are paused until next month */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2472,6 +2674,24 @@ export interface operations {
                     "application/json": components["schemas"]["InvestigationSummary"];
                 };
             };
+            /** @description Not enough credits */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not in your plan, or this month's free evaluation is used */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Not found */
             404: {
                 headers: {
@@ -2497,6 +2717,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Free evaluations are paused until next month */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2561,6 +2790,24 @@ export interface operations {
                     "application/json": components["schemas"]["InvestigationSummary"];
                 };
             };
+            /** @description Not enough credits */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not in your plan, or this month's free evaluation is used */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Not found */
             404: {
                 headers: {
@@ -2586,6 +2833,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Free evaluations are paused until next month */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3190,6 +3446,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_billing_api_v1_billing_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Billing"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
