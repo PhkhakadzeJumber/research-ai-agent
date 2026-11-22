@@ -19,6 +19,7 @@ dependencies = [
     "google-adk>=2.13,<3",      # agent framework; Claude via its AnthropicLlm model class
     "google-genai>=2.34,<3",    # Vertex AI embeddings (src/retrieval/embeddings.py)
     "httpx>=0.28,<1",           # async HTTP client for the literature source adapters
+    "pypdf>=7.1,<8",            # text from uploaded PDF documents (src/ai/workflows/user_document.py; BSD license)
     "python-dotenv>=1.0",       # loads .env in development
     "tzdata>=2024.1",           # time zone database (Asia/Tbilisi) for Windows and slim containers
 ]

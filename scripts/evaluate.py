@@ -116,7 +116,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     which.add_argument("--continue", dest="continue_id", type=uuid.UUID, metavar="INVESTIGATION",
                        help="resume an investigation waiting for clarification")
     parser.add_argument("--idea-file", type=Path, metavar="FILE",
-                        help="your own draft, proposal or paper to evaluate (.md or .txt, up to about 15-20 pages); "
+                        help="your own draft, proposal or paper to evaluate (.md, .txt or .pdf; up to 60,000 characters / 50 pages); "
                              "it is sent to Claude to be read, and stays private to this investigation")
     parser.add_argument("--consent", action="store_true",
                         help="agree to send --idea-file to Claude (needed with --yes; otherwise you are asked)")

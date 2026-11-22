@@ -47,7 +47,7 @@
 
 ### 1.2 High-value extensions (week 4, in this order)
 
-1. **The user's research document (Mode 1; doc 02 §2.4)**, built right after Workflow B (step 5.6): text and Markdown first, then PDF once the parser dependency is approved; the upload endpoint with the API.
+1. **The user's research document (Mode 1; doc 02 §2.4)**: text, Markdown and PDF built in steps 6a-6b, after Workflow B; the upload endpoint comes with the API.
 2. Candidate comparison view.
 3. Mode 2 steering buttons (more like this / simpler / exclude).
 4. Evidence graph.

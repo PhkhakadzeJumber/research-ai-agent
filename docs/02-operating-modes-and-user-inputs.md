@@ -23,7 +23,7 @@ A Mode 2 candidate can be promoted to a **deep dive**: a full Mode 1 investigati
 | Idea text | Yes | Free text: a question, hypothesis, topic or short abstract (up to ~2,000 characters) |
 | Field / subfield | Optional | Helps query planning; inferred if missing |
 | Known related papers | Optional | DOIs, arXiv IDs or titles the user already knows. Used as seeds and never counted as Eureka's own discoveries |
-| Research document | Optional (§2.4; `.md`/`.txt` since step 6a, PDF with 6b) | The user's own draft, proposal or paper (text or Markdown first, then PDF). Read in full and used instead of the short idea text; treated by the rules in §2.4 |
+| Research document | Optional (§2.4; `.md`/`.txt` since step 6a, `.pdf` since 6b) | The user's own draft, proposal or paper (text or Markdown first, then PDF). Read in full and used instead of the short idea text; treated by the rules in §2.4 |
 | Complexity level | Yes (default: Intermediate) | See section 3 |
 | Constraints profile | Yes (with defaults) | See section 4 |
 
@@ -51,7 +51,7 @@ Along with that, it asks **at most 3 clarifying questions**. The user can answer
 
 **One exception to skipping:** if the Idea Analyst had to *propose* a key facet (the user's text didn't state it, e.g. no method for "make LLMs better at low-resource languages"), the user must confirm or edit the reading explicitly before anything is evaluated. Otherwise Eureka could end up judging an idea the user never had.
 
-### 2.4 The user's research document (Mode 1; as built in step 6a.1: text and Markdown)
+### 2.4 The user's research document (Mode 1; built in steps 6a-6b: text, Markdown and PDF)
 
 A real research idea rarely fits in 2,000 characters. The user may upload their own draft, proposal or paper, and Eureka evaluates that. No new agent is needed: the existing agents get a new input or task.
 
@@ -76,7 +76,7 @@ A real research idea rarely fits in 2,000 characters. The user may upload their 
 - The document's **method, data and plan sections** reach Value & Feasibility (`<user_plan>`; prompt `value_feasibility` v2) as the user's statement, never as evidence.
 - The Mode 1 report adds **"Your document"** (file, sections, quote checks, where each facet came from) and **"Your document's claims vs the literature"** (the claims, the novelty verdict, the relevant Skeptic challenges, and the papers set aside as your own work).
 
-PDF is step 6b.
+*As built (step 6b):* `--idea-file draft.pdf` works too, with up to 50 pages and the same 60,000 characters. The text is extracted page by page with **pypdf** (BSD license; the one dependency this feature added). Page-number lines are dropped, words broken across lines are joined, and headings are detected (numbered like "2. Related work", common section names, short all-capitals lines). The reference list is dropped, and the text is then split into sections like Markdown. A scanned PDF without text, a password-protected PDF or a damaged file is refused with a clear message. DOCX could come later the same way.
 
 Cost: reading the document is about 5–15 cents (Opus, depending on length), and the excerpts add a few cents per agent. A full evaluation stays about $3–5.
 

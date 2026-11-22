@@ -1,8 +1,12 @@
 """The user's own research document in Mode 1 (doc 02 §2.4; step 6a.1): from a file to the structured idea.
 
-prepare_document(path) (code): checks the format (.md / .txt; PDF comes with step 6b) and the size
-  (MAX_DOCUMENT_CHARS), and splits the text into sections D1, D2, ... by its headings (Markdown `#`
-  headings; for plain text, by blank-line paragraphs), long sections in parts.
+prepare_document(path) (code): checks the format (.md / .txt, and .pdf since step 6b) and the size
+  (MAX_DOCUMENT_CHARS; MAX_PDF_PAGES), and splits the text into sections D1, D2, ... by its headings
+  (Markdown `#` headings; for plain text, by blank-line paragraphs), long sections in parts. A PDF's text is
+  extracted page by page (pypdf), cleaned (page-number lines dropped, hyphenated line breaks joined), its
+  headings detected (numbered, common section names, short all-capitals lines) and its reference list
+  dropped; then it is split like Markdown. A PDF without extractable text (a scan), a password-protected
+  or a damaged one is refused with a clear message.
 attach_document(session, investigation_id, prepared, consent_at=...): stores it privately with the
   investigation (UserDocument; never in the shared library). Consent is required: nothing is sent to Claude
   without it.
@@ -20,6 +24,7 @@ If a call fails, the investigation fails (understanding is mandatory) and the ca
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
 import re
 import uuid
@@ -46,7 +51,14 @@ from src.llm import LlmError
 logger = logging.getLogger(__name__)
 
 MAX_DOCUMENT_CHARS = 60_000  # about 15-20 pages; doc 02 §2.4
-MEDIA_TYPES = {".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain"}
+MEDIA_TYPES = {".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain", ".pdf": "application/pdf"}
+MAX_PDF_PAGES = 50
+_PAGE_NUMBER = re.compile(r"^\s*(page\s*)?\d{1,4}(\s*(/|of)\s*\d{1,4})?\s*$", re.I)
+_SECTION_NAMES = (r"abstract|introduction|background|related work|prior work|motivation|method|methods|methodology|"
+                  r"approach|experiments?|experimental setup|setup|evaluation|results|discussion|analysis|"
+                  r"conclusions?|limitations|future work|data|datasets?|plan|timeline|work plan|acknowledg(e)?ments?")
+_PDF_HEADING = re.compile(rf"^((\d+(\.\d+)*\.?|[IVX]+\.)\s+[A-Z][^.!?]{{1,80}}|({_SECTION_NAMES})\s*:?)$", re.I)
+_REFERENCES = re.compile(r"^((\d+\.?|[IVX]+\.)\s+)?(references|bibliography|works cited)\s*:?$", re.I)
 SECTION_CHARS = 3_000
 _HEADING = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$")
 
@@ -109,15 +121,84 @@ def split_sections(text: str, media_type: str) -> list[dict[str, str]]:
     return [{"label": f"D{n}", "heading": heading, "text": body} for n, (heading, body) in enumerate(raw, start=1)]
 
 
+def _is_heading(line: str) -> bool:
+    words = line.split()
+    if not words or len(line) > 90 or line.endswith((".", ",", ";")):
+        return False
+    if _PDF_HEADING.match(line):
+        return True
+    letters = [c for c in line if c.isalpha()]
+    return len(words) <= 6 and len(letters) >= 4 and all(c.isupper() for c in letters)  # e.g. "RELATED WORK"
+
+
+def pdf_to_markdown(pages: list[str]) -> str:
+    """A PDF's page texts as Markdown-like text: headings as `#` lines, paragraphs joined, page numbers and the
+    reference list dropped."""
+    lines: list[str] = []
+    for page in pages:
+        for raw in page.splitlines():
+            line = raw.strip()
+            if _PAGE_NUMBER.match(line):
+                continue
+            lines.append(line)
+    out: list[str] = []
+    paragraph = ""
+    for line in lines:
+        if not line:
+            if paragraph:
+                out.append(paragraph)
+                paragraph = ""
+            continue
+        if _REFERENCES.match(line):
+            break  # the reference list: long, and not needed to understand the idea
+        if _is_heading(line):
+            if paragraph:
+                out.append(paragraph)
+                paragraph = ""
+            out.append(f"# {line}")
+            continue
+        if paragraph.endswith("-") and line[:1].islower():
+            paragraph = paragraph[:-1] + line  # a word broken across lines
+        else:
+            paragraph = f"{paragraph} {line}".strip()
+    if paragraph:
+        out.append(paragraph)
+    return "\n\n".join(out)
+
+
+def extract_pdf(name: str, data: bytes) -> str:
+    from pypdf import PdfReader
+    from pypdf.errors import PdfReadError
+
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        if reader.is_encrypted and not reader.decrypt(""):
+            raise DocumentError(f"{name} is password-protected: save an unprotected copy and try again.")
+        if len(reader.pages) > MAX_PDF_PAGES:
+            raise DocumentError(f"{name} has {len(reader.pages)} pages; the limit is {MAX_PDF_PAGES}.")
+        pages = [page.extract_text() or "" for page in reader.pages]
+    except DocumentError:
+        raise
+    except (PdfReadError, ValueError, KeyError, TypeError) as error:
+        raise DocumentError(f"{name} can't be read as a PDF ({type(error).__name__}).") from None
+    if sum(len(p.strip()) for p in pages) < 200:
+        raise DocumentError(f"{name} has no extractable text (a scanned PDF?): export it with text, or paste the "
+                            "text into a .md file.")
+    return pdf_to_markdown(pages)
+
+
 def prepare_document(path: Path) -> PreparedDocument:
     media_type = MEDIA_TYPES.get(path.suffix.lower())
     if media_type is None:
-        raise DocumentError(f"{path.name}: only .md and .txt files are supported for now (PDF comes later).")
+        raise DocumentError(f"{path.name}: only .md, .txt and .pdf files are supported.")
     data = path.read_bytes()
-    try:
-        text = data.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        raise DocumentError(f"{path.name} isn't UTF-8 text.") from None
+    if media_type == "application/pdf":
+        text = extract_pdf(path.name, data)
+    else:
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            raise DocumentError(f"{path.name} isn't UTF-8 text.") from None
     text = text.replace("\r\n", "\n").strip()
     if not text:
         raise DocumentError(f"{path.name} is empty.")
@@ -126,7 +207,8 @@ def prepare_document(path: Path) -> PreparedDocument:
                             "(about 15-20 pages). Shorten it, e.g. to the abstract, introduction and method.")
     return PreparedDocument(file_name=path.name, media_type=media_type, size_bytes=len(data),
                             sha256=hashlib.sha256(data).hexdigest(), text=text,
-                            sections=split_sections(text, media_type))
+                            sections=split_sections(text, "text/markdown" if media_type == "application/pdf"
+                                                    else media_type))
 
 
 async def attach_document(session, investigation_id: uuid.UUID, prepared: PreparedDocument, *,
