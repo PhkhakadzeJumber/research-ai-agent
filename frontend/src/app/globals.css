@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+/* Eureka's design tokens: the variables of the Figma file "Eureka: website UI" (collection "Eureka"), so classes like
+   bg-paper, text-ink-2, border-line and rounded-lg match the design exactly. Fonts come from next/font (layout.tsx). */
+@theme {
+  --color-paper: #f6f4ee;
+  --color-surface: #ffffff;
+  --color-surface-muted: #efece4;
+  --color-ink: #15161a;
+  --color-ink-2: #5a5d66;
+  --color-ink-3: #8b8e96;
+  --color-line: #e3dfd5;
+  --color-accent: #f5b83d;
+  --color-accent-soft: #fcefcf;
+  --color-green: #1e8e5e;
+  --color-green-soft: #ddf2e8;
+  --color-amber: #b9760f;
+  --color-amber-soft: #fbebcf;
+  --color-red: #c9443a;
+  --color-red-soft: #f8deda;
+  --color-indigo: #4f46e5;
+  --color-indigo-soft: #e5e3fb;
+  --color-violet: #7c4ddb;
+  --color-violet-soft: #ece4fb;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  --font-serif: var(--font-instrument-serif), Georgia, serif;
+  --font-sans: var(--font-dm-sans), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+}
+
+/* Text styles from Figma (Display / Heading / Body / Label). */
+@utility display-xl {
+  font-family: var(--font-serif);
+  font-size: 72px;
+  line-height: 76px;
+}
+@utility display-l {
+  font-family: var(--font-serif);
+  font-size: 48px;
+  line-height: 52px;
+}
+@utility display-m {
+  font-family: var(--font-serif);
+  font-size: 34px;
+  line-height: 40px;
+}
+@utility heading-m {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 28px;
+}
+@utility heading-s {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 16px;
+  line-height: 22px;
+}
+@utility body-m {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 23px;
+}
+@utility body-s {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 19px;
+}
+@utility label-mono {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 14px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+@utility label-s {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* Visible keyboard focus everywhere (the design has none: this is the accessible default). */
+:focus-visible {
+  outline: 2px solid var(--color-indigo);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .display-xl {
+    font-size: 44px;
+    line-height: 48px;
+  }
+  .display-l {
+    font-size: 34px;
+    line-height: 40px;
+  }
+}

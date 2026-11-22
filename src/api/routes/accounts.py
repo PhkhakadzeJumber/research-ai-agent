@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from fastapi import APIRouter, Request, Response
+from sqlalchemy import func, select
 
 from src.api.auth import (
     COOKIE_NAME,
@@ -29,7 +30,7 @@ from src.api.schemas.accounts import (
     SignupRequest,
 )
 from src.api.schemas.common import ErrorResponse
-from src.db.models import User
+from src.db.models import Investigation, LlmCall, User
 from src.db.repositories.users import (
     EmailTaken,
     create_session,
@@ -44,8 +45,14 @@ router = APIRouter(tags=["accounts"])
 AUTH_ERRORS = {code: {"model": ErrorResponse} for code in (401, 409, 429)}
 
 
-def me(user: User) -> Me:
-    return Me(id=user.id, name=user.name, email=user.email, created_at=user.created_at)
+async def me(session, user: User) -> Me:
+    month_start = now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)  # Tbilisi time
+    spent = (await session.execute(
+        select(func.coalesce(func.sum(LlmCall.cost_usd), 0))
+        .join(Investigation, Investigation.id == LlmCall.investigation_id)
+        .where(Investigation.user_id == user.id, LlmCall.created_at >= month_start))).scalar_one()
+    return Me(id=user.id, name=user.name, email=user.email, created_at=user.created_at,
+              spent_this_month_usd=float(spent))
 
 
 async def log_in(session, request: Request, response: Response, user: User) -> None:
@@ -65,7 +72,7 @@ async def signup(body: SignupRequest, request: Request, response: Response, sess
     except EmailTaken:
         raise ApiError(409, "email_taken", "An account with this email already exists: log in instead.") from None
     await log_in(session, request, response, user)
-    return me(user)
+    return await me(session, user)
 
 
 @router.post("/auth/login", response_model=Me, responses=AUTH_ERRORS)
@@ -81,7 +88,7 @@ async def login(body: LoginRequest, request: Request, response: Response, sessio
         raise ApiError(401, "wrong_login", "The email or the password is wrong.")
     limiter.succeeded(keys[0])
     await log_in(session, request, response, user)
-    return me(user)
+    return await me(session, user)
 
 
 @router.post("/auth/logout", status_code=204)
@@ -96,8 +103,8 @@ async def logout(request: Request, session: SessionDep) -> Response:
 
 
 @router.get("/auth/me", response_model=Me, responses=AUTH_ERRORS)
-async def get_me(user: CurrentUser) -> Me:
-    return me(user)
+async def get_me(user: CurrentUser, session: SessionDep) -> Me:
+    return await me(session, user)
 
 
 @router.post("/auth/password", status_code=204, responses=AUTH_ERRORS)

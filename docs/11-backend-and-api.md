@@ -131,7 +131,7 @@ All routes are under `/api/v1`. They require authentication, except health check
 | POST | `/auth/signup` ✅ | `{name, email, password}` (10+ characters); creates the account and logs in; `409` if the email has an account |
 | POST | `/auth/login` ✅ | `{email, password}`; the same `401` for a wrong email or password; 5 failures in 15 minutes (per email or address) give `429` |
 | POST | `/auth/logout` ✅ | Ends the session (its cookie stops working at once) |
-| GET | `/auth/me` ✅ | `{id, name, email, created_at}` |
+| GET | `/auth/me` ✅ | `{id, name, email, created_at, spent_this_month_usd}` (the spend: your investigations' Claude calls since the 1st of the month, Tbilisi time; the top nav's chip) |
 | POST | `/auth/password` ✅ | `{current, new}`; logs out your other sessions |
 
 Every other route needs a login (`401 not_logged_in`). Someone else's investigation, idea or export is `404`, exactly like one that doesn't exist. The paper library is shared, but its counts and "used in" only ever show your own investigations. Runs started from the command line have no owner until `python -m scripts.users claim <email>`.

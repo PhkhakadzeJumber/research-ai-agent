@@ -58,6 +58,8 @@ class Me(ApiModel):
     name: str | None
     email: str
     created_at: Timestamp
+    spent_this_month_usd: float
+    """What your investigations' Claude calls cost since the 1st of this month (Tbilisi time): the nav's chip."""
 
 
 AcademicLevel = Literal["undergraduate", "master", "phd", "researcher"]

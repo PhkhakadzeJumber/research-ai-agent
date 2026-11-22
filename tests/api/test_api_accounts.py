@@ -14,7 +14,7 @@ from scripts.users import parse_args, run as users_command
 from src.api.auth import COOKIE_NAME, token_hash
 from src.ai.workflows.value_feasibility import available_weeks
 from src.api.schemas.accounts import profile_constraints
-from src.db.models import Candidate, Investigation, User, UserSession
+from src.db.models import Candidate, Investigation, LlmCall, User, UserSession
 from src.timeutil import now
 from tests.api.conftest import TESTER, logged_in, make_client
 from tests.db.test_clarification_workflow import sessions_on
@@ -223,3 +223,18 @@ async def test_the_users_command(db_session, capsys):
     await users_command(parse_args(["list"]), database)
     out = capsys.readouterr().out
     assert "me@example.com  Me  | 1 investigation(s)" in out and "Without an owner: 0" in out
+
+
+async def test_spent_this_month_counts_only_your_calls_this_month(client, db_session, user):
+    assert (await client.get("/api/v1/auth/me")).json()["spent_this_month_usd"] == 0
+    investigation_id = await finalist_investigation(db_session)
+    await client.get("/api/v1/investigations")  # the tester claims the new (unowned) investigation
+    calls = (await db_session.execute(select(LlmCall).where(LlmCall.investigation_id == investigation_id))).scalars()
+    calls = list(calls)
+    total = sum(float(c.cost_usd or 0) for c in calls)
+    assert round((await client.get("/api/v1/auth/me")).json()["spent_this_month_usd"], 6) == round(total, 6)
+
+    calls[0].created_at = now() - timedelta(days=40)  # last month: not counted
+    await db_session.flush()
+    spent = (await client.get("/api/v1/auth/me")).json()["spent_this_month_usd"]
+    assert round(spent, 6) == round(total - float(calls[0].cost_usd or 0), 6)

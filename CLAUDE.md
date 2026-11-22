@@ -47,9 +47,10 @@ pytest                                       # default run: no network, no paid 
 pytest -m live                               # calls Claude/real APIs: costs money, ask first
 ruff check . && ruff format --check .        # (planned)
 
-# Frontend
-cd frontend && npm install && npm run dev    # (planned) http://localhost:3000
-cd frontend && npm run lint && npm run build # (planned)
+# Frontend (Next.js; the backend must be running: /api/* is forwarded to BACKEND_URL, default http://127.0.0.1:8000)
+cd frontend && npm install && npm run dev    # http://localhost:3000
+cd frontend && npm run lint && npm run typecheck && npm test && npm run build
+python -m scripts.openapi && (cd frontend && npm run api:types)  # after changing the API: regenerate the frontend's types
 ```
 
 ## Conventions

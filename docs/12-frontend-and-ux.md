@@ -10,9 +10,11 @@
 
 ## 2. Technology
 
-React + TypeScript + Vite, Tailwind CSS + a component library (e.g. shadcn/ui), TanStack Query for data fetching, the native EventSource API for SSE, Cytoscape.js for the evidence graph, and a simple chart library for funnels and trends.
+**Built (step 10):** Next.js (App Router) + TypeScript, Tailwind CSS with the Figma variables as design tokens, TanStack Query for data fetching, the native EventSource API for the live progress stream, types generated from the API's OpenAPI description (`openapi-typescript`), Vitest + Testing Library for the frontend's logic. No component library: the design's components (buttons, pills, cards, the nav) are hand-written to match Figma. Fonts are self-hosted by `next/font`.
 
-Alternatives: Next.js (server rendering isn't needed); Streamlit (fastest to build, but looks like a demo and handles a multi-view workspace poorly). **Solo decision:** React gives the best workspace, but costs the most time. If you're not already fluent in React, start with Streamlit for the MVP (it's also cut line 4 in doc 15) and move to React later. The backend API is the same either way, so the switch doesn't touch the agents.
+**Why Next.js, not plain React + Vite:** Next forwards `/api/*` to the backend, so the browser only ever talks to one site and the login cookie (doc 11 §7) stays first-party; a cookie from another domain would be blocked by browsers. It also deploys to Vercel as planned (doc 14). Pages render in the browser (the data needs a login), so server rendering itself isn't used much. Checked in step 10a: the SSE stream passes through Next's forwarding as it happens.
+
+Earlier alternatives: Streamlit (fastest, but looks like a demo and handles a multi-view workspace poorly).
 
 ## 3. Screens
 
