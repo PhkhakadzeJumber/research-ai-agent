@@ -28,7 +28,7 @@ from src.ai.evidence.ranking import Standing, ranking_key
 from src.ai.workflows.concluding import triage_candidate
 from src.ai.workflows.evaluation import Sessions, begin_evaluation
 from src.ai.workflows.routing import FULL_LIMIT, full_evaluations_done
-from src.ai.workflows.runner import EvaluationModels, Report, run_evaluation
+from src.ai.workflows.runner import EvaluationModels, Report, ShouldStop, run_evaluation
 from src.ai.workflows.states import CandidateStatus, Stage
 from src.ai.workflows.transitions import StaleState, advance_investigation, set_candidate_status, start_evaluation
 from src.db.models import (
@@ -136,6 +136,7 @@ async def full_evaluation_step(
     search_factory=None,
     report: Report | None = None,
     on_candidate: Callable[[Candidate, int, int], Awaitable[None]] | None = None,
+    should_stop: ShouldStop | None = None,
 ) -> FullOutcome:
     outcome = FullOutcome()
     async with sessions() as session:
@@ -159,7 +160,7 @@ async def full_evaluation_step(
         else:
             evaluation_id = full.id
         result = await run_evaluation(sessions, evaluation_id, investigation_id, models=models,
-                                      search_factory=search_factory, report=report)
+                                      search_factory=search_factory, report=report, should_stop=should_stop)
         if result.ended not in ("done", "partial"):
             outcome.stopped, outcome.stopped_at = result.ended, f"{candidate.title}: {result.step}"
             return outcome

@@ -16,6 +16,7 @@ from decimal import Decimal
 from src.db.models import Investigation
 
 DEFAULT_COST_CAP_USD = Decimal("5")  # doc 05 §6, Mode 1
+DEFAULT_DISCOVER_CAP_USD = 12.0  # doc 05 §6, Mode 2 (moved here from scripts/discover.py in step 9b, for the API)
 
 
 def cost_cap(investigation: Investigation) -> Decimal:

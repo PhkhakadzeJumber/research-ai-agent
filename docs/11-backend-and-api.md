@@ -74,19 +74,21 @@ Folders are created when their first file is written, not in advance.
 
 All routes are under `/api/v1`. They require authentication, except health checks (from step 9d; until then the API runs on your own machine only).
 
-**Built so far (step 9a):** the read-only routes marked ✅ below, in `src/api/`. Every response has its own Pydantic model (`src/api/schemas/`); timestamps are ISO with the +04:00 offset; every category comes with its label (`{"category": "potential_opportunity", "label": "Potential opportunity"}`); lists are `{"items": [...], "total": N}`; errors are `{"error": {"code", "message", "request_id"}}`, and every response carries an `X-Request-ID` header.
+**Built so far (steps 9a-9b):** the routes marked ✅ below, in `src/api/`. Every response has its own Pydantic model (`src/api/schemas/`); timestamps are ISO with the +04:00 offset; every category comes with its label (`{"category": "potential_opportunity", "label": "Potential opportunity"}`); lists are `{"items": [...], "total": N}`; errors are `{"error": {"code", "message", "request_id"}}`, and every response carries an `X-Request-ID` header.
 
 ### 3.1 Investigations (both modes)
 
 | Method | Route | Purpose |
 |---|---|---|
-| POST | `/investigations` | Create. Body: mode, input (idea or field brief inputs), complexity, constraints (or "use my profile"). Returns the investigation ID |
+| POST | `/investigations` ✅ | Create (JSON). Mode 1: idea, field, seed papers, complexity, constraints, budget. Mode 2: field, interests, technologies, domain, exclusions, count, complexity, constraints, budget, light-evaluation cap. Eureka's first reading runs in the background; `202` with the investigation |
+| POST | `/investigations/document` ✅ | Create Mode 1 from the user's own document (multipart upload: .pdf/.md/.txt, `consent=true` required, optional published/DOI/arXiv). Nothing is stored without consent |
 | GET | `/investigations` ✅ | List the user's investigations |
 | GET | `/investigations/{id}` ✅ | Status, stage, mode, summary, budgets and counters |
 | GET | `/investigations/{id}/clarification` ✅ | The structured reading (facets or field brief) + questions |
-| POST | `/investigations/{id}/clarification` | Answers / edits / skip → starts the main run |
+| POST | `/investigations/{id}/clarification` ✅ | Answers (null skips), facet edits (Mode 1) or subtopics to remove (Mode 2), `confirm: true` → starts the main run in the background |
 | GET | `/investigations/{id}/events` | **SSE** stream of progress events |
-| POST | `/investigations/{id}/cancel` | Cancel (stops at the next stage boundary) |
+| POST | `/investigations/{id}/stop` ✅ | Stop at the next step boundary. A pause, not a final cancel: nothing is lost and it can be resumed |
+| POST | `/investigations/{id}/resume` ✅ | Continue where it stopped (after Stop, the budget, an account refusal or a server restart), optionally with a new budget |
 | GET | `/investigations/{id}/coverage` | Investigation-level coverage summary |
 | GET | `/investigations/{id}/results` ✅ | The ranked results: finalists (with why each comes before the next), ideas that passed screening, and everything set aside with its reason |
 | GET | `/investigations/{id}/cost` ✅ | Cost per agent role and in total, against the budget |
@@ -106,7 +108,7 @@ All routes are under `/api/v1`. They require authentication, except health check
 | GET | `/candidates/compare?ids=…` | Side-by-side comparison data |
 | POST | `/candidates/{cid}/steer` | Mode 2 steering: more like this / simpler / exclude X / combine with Y → a Scout task |
 | POST | `/candidates/{cid}/deep-dive` | Run Workflow A (full evaluation) on this candidate |
-| POST | `/candidates/{cid}/proposal` | Generate the research package (async; progress over SSE) |
+| POST | `/candidates/{cid}/proposal` ✅ | Generate the research package in the background (a new revision each time) |
 | GET | `/candidates/{cid}/proposal` ✅ | Get the research package |
 | GET | `/candidates/{cid}/graph` | Evidence graph nodes and edges |
 
@@ -116,8 +118,8 @@ All routes are under `/api/v1`. They require authentication, except health check
 |---|---|---|
 | GET | `/papers` ✅ | The shared paper library across investigations: search titles and abstracts (`q`), filter read closely / found in your investigations / year. (Per-investigation filtering can come later) |
 | GET | `/papers/{pid}` ✅ | Metadata + analysis + quotes used |
-| GET | `/investigations/{id}/report?format=md\|pdf` | Investigation report |
-| GET | `/candidates/{cid}/proposal/export?format=md\|pdf\|docx` | Package export (docx later) |
+| GET | `/investigations/{id}/report?format=md` ✅ | Investigation report as Markdown (PDF later) |
+| GET | `/candidates/{cid}/proposal/export?format=md` ✅ | Package export as Markdown (PDF, docx later) |
 | POST | `/investigations/{id}/messages` | "Ask about this investigation" (optional feature) |
 | GET/PUT | `/profile` | Constraints profile |
 | GET | `/health`, `/ready` | Health checks |
@@ -137,9 +139,11 @@ Events are also stored, so a reconnecting client can replay them.
 
 ## 4. Background execution
 
-- Creating or clarifying an investigation starts the orchestrator as a background task, and the request returns immediately.
-- The orchestrator persists its state after each stage. On startup, the service looks for investigations in "running" status and resumes them.
-- Concurrency limits: a maximum number of concurrent investigations per instance and per user, plus global semaphores for LLM calls and for each source.
+- Creating, clarifying, resuming or writing a package starts a background task in the API process (`src/api/runs.py`), and the request returns `202` at once. The investigation's `run` field says `running` / `stopping` / `idle`.
+- The run control is the driver (`src/ai/workflows/driver.py`, step 9b.1): it carries an investigation from its stage until it needs the user, ends, runs out of budget, is refused by Anthropic or is asked to stop. The command-line scripts use the same driver and print its events.
+- State is saved after every step. **Runs are not resumed automatically when the server starts** (a restart would quietly spend money): an interrupted run shows as idle and the user resumes it (`POST /resume`).
+- Stop is a pause (checked before every step); the final `cancelled` status is not used by the API.
+- Limits: one run per investigation at a time (`409` otherwise); at most 2 runs at once per process (the rest wait); a budget ceiling per investigation (`EUREKA_MAX_BUDGET_USD`, default $20).
 - **Cloud Run note:** background work after the response needs CPU that stays allocated (instance-based billing or "CPU always allocated") and a minimum instance count of 1 during demos. Otherwise background tasks get throttled. Moving runs to Cloud Run Jobs/Tasks later removes this constraint.
 
 ## 5. Error handling summary

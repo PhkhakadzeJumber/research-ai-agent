@@ -296,11 +296,17 @@ def get_role_llm_settings(role: str) -> RoleLlmSettings:
 DEFAULT_FRONTEND_ORIGIN = "http://localhost:3000"  # the Next.js dev server
 
 
+DEFAULT_MAX_BUDGET_USD = 20.0
+
+
 @dataclass(frozen=True)
 class ApiSettings:
     frontend_origins: tuple[str, ...]
     """Origins the browser may call the API from (CORS), from FRONTEND_ORIGIN: one URL, or several separated by
     commas. Default: the local Next.js dev server."""
+
+    max_budget_usd: float = DEFAULT_MAX_BUDGET_USD
+    """The most one investigation may be given to spend (EUREKA_MAX_BUDGET_USD), so no request can ask for more."""
 
 
 def load_api_settings(environ: Mapping[str, str]) -> ApiSettings:
@@ -310,7 +316,14 @@ def load_api_settings(environ: Mapping[str, str]) -> ApiSettings:
     if bad or not origins:
         raise ConfigError(f"FRONTEND_ORIGIN must be http(s) URLs separated by commas, e.g. {DEFAULT_FRONTEND_ORIGIN}; "
                           f"got {', '.join(bad) or 'nothing'}.")
-    return ApiSettings(frontend_origins=origins)
+    raw_max = environ.get("EUREKA_MAX_BUDGET_USD", "").strip() or str(DEFAULT_MAX_BUDGET_USD)
+    try:
+        max_budget = float(raw_max)
+    except ValueError:
+        max_budget = 0.0
+    if max_budget <= 0:
+        raise ConfigError(f"EUREKA_MAX_BUDGET_USD must be a number of dollars above 0, e.g. 20; got {raw_max!r}.")
+    return ApiSettings(frontend_origins=origins, max_budget_usd=max_budget)
 
 
 @lru_cache(maxsize=1)

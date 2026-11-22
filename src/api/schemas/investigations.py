@@ -19,6 +19,11 @@ class InvestigationSummary(ApiModel):
     """One line for the list, e.g. "9 ideas · 1 finalist" or "your document · draft.pdf"."""
     status: str
     stage: str
+    run: Literal["running", "stopping", "idle"]
+    """Whether a background run is working on it now (stopping: asked to stop at the next step boundary). An
+    unfinished investigation that is idle was stopped or interrupted: it can be resumed."""
+    waiting_for: Literal["clarification"] | None
+    """What the user must do before it can go on (answer the clarification), if anything."""
     cost_usd: float
     budget_usd: float
     created_at: Timestamp

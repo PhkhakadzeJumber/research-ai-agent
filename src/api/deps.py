@@ -13,6 +13,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.runs import Runs
 from src.db.session import Database
 
 
@@ -25,5 +26,11 @@ async def get_session(database: Annotated[Database, Depends(get_database)]) -> A
         yield session
 
 
+def get_runs(request: Request) -> Runs:
+    """The background runs (src/api/runs.py), one manager per app."""
+    return request.app.state.runs
+
+
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 DatabaseDep = Annotated[Database, Depends(get_database)]
+RunsDep = Annotated[Runs, Depends(get_runs)]

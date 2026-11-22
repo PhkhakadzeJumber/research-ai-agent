@@ -45,6 +45,8 @@ PAID_STEPS = {EvaluationStep.PLANNING_QUERIES, EvaluationStep.SCREENING, Evaluat
               EvaluationStep.ASSESSING_VALUE_FEASIBILITY}
 
 Report = Callable[[str, str, Any], Awaitable[None]]
+ShouldStop = Callable[[], bool]
+"""Asked before every step: True stops the run there, unchanged, so it can be resumed (the API's Stop, step 9b)."""
 
 
 @dataclass
@@ -70,7 +72,8 @@ class EvaluationModels:
 class RunResult:
     ended: str
     """done / partial (the evaluation ended), failed, retrieval_failed, budget (stopped before a paid step), or
-    account_refused (Anthropic refused the account: the step was left as it was, to resume later)."""
+    account_refused (Anthropic refused the account: the step was left as it was, to resume later), or stopped
+    (should_stop asked for it before the step began; resumable the same way)."""
     step: str
     """The step it ended or stopped at."""
 
@@ -87,6 +90,7 @@ async def run_evaluation(
     models: EvaluationModels | None = None,
     search_factory=None,
     report: Report | None = None,
+    should_stop: ShouldStop | None = None,
 ) -> RunResult:
     models = models or EvaluationModels()
     report = report or _no_report
@@ -100,6 +104,8 @@ async def run_evaluation(
             return RunResult("failed", step)
         if status != "running":
             return RunResult(status, step)
+        if should_stop is not None and should_stop():
+            return RunResult("stopped", step)
         if step in PAID_STEPS:
             async with sessions() as session:
                 if not budget_left(await session.get(Investigation, investigation_id)):

@@ -15,6 +15,7 @@ dependencies = [
     "asyncpg>=0.29",            # async PostgreSQL driver
     "fastapi>=0.160,<1",        # the HTTP API (src/api; step 9)
     "uvicorn>=0.50,<1",         # the server that runs the API
+    "python-multipart>=0.0.20", # file uploads in the API (POST /investigations/document)
     "pgvector>=0.3",            # vector column type for SQLAlchemy (embeddings)
     "pydantic>=2.7,<3",         # agent output shapes (src/ai/schemas), validated on every LLM response
     "sqlalchemy[asyncio]>=2.0,<3",  # database toolkit: tables, queries, sessions

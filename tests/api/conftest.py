@@ -14,7 +14,12 @@ import pytest
 
 from src.api.deps import get_database, get_session
 from src.api.main import create_app
+from src.api.runs import RunModels, Runs
+from src.config import RoleLlmSettings
 from tests.db.conftest import db_session, test_database_url  # noqa: F401  (database fixtures, shared)
+from tests.db.test_clarification_workflow import sessions_on
+
+IDEA_SETTINGS = RoleLlmSettings(role="idea_analyst", model="claude-opus-5-5", effort="medium", max_tokens=16000)
 
 
 class FakeDatabase:
@@ -59,3 +64,32 @@ async def client(app, db_session) -> AsyncIterator[httpx.AsyncClient]:  # noqa: 
     app.dependency_overrides[get_session] = session
     async with make_client(app) as client:
         yield client
+
+
+class ManualRuns(Runs):
+    """Runs that wait until the test says so (await runs.drain()), instead of starting at once: the test's one
+    database session is then never used by a request and a run at the same time."""
+
+    def __init__(self, sessions, models: RunModels) -> None:
+        super().__init__(sessions, models=models)
+        self.queued: list = []
+
+    def _launch(self, run) -> None:
+        self.queued.append(run)
+
+    async def drain(self) -> None:
+        while self.queued:
+            await self.queued.pop(0)
+
+    def discard(self) -> None:
+        for run in self.queued:
+            run.close()
+
+
+@pytest.fixture
+def runs(app, db_session):  # noqa: F811  (the shared fixture)
+    """The app's background runs on the test's session, with fake Claude (set runs.models in a test as needed)."""
+    manual = ManualRuns(sessions_on(db_session), RunModels(idea_settings=IDEA_SETTINGS))
+    app.state.runs = manual
+    yield manual
+    manual.discard()

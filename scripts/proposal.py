@@ -23,6 +23,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from src.ai.reporting import package_markdown
 from src.ai.workflows.proposal import NoCandidateForProposal, package_sections, write_proposal
 from src.ai.workflows.transitions import StaleState
 from src.config import ConfigError
@@ -31,21 +32,7 @@ from src.db.session import Database
 from src.llm import LlmError
 
 
-def to_markdown(candidate: Candidate, package: ResearchPackage, sections: list[dict]) -> str:
-    lines = [f"# Research package: {sections[0]['items'][0]}", "",
-             f"Candidate `{candidate.id}` | package revision {package.revision} | grounded in evaluation "
-             f"`{package.evaluation_id}` | {package.prompt_version}"]
-    checks = package.sections.get("checks") or {}
-    if checks.get("retagged") or checks.get("dropped_labels"):
-        lines.append(f"Code's checks: {checks.get('retagged', 0)} statement(s) re-tagged 'to verify' (no verified "
-                     f"source), {checks.get('dropped_labels', 0)} unknown source label(s) dropped.")
-    for section in sections[1:]:
-        lines += ["", f"## {section['number']}. {section['title']}", f"*{section['status']}*", ""]
-        items = [item for item in section["items"] if item]
-        lines.extend(f"- {item}" for item in items) if items else lines.append("- (nothing here)")
-    lines += ["", "*Statements marked 'to verify' are needed by the plan but not backed by the evidence Eureka found: "
-                  "check them before relying on them.*"]
-    return "\n".join(lines)
+to_markdown = package_markdown  # moved to src/ai/reporting.py in step 9b.1; kept importable here
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

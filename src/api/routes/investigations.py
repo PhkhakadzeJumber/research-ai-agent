@@ -19,8 +19,9 @@ from src.ai.workflows.budget import cost_cap
 from src.ai.workflows.landscape import confirmed_brief
 from src.ai.workflows.ranking import FINALIST_STATUSES, Ranked, ranked_results
 from src.ai.workflows.transitions import StaleState
-from src.api.deps import SessionDep
+from src.api.deps import RunsDep, SessionDep
 from src.api.errors import ApiError, not_found
+from src.api.runs import Runs
 from src.api.schemas.common import ERRORS, Page, labelled
 from src.api.schemas.investigations import (
     CandidateSummary,
@@ -94,10 +95,13 @@ async def describe(session: AsyncSession, investigation: Investigation) -> tuple
     return title, statuses[0][0].replace("_", " ").capitalize() if statuses else "Waiting for confirmation"
 
 
-async def summary_of(session: AsyncSession, investigation: Investigation) -> dict:
+async def summary_of(session: AsyncSession, investigation: Investigation, runs: Runs) -> dict:
     title, summary = await describe(session, investigation)
+    run = runs.state(investigation.id)
+    waiting = "clarification" if investigation.stage == "awaiting_clarification" and run == "idle" else None
     return dict(id=investigation.id, mode=investigation.mode, title=title, summary=summary,
-                status=investigation.status, stage=investigation.stage, cost_usd=float(investigation.cost_usd or 0),
+                status=investigation.status, stage=investigation.stage, run=run, waiting_for=waiting,
+                cost_usd=float(investigation.cost_usd or 0),
                 budget_usd=float(cost_cap(investigation)), created_at=investigation.created_at,
                 updated_at=investigation.updated_at)
 
@@ -105,6 +109,7 @@ async def summary_of(session: AsyncSession, investigation: Investigation) -> dic
 @router.get("", response_model=Page[InvestigationSummary])
 async def list_investigations(
     session: SessionDep,
+    runs: RunsDep,
     status: str | None = None,
     mode: Literal["evaluate", "discover"] | None = None,
     limit: int = Query(20, ge=1, le=100),
@@ -115,11 +120,12 @@ async def list_investigations(
     total = (await session.execute(select(func.count()).select_from(Investigation).where(*where))).scalar_one()
     rows = (await session.execute(select(Investigation).where(*where).order_by(Investigation.updated_at.desc())
                                   .limit(limit).offset(offset))).scalars().all()
-    return Page(items=[InvestigationSummary(**await summary_of(session, i)) for i in rows], total=total)
+    return Page(items=[InvestigationSummary(**await summary_of(session, i, runs)) for i in rows], total=total)
 
 
 @router.get("/{investigation_id}", response_model=InvestigationDetail, responses=ERRORS)
-async def get_investigation_detail(investigation_id: uuid.UUID, session: SessionDep) -> InvestigationDetail:
+async def get_investigation_detail(investigation_id: uuid.UUID, session: SessionDep,
+                                   runs: RunsDep) -> InvestigationDetail:
     investigation = await get_investigation(session, investigation_id)
     document = await find_document(session, investigation_id)
     card = None
@@ -128,7 +134,7 @@ async def get_investigation_detail(investigation_id: uuid.UUID, session: Session
         card = DocumentCard(file_name=document.file_name, media_type=document.media_type,
                             sections=len(document.sections or []), quotes=reading.get("quotes", 0),
                             verified_quotes=reading.get("verified_quotes", 0), published=document.published)
-    return InvestigationDetail(**await summary_of(session, investigation), input=investigation.input or {},
+    return InvestigationDetail(**await summary_of(session, investigation, runs), input=investigation.input or {},
                                complexity=investigation.complexity,
                                constraints=investigation.constraints_snapshot or {},
                                assumptions=[str(a) for a in investigation.assumptions or []], document=card)

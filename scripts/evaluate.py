@@ -63,7 +63,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from src.ai.schemas.structured_idea import StructuredIdeaOutput
-from src.ai.workflows.budget import DEFAULT_COST_CAP_USD, cost_cap, set_cost_cap
+from src.ai.workflows.budget import DEFAULT_COST_CAP_USD, set_cost_cap
 from src.ai.workflows.clarification import (
     ConfirmationRequired,
     NotWaitingForClarification,
@@ -78,18 +78,16 @@ from sqlalchemy import select
 
 from src.ai.evidence.verdicts import LABELS
 from src.ai.schemas.query_plan import QueryPlanOutput
-from src.ai.workflows.evaluation import begin_evaluation, novelty_verdict_for, selected_papers
-from src.ai.workflows.concluding import finish_investigation
-from src.ai.workflows.runner import EvaluationModels, run_evaluation
-from scripts.candidate_loop import ACCOUNT_REFUSED, LoopModels, continue_at
+from src.ai.workflows.evaluation import novelty_verdict_for, selected_papers
+from src.ai.workflows.runner import EvaluationModels
+from scripts.candidate_loop import LoopModels, continue_at, drive
 from src.ai.workflows.states import EvaluationStep, Stage
 from src.ai.workflows.understanding import understand_idea
 from src.ai.workflows.user_document import DocumentError, attach_document, prepare_document, understand_document
 from src.timeutil import now
 from src.config import ConfigError
 from src.db.models import Evaluation, Facet, Investigation
-from src.db.repositories.candidates import investigation_candidates
-from src.db.repositories.evaluations import latest_evaluation, top_hits
+from src.db.repositories.evaluations import top_hits
 from src.db.models.run import COMPLEXITY_LEVELS
 from src.db.repositories.runs import create_investigation
 from src.db.session import Database
@@ -301,52 +299,17 @@ async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read:
                    read_settings=None, read_model=None, novelty_settings=None, novelty_model=None,
                    skeptic_settings=None, skeptic_model=None, value_settings=None, value_model=None,
                    scout_model=None) -> int:
-    """Runs the full evaluation of the investigation's confirmed idea, from wherever it stands."""
-    async with sessions() as session:
-        # this path is the user's own idea (v1); later full evaluations (a refined version or an alternative
-        # that advanced) run in the candidate loop (scripts/candidate_loop.py, step 5.6a)
-        candidates = [c for c in await investigation_candidates(session, investigation_id)
-                      if c.status == "full_evaluating" and c.origin == "user" and c.version == 1]
-        if not candidates:  # e.g. a refined version waiting in the candidate loop
-            return await continue_at(sessions, investigation_id, command="evaluate")
-        candidate_id = candidates[0].id
-        evaluation = await latest_evaluation(session, candidate_id)
-        evaluation_id = evaluation.id if evaluation is not None and evaluation.status == "running" else None
-    if evaluation_id is None:
-        evaluation_id = await begin_evaluation(sessions, candidate_id, depth="full")
-        print(f"\nFull evaluation {evaluation_id} started.")
-
+    """Runs the full evaluation of the investigation's confirmed idea, from wherever it stands, then the
+    candidate loop (refinements, alternatives) until the results are ready: the driver
+    (src/ai/workflows/driver.py) runs it, this prints it."""
     models = EvaluationModels(
         max_read=max_read, settings=settings, model=model, screen_settings=screen_settings, screen_model=screen_model,
         read_settings=read_settings, read_model=read_model, novelty_settings=novelty_settings,
         novelty_model=novelty_model, skeptic_settings=skeptic_settings, skeptic_model=skeptic_model,
         value_settings=value_settings, value_model=value_model)
-
-    async def report(step: str, phase: str, outcome) -> None:
-        if phase == "start":
-            await _report_start(sessions, evaluation_id, step)
-        else:
-            await _report_done(sessions, evaluation_id, investigation_id, step, outcome)
-
-    result = await run_evaluation(sessions, evaluation_id, investigation_id, models=models,
-                                  search_factory=search_factory, report=report)
-    if result.ended == "failed":
-        print(f"\nThe evaluation failed (at {result.step}).")
-        return 1
-    if result.ended == "retrieval_failed":
-        return 1
-    if result.ended == "account_refused":
-        print("\n" + ACCOUNT_REFUSED.format(where=result.step, command="evaluate", investigation_id=investigation_id))
-        return 1
-    if result.ended == "budget":
-        async with sessions() as session:
-            investigation = await session.get(Investigation, investigation_id)
-        print(f"\nBudget used up: ${investigation.cost_usd:.2f} of ${cost_cap(investigation)}. Stopped "
-              f"before {result.step}. Resume with: python -m scripts.evaluate --continue {investigation_id} "
-              "--budget <more>")
-        return 3
-    return await finish(sessions, investigation_id, result.ended,
-                        LoopModels(models, scout_model=scout_model, search_factory=search_factory))
+    return await drive(sessions, investigation_id,
+                       LoopModels(models, scout_model=scout_model, search_factory=search_factory).driver(),
+                       command="evaluate")
 
 
 async def _report_start(sessions: Sessions, evaluation_id: uuid.UUID, step: str) -> None:
@@ -568,28 +531,37 @@ def format_value(outcome) -> str:
     return "\n".join(lines)
 
 
-async def finish(sessions: Sessions, investigation_id: uuid.UUID, evaluation_status: str,
-                 models: LoopModels | None = None) -> int:
-    """After the evaluation: triage, then the router: ranking -> reporting -> results ready, or a refinement
-    carried out by the candidate loop (scripts/candidate_loop.py)."""
-    async with sessions() as session:
-        stage = (await session.get(Investigation, investigation_id)).stage
-    if stage == Stage.FULL_EVALUATION:
-        outcome = await finish_investigation(sessions, investigation_id)
-        decision = outcome.decision
-        print(f"\nTriage: rule {decision.rule_number}: {decision.action} ({decision.reason})")
-        print(f"Your idea's status: {outcome.candidate_status.replace('_', ' ')}"
-              f" | evaluation {evaluation_status}")
-        if outcome.not_executed:
-            print(f"  {outcome.not_executed}")
-        if outcome.route is not None and outcome.route.stage != Stage.RANKING:
-            print(f"\nNext: {outcome.route.stage.replace('_', ' ')} ({outcome.route.reason})")
-            return await continue_at(sessions, investigation_id, models, command="evaluate")
-    async with sessions() as session:
-        cost = (await session.get(Investigation, investigation_id)).cost_usd
-    print(f"\nDone. Total cost: ${cost:.2f}")
-    print(f"Full report: python -m scripts.report {investigation_id} [--out report.md]")
-    return 0
+# --- printing the driver's events for the user's idea (Mode 1) --------------------------------------------
+
+async def _idea_step(data: dict, ctx) -> None:
+    if data["phase"] == "start":
+        await _report_start(ctx.sessions, data["evaluation_id"], data["step"])
+    else:
+        await _report_done(ctx.sessions, data["evaluation_id"], ctx.investigation_id, data["step"], data["outcome"])
+
+
+async def _idea_triaged(data: dict, ctx) -> None:
+    """After the evaluation: triage, then the router (ranking, or the candidate loop for a refinement)."""
+    outcome, decision = data["outcome"], data["outcome"].decision
+    print(f"\nTriage: rule {decision.rule_number}: {decision.action} ({decision.reason})")
+    print(f"Your idea's status: {outcome.candidate_status.replace('_', ' ')}"
+          f" | evaluation {data['evaluation_status']}")
+    if outcome.not_executed:
+        print(f"  {outcome.not_executed}")
+    if outcome.route is not None and outcome.route.stage != Stage.RANKING:
+        print(f"\nNext: {outcome.route.stage.replace('_', ' ')} ({outcome.route.reason})")
+
+
+async def _evaluation_started(data: dict, ctx) -> None:
+    print(f"\nFull evaluation {data['evaluation_id']} started.")
+
+
+async def _evaluation_failed(data: dict, ctx) -> None:
+    print(f"\nThe evaluation failed (at {data['step']}).")
+
+
+IDEA_PRINTERS = {"evaluation_started": _evaluation_started, "idea_step": _idea_step,
+                 "evaluation_failed": _evaluation_failed, "idea_triaged": _idea_triaged}
 
 
 def format_all_verdicts(verdicts, *, final: bool = False) -> str:

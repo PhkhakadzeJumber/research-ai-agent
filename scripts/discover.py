@@ -54,13 +54,14 @@ import uuid
 from collections.abc import Callable
 
 from src.ai.schemas.field_brief import FieldBriefOutput
-from src.ai.workflows.budget import budget_left, cost_cap, set_cost_cap, set_light_cap
+from src.ai.workflows.budget import DEFAULT_DISCOVER_CAP_USD, set_cost_cap, set_light_cap
 from src.ai.workflows.clarification import NotWaitingForClarification, answers_for
 from src.ai.workflows.evaluation import Sessions
-from src.ai.workflows.landscape import LandscapeOutcome, LandscapeReading, landscape_reading_step, landscape_step
-from src.ai.workflows.mining import MiningOutcome, mining_step
+from src.ai.workflows.landscape import LandscapeOutcome, LandscapeReading
+from src.ai.workflows.mining import MiningOutcome
 from src.ai.workflows.runner import EvaluationModels
-from scripts.candidate_loop import LoopModels, continue_at, evaluate_light, generate
+from scripts.candidate_loop import LoopModels, continue_at, drive, evaluate_light, generate  # noqa: F401  (evaluate_light: importable from here)
+from src.ai.workflows.driver import DriverModels
 from src.ai.workflows.field import (
     apply_brief_answers,
     confirm_brief,
@@ -72,15 +73,10 @@ from src.ai.workflows.states import Stage
 from src.config import ConfigError
 from src.db.models import Investigation
 from src.db.models.run import COMPLEXITY_LEVELS
-from src.db.repositories.cache import DbResponseCache
 from src.db.repositories.runs import create_investigation
-from src.retrieval.search import LiteratureSearch
-from src.retrieval.sources.arxiv import ArxivSource
-from src.retrieval.sources.openalex import OpenAlexSource
 from src.db.session import Database
-from src.llm import LlmError
 
-DEFAULT_BUDGET_USD = 12.0  # doc 05 §6, Mode 2
+DEFAULT_BUDGET_USD = DEFAULT_DISCOVER_CAP_USD  # doc 05 §6, Mode 2
 Ask = Callable[[str], str]
 
 
@@ -240,26 +236,9 @@ def format_landscape(outcome: LandscapeOutcome) -> str:
 
 
 async def landscape(sessions: Sessions, investigation_id: uuid.UUID, *, search_for=None) -> int:
-    print("\nSearching the landscape: recent work, surveys, highly cited, newest preprints...")
-    if search_for is not None:
-        outcome = await landscape_step(sessions, investigation_id, search_for)
-    else:
-        # One client per source, shared by every combination: two arXiv clients each kept their own
-        # 3-second spacing and together got rate-limited (step 5.1b live run: 16 of 34 failed).
-        cache = DbResponseCache(sessions)
-        openalex, arxiv = OpenAlexSource.from_settings(cache=cache), ArxivSource(cache=cache)
-        searches = {("openalex", "arxiv"): LiteratureSearch([openalex, arxiv]),
-                    ("openalex",): LiteratureSearch([openalex]), ("arxiv",): LiteratureSearch([arxiv])}
-        try:
-            outcome = await landscape_step(sessions, investigation_id, lambda sources: searches[tuple(sources)])
-        finally:
-            await openalex.aclose()
-            await arxiv.aclose()
-    print(format_landscape(outcome))
-    if outcome.failed:
-        print("  Every search failed on every source: nothing could be looked at.")
-        return 1
-    return 0
+    """Stage landscape_retrieval only (the driver, src/ai/workflows/driver.py, runs it)."""
+    return await drive(sessions, investigation_id, DriverModels(landscape_search_for=search_for), command="discover",
+                       only=Stage.LANDSCAPE_RETRIEVAL)
 
 
 # --- reading the landscape ------------------------------------------------------------------------------
@@ -279,25 +258,12 @@ def format_reading(outcome: LandscapeReading) -> str:
     return "\n".join(lines)
 
 
-async def over_budget(sessions: Sessions, investigation_id: uuid.UUID, before: str) -> bool:
-    async with sessions() as session:
-        investigation = await session.get(Investigation, investigation_id)
-        if budget_left(investigation):
-            return False
-        print(f"\nBudget used up: ${investigation.cost_usd:.2f} of ${cost_cap(investigation)}. Stopped before "
-              f"{before}. Resume with: python -m scripts.discover --continue {investigation_id} --budget <more>")
-        return True
-
-
 async def read_landscape(sessions: Sessions, investigation_id: uuid.UUID, *, screen_model=None,
                          read_model=None, mine_model=None, scout_model=None) -> int:
-    if await over_budget(sessions, investigation_id, "reading the landscape"):
-        return 3
-    print("\nReading the landscape: screening every paper, then reading the best ~45...")
-    outcome = await landscape_reading_step(sessions, investigation_id, screen_model=screen_model,
-                                           read_model=read_model)
-    print(format_reading(outcome))
-    return await mine(sessions, investigation_id, model=mine_model, scout_model=scout_model)
+    """Reading the landscape, then mining it and the candidate loop, until the results are ready."""
+    return await drive(sessions, investigation_id,
+                       DriverModels(landscape_screen_model=screen_model, landscape_read_model=read_model,
+                                    mine_model=mine_model, scout_model=scout_model), command="discover")
 
 
 # --- mining the landscape -------------------------------------------------------------------------------
@@ -322,16 +288,10 @@ def format_mining(outcome: MiningOutcome) -> str:
 
 async def mine(sessions: Sessions, investigation_id: uuid.UUID, *, model=None, scout_model=None,
                quick_model=None) -> int:
-    if await over_budget(sessions, investigation_id, "mining the landscape"):
-        return 3
-    print("\nMining the landscape: recurring problems, contradictions, subtopics, datasets...")
-    try:
-        outcome = await mining_step(sessions, investigation_id, model=model)
-    except LlmError as error:
-        print(f"  The opportunity miner failed: {error}. Nothing was stored; run --continue to try again.")
-        return 1
-    print(format_mining(outcome))
-    return await scout(sessions, investigation_id, model=scout_model, quick_model=quick_model)
+    """Mining the landscape, then the candidate loop, until the results are ready."""
+    return await drive(sessions, investigation_id,
+                       DriverModels(mine_model=model, scout_model=scout_model, quick_model=quick_model),
+                       command="discover")
 
 
 # --- generating candidates ------------------------------------------------------------------------------
@@ -349,8 +309,34 @@ async def continue_after_brief(sessions: Sessions, investigation_id: uuid.UUID, 
         stage = (await session.get(Investigation, investigation_id)).stage
     if code != 0 or stage != Stage.LANDSCAPE_RETRIEVAL:
         return code
-    code = await landscape(sessions, investigation_id, search_for=search_for)
-    return code if code != 0 else await read_landscape(sessions, investigation_id)
+    return await drive(sessions, investigation_id, DriverModels(landscape_search_for=search_for), command="discover")
+
+
+# --- printing the driver's Mode 2 events -----------------------------------------------------------------
+
+async def _landscape_searched(data: dict, ctx) -> None:
+    print(format_landscape(data["outcome"]))
+    if data["outcome"].failed:
+        print("  Every search failed on every source: nothing could be looked at.")
+
+
+async def _say(text: str) -> None:
+    print(text)
+
+
+LANDSCAPE_PRINTERS = {
+    "landscape_searching": lambda data, ctx: _say(
+        "\nSearching the landscape: recent work, surveys, highly cited, newest preprints..."),
+    "landscape_searched": _landscape_searched,
+    "landscape_reading": lambda data, ctx: _say("\nReading the landscape: screening every paper, then reading the "
+                                                "best ~45..."),
+    "landscape_read": lambda data, ctx: _say(format_reading(data["outcome"])),
+    "mining": lambda data, ctx: _say("\nMining the landscape: recurring problems, contradictions, subtopics, "
+                                     "datasets..."),
+    "mining_failed": lambda data, ctx: _say(f"  The opportunity miner failed: {data['error']}. Nothing was stored; "
+                                            "run --continue to try again."),
+    "mined": lambda data, ctx: _say(format_mining(data["outcome"])),
+}
 
 
 # --- main -----------------------------------------------------------------------------------------------
@@ -374,13 +360,8 @@ async def resume(sessions: Sessions, investigation_id: uuid.UUID, *, yes: bool, 
         print("\n" + format_brief(pending.brief))
         code = await clarify_brief(sessions, investigation_id, yes=yes)
         return await continue_after_brief(sessions, investigation_id, code)
-    if investigation.stage == Stage.LANDSCAPE_RETRIEVAL:
-        code = await landscape(sessions, investigation_id)
-        return code if code != 0 else await read_landscape(sessions, investigation_id)
-    if investigation.stage == Stage.LANDSCAPE_READING:
-        return await read_landscape(sessions, investigation_id)
-    if investigation.stage == Stage.OPPORTUNITY_MINING:
-        return await mine(sessions, investigation_id)
+    if investigation.stage in (Stage.LANDSCAPE_RETRIEVAL, Stage.LANDSCAPE_READING, Stage.OPPORTUNITY_MINING):
+        return await drive(sessions, investigation_id, DriverModels(), command="discover")
     if investigation.stage in (Stage.GENERATING_CANDIDATES, Stage.PRESCREENING, Stage.LIGHT_EVALUATION, Stage.TRIAGE, Stage.REFINING, Stage.FULL_EVALUATION,
                                Stage.RANKING):
         return await continue_at(sessions, investigation_id, command="discover")

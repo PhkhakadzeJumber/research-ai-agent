@@ -1,7 +1,8 @@
-"""The candidate loop shared by both commands (scripts/evaluate.py and scripts/discover.py), step 5.5a.
+"""The candidate loop shared by both commands (scripts/evaluate.py and scripts/discover.py), step 5.5a; printing
+moved onto the driver in step 9b.1.
 
-After triage, the router (src/ai/workflows/routing.py) picks the next stage; this module carries it
-out and prints what happens, until the investigation reaches a stage that isn't built yet or ends:
+The control flow lives in src/ai/workflows/driver.py (shared with the API); this module prints what it reports.
+After triage, the router picks the next stage; the driver carries it out until the investigation ends:
 
     triage -> refining -> light_evaluation -> triage -> ...   (refine: the Scout writes the next version)
     triage -> generating_candidates -> prescreening -> light_evaluation -> triage -> ...
@@ -9,29 +10,25 @@ out and prints what happens, until the investigation reaches a stage that isn't 
     triage -> full_evaluation -> triage -> ...               (the best advanced candidates, step 5.6a)
     triage -> ranking -> reporting -> results_ready          (the ranked results; the report: scripts/report.py)
 
+make_printer() turns the driver's events into the commands' output; print_ended() says how a run ended.
 Exit codes as in the commands: 0 ok, 1 a step failed, 3 the budget is used up.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from src.ai.workflows.budget import budget_left, cost_cap
+from src.ai.workflows.driver import DriverModels, Emit, Ended, Event, advance
 from src.ai.workflows.evaluation import Sessions
-from src.ai.workflows.alternatives import NoIdeaToReplace
-from src.ai.workflows.full_evaluation import full_evaluation_step
-from src.ai.workflows.generating import generate_step
-from src.ai.workflows.light_evaluation import LightOutcome, light_evaluation_step, short_step_line
-from src.ai.workflows.prescreening import PrescreenOutcome, prescreen_step
-from src.ai.workflows.ranking import RankedResults, complete_results, ranked_results
-from src.ai.workflows.refining import RefiningOutcome, refine_step
-from src.ai.workflows.routing import route_after_triage
+from src.ai.workflows.light_evaluation import LightOutcome, short_step_line
+from src.ai.workflows.prescreening import PrescreenOutcome
+from src.ai.workflows.ranking import RankedResults
+from src.ai.workflows.refining import RefiningOutcome
 from src.ai.workflows.runner import EvaluationModels
-from src.ai.workflows.scouting import NothingToGround, ScoutingOutcome
-from src.ai.workflows.states import Mode, Stage
-from src.db.models import Investigation
-from src.llm import LlmError
+from src.ai.workflows.scouting import ScoutingOutcome
+from src.ai.workflows.states import Mode
 
 
 ACCOUNT_REFUSED = ("Anthropic refused the request for your account (a usage or spending limit, the credit, or the API key). Stopped at {where}; nothing was concluded. Fix it in the Anthropic Console, then resume: python -m scripts.{command} --continue {investigation_id}")
@@ -46,18 +43,12 @@ class LoopModels:
     search_factory: object = None
     quick_model: object = None
 
-
-async def _over_budget(sessions: Sessions, investigation_id: uuid.UUID, before: str, command: str) -> bool:
-    async with sessions() as session:
-        investigation = await session.get(Investigation, investigation_id)
-        if budget_left(investigation):
-            return False
-        print(f"\nBudget used up: ${investigation.cost_usd:.2f} of ${cost_cap(investigation)}. Stopped before "
-              f"{before}. Resume with: python -m scripts.{command} --continue {investigation_id} --budget <more>")
-        return True
+    def driver(self, **extra) -> DriverModels:
+        return DriverModels(evaluation=self.evaluation, scout_model=self.scout_model,
+                            search_factory=self.search_factory, quick_model=self.quick_model, **extra)
 
 
-# --- generating candidates and pre-screening -------------------------------------------------------------
+# --- formatting ------------------------------------------------------------------------------------------
 
 def format_scouting(outcome: ScoutingOutcome) -> str:
     screened = {candidate.id for candidate in outcome.screened_out}
@@ -82,30 +73,6 @@ TASK_HEADERS = {
 }
 
 
-async def generate(sessions: Sessions, investigation_id: uuid.UUID, models: LoopModels | None = None, *,
-                   command: str) -> int:
-    """Stage generating_candidates: discover, replenish or alternatives (src/ai/workflows/generating.py)."""
-    models = models or LoopModels()
-    if await _over_budget(sessions, investigation_id, "generating candidates", command):
-        return 3
-    print("\nGenerating candidates...")
-    try:
-        task, outcome = await generate_step(sessions, investigation_id, model=models.scout_model)
-    except (NothingToGround, NoIdeaToReplace) as error:
-        print(f"  {error} Nothing was generated.")
-        return 1
-    except LlmError as error:
-        print(f"  The Scout failed: {error}. Nothing was stored; run --continue to try again.")
-        return 1
-    print(f"  {TASK_HEADERS[task]}")
-    if outcome.from_reserve:
-        print(f"  {outcome.from_reserve} idea(s) wait in reserve: no new ideas needed; pre-screening picks the "
-              "next ones")
-    else:
-        print(format_scouting(outcome))
-    return await prescreen(sessions, investigation_id, models, command=command)
-
-
 def format_prescreen(outcome: PrescreenOutcome) -> str:
     lines = [f"  {outcome.considered} candidates: {len(outcome.light)} to light evaluation, "
              f"{len(outcome.reserve)} in reserve, {len(outcome.screened_out)} screened out"
@@ -123,25 +90,6 @@ def format_prescreen(outcome: PrescreenOutcome) -> str:
     return "\n".join(lines)
 
 
-async def prescreen(sessions: Sessions, investigation_id: uuid.UUID, models: LoopModels | None = None, *,
-                    command: str) -> int:
-    models = models or LoopModels()
-    if await _over_budget(sessions, investigation_id, "pre-screening", command):
-        return 3
-    print("\nPre-screening: duplicates, your constraints, a quick feasibility check...")
-    try:
-        outcome = await prescreen_step(sessions, investigation_id, model=models.quick_model)
-    except LlmError as error:
-        print(f"  The quick feasibility check failed: {error}. Nothing was stored; run --continue to try again.")
-        return 1
-    print(format_prescreen(outcome))
-    return await evaluate_light(sessions, investigation_id, models=models.evaluation,
-                                search_factory=models.search_factory, scout_model=models.scout_model,
-                                command=command, quick_model=models.quick_model)
-
-
-# --- light evaluation -----------------------------------------------------------------------------------
-
 def format_light(outcome: LightOutcome) -> str:
     if not outcome.triaged:
         return ""
@@ -152,82 +100,6 @@ def format_light(outcome: LightOutcome) -> str:
     return "\n".join(lines)
 
 
-async def evaluate_light(sessions: Sessions, investigation_id: uuid.UUID, *, models: EvaluationModels | None = None,
-                         search_factory=None, scout_model=None, command: str = "discover", quick_model=None) -> int:
-    async def on_candidate(candidate, number, total) -> None:
-        version = f" (v{candidate.version})" if candidate.version > 1 else ""
-        print(f"\nLight evaluation {number}/{total}: {candidate.title}{version}")
-
-    async def report(step, phase, outcome) -> None:
-        line = short_step_line(step, outcome) if phase == "done" else None
-        if line:
-            print(f"  {line}")
-
-    outcome = await light_evaluation_step(sessions, investigation_id, models=models, search_factory=search_factory,
-                                          report=report, on_candidate=on_candidate)
-    print(format_light(outcome))
-    async with sessions() as session:
-        investigation = await session.get(Investigation, investigation_id)
-    if outcome.stopped == "budget":
-        print(f"\nBudget used up: ${investigation.cost_usd:.2f} of ${cost_cap(investigation)}. Stopped at "
-              f"{outcome.stopped_at}. Resume with: python -m scripts.{command} --continue {investigation_id} "
-              "--budget <more>")
-        return 3
-    if outcome.stopped == "account_refused":
-        print("\n" + ACCOUNT_REFUSED.format(where=outcome.stopped_at, command=command,
-                                            investigation_id=investigation_id))
-        return 1
-    if outcome.stopped:
-        print(f"\nThe light evaluation stopped ({outcome.stopped}) at {outcome.stopped_at}. "
-              f"Run --continue to try again.")
-        return 1
-    return await route(sessions, investigation_id, LoopModels(models, scout_model, search_factory, quick_model),
-                       command=command)
-
-
-# --- full evaluation ------------------------------------------------------------------------------------
-
-async def evaluate_full(sessions: Sessions, investigation_id: uuid.UUID, models: LoopModels | None = None, *,
-                        command: str) -> int:
-    models = models or LoopModels()
-
-    async def on_candidate(candidate, number, total) -> None:
-        print(f"\nFull evaluation {number}/{total}: {candidate.title}"
-              + (f" (v{candidate.version})" if candidate.version > 1 else "")
-              + " (extends its light evaluation: earlier searches and readings are reused)")
-
-    async def report(step, phase, outcome) -> None:
-        line = short_step_line(step, outcome) if phase == "done" else None
-        if line:
-            print(f"  {line}")
-
-    outcome = await full_evaluation_step(sessions, investigation_id, models=models.evaluation,
-                                         search_factory=models.search_factory, report=report,
-                                         on_candidate=on_candidate)
-    if outcome.triaged:
-        print("\nTriage after full evaluation:")
-        for candidate, decision in outcome.triaged:
-            print(f"  {candidate.title}\n    rule {decision.rule_number}: {decision.action} -> "
-                  f"{candidate.status.replace('_', ' ')} ({decision.reason})")
-    async with sessions() as session:
-        investigation = await session.get(Investigation, investigation_id)
-    if outcome.stopped == "budget":
-        print(f"\nBudget used up: ${investigation.cost_usd:.2f} of ${cost_cap(investigation)}. Stopped at "
-              f"{outcome.stopped_at}. Resume with: python -m scripts.{command} --continue {investigation_id} "
-              "--budget <more>")
-        return 3
-    if outcome.stopped == "account_refused":
-        print("\n" + ACCOUNT_REFUSED.format(where=outcome.stopped_at, command=command,
-                                            investigation_id=investigation_id))
-        return 1
-    if outcome.stopped:
-        print(f"\nThe full evaluation stopped ({outcome.stopped}) at {outcome.stopped_at}. Run --continue to try again.")
-        return 1
-    return await route(sessions, investigation_id, models, command=command)
-
-
-# --- refining -------------------------------------------------------------------------------------------
-
 def format_refining(outcome: RefiningOutcome) -> str:
     lines = []
     for r in outcome.refinements:
@@ -236,23 +108,6 @@ def format_refining(outcome: RefiningOutcome) -> str:
         lines.append("    -> light re-evaluation" if r.passed else f"    SCREENED OUT: {r.reason}")
     return "\n".join(lines)
 
-
-async def refine(sessions: Sessions, investigation_id: uuid.UUID, models: LoopModels, *, command: str) -> int:
-    if await _over_budget(sessions, investigation_id, "refining", command):
-        return 3
-    print("\nRefining (the Scout writes the next version of each idea sent back by triage)...")
-    try:
-        outcome = await refine_step(sessions, investigation_id, model=models.scout_model)
-    except LlmError as error:
-        print(f"  The Scout failed: {error}. Finished refinements are kept; run --continue to try again.")
-        return 1
-    print(format_refining(outcome))
-    return await evaluate_light(sessions, investigation_id, models=models.evaluation,
-                                search_factory=models.search_factory, scout_model=models.scout_model,
-                                command=command, quick_model=models.quick_model)
-
-
-# --- ranking (step 5.6b) ---------------------------------------------------------------------------------
 
 def format_ranking(results: RankedResults) -> str:
     lines = ["\nRanked ideas:" if results.finalists else "\nNo idea became a finalist."]
@@ -268,50 +123,174 @@ def format_ranking(results: RankedResults) -> str:
     return "\n".join(lines)
 
 
-# --- routing --------------------------------------------------------------------------------------------
+# --- printing the driver's events ------------------------------------------------------------------------
 
-async def route(sessions: Sessions, investigation_id: uuid.UUID, models: LoopModels | None = None, *,
-                command: str) -> int:
-    """At stage `triage`: picks the next stage and carries it out as far as it is built."""
-    models = models or LoopModels()
-    decision = await route_after_triage(sessions, investigation_id)
+@dataclass(frozen=True)
+class Context:
+    sessions: Sessions
+    investigation_id: uuid.UUID
+    command: str
+
+
+Printer = Callable[[dict, Context], Awaitable[None]]
+
+
+async def _generated(data: dict, ctx: Context) -> None:
+    outcome = data["outcome"]
+    print(f"  {TASK_HEADERS[data['task']]}")
+    if outcome.from_reserve:
+        print(f"  {outcome.from_reserve} idea(s) wait in reserve: no new ideas needed; pre-screening picks the "
+              "next ones")
+    else:
+        print(format_scouting(outcome))
+
+
+async def _generate_failed(data: dict, ctx: Context) -> None:
+    if data["nothing_to_generate"]:
+        print(f"  {data['error']} Nothing was generated.")
+    else:
+        print(f"  The Scout failed: {data['error']}. Nothing was stored; run --continue to try again.")
+
+
+async def _candidate(data: dict, ctx: Context, *, full: bool) -> None:
+    candidate = data["candidate"]
+    version = f" (v{candidate.version})" if candidate.version > 1 else ""
+    if full:
+        print(f"\nFull evaluation {data['number']}/{data['total']}: {candidate.title}{version}"
+              " (extends its light evaluation: earlier searches and readings are reused)")
+    else:
+        print(f"\nLight evaluation {data['number']}/{data['total']}: {candidate.title}{version}")
+
+
+async def _loop_step(data: dict, ctx: Context) -> None:
+    line = short_step_line(data["step"], data["outcome"]) if data["phase"] == "done" else None
+    if line:
+        print(f"  {line}")
+
+
+async def _full_done(data: dict, ctx: Context) -> None:
+    outcome = data["outcome"]
+    if outcome.triaged:
+        print("\nTriage after full evaluation:")
+        for candidate, decision in outcome.triaged:
+            print(f"  {candidate.title}\n    rule {decision.rule_number}: {decision.action} -> "
+                  f"{candidate.status.replace('_', ' ')} ({decision.reason})")
+
+
+async def _loop_failed(data: dict, ctx: Context) -> None:
+    print(f"\nThe {data['phase']} stopped ({data['stopped']}) at {data['stopped_at']}. Run --continue to try again.")
+
+
+async def _routed(data: dict, ctx: Context) -> None:
+    decision = data["decision"]
     for candidate in decision.out_of_refinements:
         print(f"\n  rejected (no refinements left): {candidate.title}")
     print(f"\nNext: {decision.stage.replace('_', ' ')} ({decision.reason})")
-    return await continue_at(sessions, investigation_id, models, command=command)
 
+
+async def _ranked(data: dict, ctx: Context) -> None:
+    if data["mode"] == Mode.DISCOVER:
+        print(format_ranking(data["results"]))
+
+
+async def _done(data: dict, ctx: Context) -> None:
+    print(f"\nDone. Total cost: ${data['cost_usd']:.2f}")
+    print(f"Full report: python -m scripts.report {ctx.investigation_id} [--out report.md]")
+
+
+def _say(text: str) -> Printer:
+    async def printer(data: dict, ctx: Context) -> None:
+        print(text)
+    return printer
+
+
+def _error(template: str) -> Printer:
+    async def printer(data: dict, ctx: Context) -> None:
+        print(template.format(error=data["error"]))
+    return printer
+
+
+LOOP_PRINTERS: dict[str, Printer] = {
+    "generating": _say("\nGenerating candidates..."),
+    "generate_failed": _generate_failed,
+    "generated": _generated,
+    "prescreening": _say("\nPre-screening: duplicates, your constraints, a quick feasibility check..."),
+    "prescreen_failed": _error("  The quick feasibility check failed: {error}. Nothing was stored; run --continue "
+                               "to try again."),
+    "prescreened": lambda data, ctx: _print(format_prescreen(data["outcome"])),
+    "light_candidate": lambda data, ctx: _candidate(data, ctx, full=False),
+    "full_candidate": lambda data, ctx: _candidate(data, ctx, full=True),
+    "loop_step": _loop_step,
+    "light_done": lambda data, ctx: _print(format_light(data["outcome"])),
+    "full_done": _full_done,
+    "loop_failed": _loop_failed,
+    "refining": _say("\nRefining (the Scout writes the next version of each idea sent back by triage)..."),
+    "refine_failed": _error("  The Scout failed: {error}. Finished refinements are kept; run --continue to try "
+                            "again."),
+    "refined": lambda data, ctx: _print(format_refining(data["outcome"])),
+    "routed": _routed,
+    "ranked": _ranked,
+    "done": _done,
+}
+
+
+async def _print(text: str) -> None:
+    print(text)
+
+
+def make_printer(sessions: Sessions, investigation_id: uuid.UUID, command: str) -> Emit:
+    """The driver's events, printed as the commands always printed them."""
+    # imported here: the commands import this module, so a top-level import would be circular
+    from scripts.discover import LANDSCAPE_PRINTERS
+    from scripts.evaluate import IDEA_PRINTERS
+
+    printers = {**LOOP_PRINTERS, **IDEA_PRINTERS, **LANDSCAPE_PRINTERS}
+    ctx = Context(sessions, investigation_id, command)
+
+    async def emit(event: Event) -> None:
+        printer = printers.get(event.kind)
+        if printer is None:
+            raise ValueError(f"No printer for the driver's event {event.kind!r}.")
+        await printer(event.data, ctx)
+
+    return emit
+
+
+def print_ended(ended: Ended, investigation_id: uuid.UUID, command: str) -> int:
+    """How the run ended (what wasn't already printed as an event), and the command's exit code."""
+    if ended.reason == "budget":
+        print(f"\nBudget used up: ${ended.cost_usd:.2f} of ${ended.cap_usd}. Stopped {ended.where}. Resume with: "
+              f"python -m scripts.{command} --continue {investigation_id} --budget <more>")
+    elif ended.reason == "account_refused":
+        print("\n" + ACCOUNT_REFUSED.format(where=ended.where, command=command, investigation_id=investigation_id))
+    elif ended.reason == "nothing":
+        print(f"Nothing to continue at stage {ended.where}.")
+    return ended.exit_code
+
+
+async def drive(sessions: Sessions, investigation_id: uuid.UUID, models: DriverModels, *, command: str,
+                only: str | None = None) -> int:
+    """Runs the investigation on from its stage with the driver, printing as it goes; returns the exit code."""
+    ended = await advance(sessions, investigation_id, models=models, only=only,
+                          emit=make_printer(sessions, investigation_id, command))
+    return print_ended(ended, investigation_id, command)
+
+
+# --- the entry points (each carries on from the investigation's current stage) -----------------------------
 
 async def continue_at(sessions: Sessions, investigation_id: uuid.UUID, models: LoopModels | None = None, *,
                       command: str) -> int:
-    """Carries on from the loop's stages (triage, refining, light evaluation, ranking)."""
-    models = models or LoopModels()
-    async with sessions() as session:
-        investigation = await session.get(Investigation, investigation_id)
-        stage, mode = investigation.stage, investigation.mode
-    if stage == Stage.TRIAGE:
-        return await route(sessions, investigation_id, models, command=command)
-    if stage == Stage.REFINING:
-        return await refine(sessions, investigation_id, models, command=command)
-    if stage == Stage.LIGHT_EVALUATION:
-        return await evaluate_light(sessions, investigation_id, models=models.evaluation,
-                                    search_factory=models.search_factory, scout_model=models.scout_model,
-                                    command=command, quick_model=models.quick_model)
-    if stage == Stage.GENERATING_CANDIDATES:
-        return await generate(sessions, investigation_id, models, command=command)
-    if stage == Stage.PRESCREENING:
-        return await prescreen(sessions, investigation_id, models, command=command)
-    if stage == Stage.FULL_EVALUATION:
-        return await evaluate_full(sessions, investigation_id, models, command=command)
-    if stage == Stage.RANKING:
-        async with sessions() as session:
-            results = await ranked_results(session, investigation_id)
-        await complete_results(sessions, investigation_id)
-        if mode == Mode.DISCOVER:
-            print(format_ranking(results))
-        async with sessions() as session:
-            cost = (await session.get(Investigation, investigation_id)).cost_usd
-        print(f"\nDone. Total cost: ${cost:.2f}")
-        print(f"Full report: python -m scripts.report {investigation_id} [--out report.md]")
-        return 0
-    print(f"Nothing to continue at stage {stage}.")
-    return 0
+    """Carries on from the loop's stages (triage, refining, light evaluation, ranking, ...)."""
+    return await drive(sessions, investigation_id, (models or LoopModels()).driver(), command=command)
+
+
+async def generate(sessions: Sessions, investigation_id: uuid.UUID, models: LoopModels | None = None, *,
+                   command: str) -> int:
+    """Stage generating_candidates: discover, replenish or alternatives (src/ai/workflows/generating.py)."""
+    return await continue_at(sessions, investigation_id, models, command=command)
+
+
+async def evaluate_light(sessions: Sessions, investigation_id: uuid.UUID, *, models: EvaluationModels | None = None,
+                         search_factory=None, scout_model=None, command: str = "discover", quick_model=None) -> int:
+    return await continue_at(sessions, investigation_id, LoopModels(models, scout_model, search_factory, quick_model),
+                             command=command)

@@ -28,7 +28,7 @@ from sqlalchemy import select
 from src.ai.evidence.verdicts import LABELS
 from src.ai.workflows.concluding import triage_candidate
 from src.ai.workflows.evaluation import Sessions, begin_evaluation
-from src.ai.workflows.runner import EvaluationModels, Report, run_evaluation
+from src.ai.workflows.runner import EvaluationModels, Report, ShouldStop, run_evaluation
 from src.ai.workflows.states import CandidateStatus, Stage
 from src.ai.workflows.transitions import StaleState, advance_investigation
 from src.db.models import Candidate, Investigation, TriageDecision
@@ -41,7 +41,8 @@ LIGHT = "light"
 class LightOutcome:
     triaged: list[tuple[Candidate, TriageDecision]] = field(default_factory=list)
     stopped: str | None = None
-    """None when every candidate was triaged; otherwise budget / failed / retrieval_failed."""
+    """None when every candidate was triaged; otherwise budget / failed / retrieval_failed / account_refused /
+    stopped (the run was asked to stop before a step)."""
     stopped_at: str | None = None
     """'<candidate title>: <step>' where it stopped."""
 
@@ -63,6 +64,7 @@ async def light_evaluation_step(
     search_factory=None,
     report: Report | None = None,
     on_candidate: Callable[[Candidate, int, int], Awaitable[None]] | None = None,
+    should_stop: ShouldStop | None = None,
 ) -> LightOutcome:
     async with sessions() as session:
         investigation = await session.get(Investigation, investigation_id)
@@ -80,7 +82,7 @@ async def light_evaluation_step(
         else:
             evaluation_id = evaluation.id
         result = await run_evaluation(sessions, evaluation_id, investigation_id, models=models,
-                                      search_factory=search_factory, report=report)
+                                      search_factory=search_factory, report=report, should_stop=should_stop)
         if result.ended not in ("done", "partial"):
             outcome.stopped, outcome.stopped_at = result.ended, f"{candidate.title}: {result.step}"
             return outcome

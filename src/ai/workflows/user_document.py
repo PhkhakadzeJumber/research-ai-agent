@@ -188,24 +188,30 @@ def extract_pdf(name: str, data: bytes) -> str:
 
 
 def prepare_document(path: Path) -> PreparedDocument:
-    media_type = MEDIA_TYPES.get(path.suffix.lower())
+    """A document from a file on disk (the command line)."""
+    return prepare_document_bytes(path.name, path.read_bytes())
+
+
+def prepare_document_bytes(file_name: str, data: bytes) -> PreparedDocument:
+    """A document from its name and bytes (an upload through the API, step 9b, or a file read from disk)."""
+    name = Path(file_name).name  # never a path from the client
+    media_type = MEDIA_TYPES.get(Path(name).suffix.lower())
     if media_type is None:
-        raise DocumentError(f"{path.name}: only .md, .txt and .pdf files are supported.")
-    data = path.read_bytes()
+        raise DocumentError(f"{name}: only .md, .txt and .pdf files are supported.")
     if media_type == "application/pdf":
-        text = extract_pdf(path.name, data)
+        text = extract_pdf(name, data)
     else:
         try:
             text = data.decode("utf-8-sig")
         except UnicodeDecodeError:
-            raise DocumentError(f"{path.name} isn't UTF-8 text.") from None
+            raise DocumentError(f"{name} isn't UTF-8 text.") from None
     text = text.replace("\r\n", "\n").strip()
     if not text:
-        raise DocumentError(f"{path.name} is empty.")
+        raise DocumentError(f"{name} is empty.")
     if len(text) > MAX_DOCUMENT_CHARS:
-        raise DocumentError(f"{path.name} has {len(text):,} characters; the limit is {MAX_DOCUMENT_CHARS:,} "
+        raise DocumentError(f"{name} has {len(text):,} characters; the limit is {MAX_DOCUMENT_CHARS:,} "
                             "(about 15-20 pages). Shorten it, e.g. to the abstract, introduction and method.")
-    return PreparedDocument(file_name=path.name, media_type=media_type, size_bytes=len(data),
+    return PreparedDocument(file_name=name, media_type=media_type, size_bytes=len(data),
                             sha256=hashlib.sha256(data).hexdigest(), text=text,
                             sections=split_sections(text, "text/markdown" if media_type == "application/pdf"
                                                     else media_type))
