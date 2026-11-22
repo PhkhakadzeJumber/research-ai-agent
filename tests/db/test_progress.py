@@ -3,6 +3,7 @@ events described in words (src/ai/progress.py), and the command line recording t
 (rolled back), fake Claude: no network, no cost."""
 
 from decimal import Decimal
+from types import SimpleNamespace as NS
 
 import pytest
 from sqlalchemy import select
@@ -67,6 +68,23 @@ async def test_a_run_records_what_it_did(db_session):
     assert rows[1].data["recommendation"] == "pursue"
     assert rows[2].message.startswith("Triage: rule ") and rows[2].message.endswith("Your idea is now finalist.")
     assert rows[3].data == {"reason": "done", "where": None} and rows[3].cost_usd > 0
+
+
+def test_the_novelty_and_value_steps_say_what_they_found():
+    novelty = NS(error=None, papers={"P1": 1, "P2": 2, "P3": 3},
+                 reading=NS(output=NS(closest_works=[1, 2])))
+    [entry] = describe(Event("loop_step", {"step": "assessing_novelty", "phase": "done", "outcome": novelty}))
+    assert entry.message == "Compared the idea with 3 close papers: 2 closest works to tell apart"
+
+    value = NS(error=None, timeline={"total_weeks": 8.0, "available_weeks": 10.0},
+               reading=NS(claims=[NS(status="verified"), NS(status="no_evidence")]))
+    [entry] = describe(Event("idea_step", {"step": "assessing_value_feasibility", "phase": "done", "outcome": value}))
+    assert entry.message == ("Judged significance and feasibility: 1 of 2 claims verified; "
+                             "the plan takes 8 weeks of 10 available")
+
+    failed = NS(error="the model's answer was invalid", reading=None, papers={})
+    [entry] = describe(Event("idea_step", {"step": "assessing_novelty", "phase": "done", "outcome": failed}))
+    assert entry.message.endswith("the model's answer was invalid")
 
 
 async def test_the_command_line_records_events_too(db_session, capsys):

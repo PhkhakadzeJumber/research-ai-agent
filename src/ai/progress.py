@@ -89,6 +89,18 @@ def _step_done(step: str, outcome: Any) -> str:
         if resolutions:
             counts = {r: resolutions.count(r) for r in ("accepted", "rebutted", "unresolved") if r in resolutions}
             return "Answered the Skeptic: " + ", ".join(f"{n} {r}" for r, n in counts.items())
+    if step == "assessing_novelty" and not getattr(outcome, "error", None) and outcome.reading is not None:
+        # step 10b: say what was compared, not just "assessed" (thin in the first live run through the API)
+        closest = len(outcome.reading.output.closest_works)
+        return (f"Compared the idea with {_plural(len(outcome.papers), 'close paper')}: "
+                f"{_plural(closest, 'closest work')} to tell apart")
+    if step == "assessing_value_feasibility" and not getattr(outcome, "error", None) and outcome.reading is not None:
+        claims = outcome.reading.claims
+        verified = sum(1 for claim in claims if claim.status == "verified")
+        weeks, available = (outcome.timeline or {}).get("total_weeks"), (outcome.timeline or {}).get("available_weeks")
+        plan = (f"; the plan takes {weeks:g} weeks" + (f" of {available:g} available" if available else "")
+                if weeks else "")
+        return f"Judged significance and feasibility: {verified} of {_plural(len(claims), 'claim')} verified{plan}"
     if step == "concluding":
         return (f"Verdicts: novelty {_label(outcome.novelty.category)}, significance "
                 f"{_label(outcome.significance.category)}, feasibility {_label(outcome.feasibility.category)}, "

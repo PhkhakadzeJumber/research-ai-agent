@@ -15,6 +15,7 @@ const LINKS = [
   { href: "/investigations", label: "Investigations" },
   { href: "/", label: "New" },
   { href: "/library", label: "Library" },
+  { href: "/#how-it-works", label: "How it works" },
 ];
 
 export function initials(name: string | null | undefined, email: string | undefined) {
@@ -27,7 +28,7 @@ export function initials(name: string | null | undefined, email: string | undefi
 export function TopNav() {
   const path = usePathname();
   const { data: me } = useMe();
-  const active = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
+  const active = (href: string) => (href.startsWith("/#") ? false : href === "/" ? path === "/" : path.startsWith(href));
   return (
     <header className="flex h-[72px] items-center justify-between border-b border-line px-4 sm:px-8">
       <div className="flex items-center gap-6 sm:gap-10">

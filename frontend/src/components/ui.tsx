@@ -20,7 +20,7 @@ const BUTTON: Record<ButtonKind, string> = {
   accent: "bg-accent text-ink hover:brightness-95",
 };
 
-const buttonClass = (kind: ButtonKind, extra?: string) =>
+export const buttonClass = (kind: ButtonKind, extra?: string) =>
   cx(
     "inline-flex items-center justify-center gap-2 rounded-pill px-5 py-2.5 text-sm font-semibold transition",
     "disabled:cursor-not-allowed disabled:opacity-50",
