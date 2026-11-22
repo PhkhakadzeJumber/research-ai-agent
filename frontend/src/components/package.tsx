@@ -4,17 +4,19 @@
  * The written sections show each statement with its type (evidence / interpretation / hypothesis / to verify) and
  * its sources (papers link to the library; claims show their text); the other sections are rendered by code from the
  * evaluation. Export as Markdown. With no package yet, the user can have it written (one paid call, about
- * $0.35-0.50): the page follows the writing until the package is there.
+ * 5 credits, Pro only): the page follows the writing until the package is there.
  */
 "use client";
 
 import Link from "next/link";
 import { useState } from "react";
 
+import { PlanNote } from "@/components/plan-note";
 import { Button, Card, ErrorNote, MonoLabel, Pill, buttonClass, cx } from "@/components/ui";
 import { API } from "@/lib/api/client";
-import { useIdea, useInvestigation, usePackage, useWritePackage, type ResearchPackage } from "@/lib/api/hooks";
+import { useIdea, useInvestigation, useMe, usePackage, useWritePackage, type ResearchPackage } from "@/lib/api/hooks";
 import { STATEMENT_TONES } from "@/lib/format";
+import { canStart, priceText } from "@/lib/plan";
 
 export const shortTitle = (title: string, max = 48) =>
   title.length > max ? `${title.slice(0, max).replace(/[\s:,;-]+\S*$/, "")}…` : title;
@@ -26,6 +28,8 @@ export function PackageScreen({ ideaId }: { ideaId: string }) {
   const investigation = useInvestigation(idea.data?.investigation_id ?? "");
   const writing = investigation.data?.run === "running";
   const write = useWritePackage(ideaId);
+  const plan = useMe().data?.plan;
+  const allowed = canStart(plan, "package");
   const pkg = usePackage(ideaId, writing || write.isSuccess);
 
   if (idea.isPending || pkg.isPending) return <p className="body-s text-ink-3">Loading…</p>;
@@ -55,9 +59,10 @@ export function PackageScreen({ ideaId }: { ideaId: string }) {
           </p>
         ) : canWrite ? (
           <>
-            <p className="body-s text-ink-3">One call to the Proposal Designer: about $0.35–0.50, counted in this investigation&apos;s budget.</p>
+            <p className="body-s text-ink-3">One call to the Proposal Designer, about 2 minutes: {priceText(plan, "package")}.</p>
             <ErrorNote error={write.error} />
-            <div><Button kind="accent" disabled={write.isPending} onClick={() => write.mutate()}>Write the research package →</Button></div>
+            <PlanNote check={allowed} />
+            <div><Button kind="accent" disabled={write.isPending || !allowed.ok} onClick={() => write.mutate()}>Write the research package →</Button></div>
           </>
         ) : (
           <p className="body-s text-ink-2">A research package is written for a finalist; this idea is {idea.data.status.replaceAll("_", " ")}.</p>

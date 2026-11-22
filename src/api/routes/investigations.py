@@ -20,6 +20,7 @@ from src.ai.workflows.landscape import confirmed_brief
 from src.ai.workflows.ranking import FINALIST_STATUSES, Ranked, ranked_results
 from src.ai.workflows.transitions import StaleState
 from src.api.auth import CurrentUser
+from src.api.billing import investigation_credits
 from src.api.deps import RunsDep, SessionDep
 from src.api.errors import ApiError, not_found
 from src.api.runs import Runs
@@ -116,8 +117,8 @@ async def summary_of(session: AsyncSession, investigation: Investigation, runs: 
     waiting = "clarification" if investigation.stage == "awaiting_clarification" and run == "idle" else None
     return dict(id=investigation.id, mode=investigation.mode, title=title, summary=summary,
                 status=investigation.status, stage=investigation.stage, run=run, waiting_for=waiting,
-                cost_usd=float(investigation.cost_usd or 0),
-                budget_usd=float(cost_cap(investigation)), created_at=investigation.created_at,
+                cost_usd=float(investigation.cost_usd or 0), budget_usd=float(cost_cap(investigation)),
+                credits=await investigation_credits(session, investigation.id), created_at=investigation.created_at,
                 updated_at=investigation.updated_at)
 
 

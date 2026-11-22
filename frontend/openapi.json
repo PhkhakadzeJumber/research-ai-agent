@@ -2220,6 +2220,28 @@
      }
     }
    }
+  },
+  "/api/v1/plans": {
+   "get": {
+    "tags": [
+     "billing"
+    ],
+    "summary": "Get Plans",
+    "description": "What Free and Pro include and cost, for the Pricing page: no login needed.",
+    "operationId": "get_plans_api_v1_plans_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Plans"
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -4000,6 +4022,31 @@
     ],
     "title": "IdeaReading"
    },
+   "InvestigationCredits": {
+    "properties": {
+     "used": {
+      "type": "integer",
+      "title": "Used"
+     },
+     "limit": {
+      "type": "integer",
+      "title": "Limit"
+     },
+     "free": {
+      "type": "boolean",
+      "title": "Free"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "used",
+     "limit",
+     "free"
+    ],
+    "title": "InvestigationCredits",
+    "description": "What the investigation's runs used, in credits (step P4; docs/18)."
+   },
    "InvestigationDetail": {
     "properties": {
      "id": {
@@ -4059,6 +4106,9 @@
      "budget_usd": {
       "type": "number",
       "title": "Budget Usd"
+     },
+     "credits": {
+      "$ref": "#/components/schemas/InvestigationCredits"
      },
      "created_at": {
       "type": "string",
@@ -4123,6 +4173,7 @@
      "waiting_for",
      "cost_usd",
      "budget_usd",
+     "credits",
      "created_at",
      "updated_at",
      "input",
@@ -4194,6 +4245,9 @@
       "type": "number",
       "title": "Budget Usd"
      },
+     "credits": {
+      "$ref": "#/components/schemas/InvestigationCredits"
+     },
      "created_at": {
       "type": "string",
       "title": "Created At"
@@ -4216,6 +4270,7 @@
      "waiting_for",
      "cost_usd",
      "budget_usd",
+     "credits",
      "created_at",
      "updated_at"
     ],
@@ -5169,6 +5224,50 @@
     ],
     "title": "PlanInfo"
    },
+   "Plans": {
+    "properties": {
+     "prices": {
+      "$ref": "#/components/schemas/Prices"
+     },
+     "pro_monthly_credits": {
+      "type": "integer",
+      "title": "Pro Monthly Credits"
+     },
+     "free_evaluations": {
+      "type": "integer",
+      "title": "Free Evaluations"
+     },
+     "pro_monthly_usd": {
+      "type": "number",
+      "title": "Pro Monthly Usd"
+     },
+     "pro_yearly_usd": {
+      "type": "number",
+      "title": "Pro Yearly Usd"
+     },
+     "topup_credits": {
+      "type": "integer",
+      "title": "Topup Credits"
+     },
+     "topup_usd": {
+      "type": "number",
+      "title": "Topup Usd"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "prices",
+     "pro_monthly_credits",
+     "free_evaluations",
+     "pro_monthly_usd",
+     "pro_yearly_usd",
+     "topup_credits",
+     "topup_usd"
+    ],
+    "title": "Plans",
+    "description": "What the plans offer and cost: the public Pricing page (no login)."
+   },
    "Prices": {
     "properties": {
      "evaluate": {
@@ -5301,6 +5400,9 @@
       "type": "number",
       "title": "Budget Usd"
      },
+     "credits": {
+      "$ref": "#/components/schemas/InvestigationCredits"
+     },
      "last_seq": {
       "type": "integer",
       "title": "Last Seq"
@@ -5327,6 +5429,7 @@
      "counters",
      "cost_usd",
      "budget_usd",
+     "credits",
      "last_seq",
      "last_run"
     ],

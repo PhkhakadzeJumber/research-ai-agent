@@ -9,9 +9,9 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef } from "react";
 
-import { Button, Card, ErrorNote, Input, MonoLabel, Pill, cx, type Tone } from "@/components/ui";
+import { Button, Card, ErrorNote, MonoLabel, Pill, cx, type Tone } from "@/components/ui";
 import {
   investigationKeys,
   useActivity,
@@ -22,6 +22,7 @@ import {
   type Progress,
   type ProgressEvent,
 } from "@/lib/api/hooks";
+import { creditsText, endedText } from "@/lib/plan";
 import { useLiveEvents } from "@/lib/live";
 
 const HEADLINES: Record<string, [string, string]> = {
@@ -87,10 +88,8 @@ export function ProgressView({ investigation }: { investigation: Investigation }
   const data = progress.data;
   const [plain, emphasis] = headline(data);
   const lastRun = investigation.last_run;
-  const needsBudget = !running && lastRun?.reason === "budget";
   const stoppedEarly = !running && lastRun && ["stopped", "budget", "account_refused", "failed"].includes(lastRun.reason);
-  const cost = data?.cost_usd ?? investigation.cost_usd;
-  const cap = data?.budget_usd ?? investigation.budget_usd;
+  const credits = data?.credits ?? investigation.credits;
   const current = data?.rail.find((s) => s.status === "active");
 
   return (
@@ -115,14 +114,14 @@ export function ProgressView({ investigation }: { investigation: Investigation }
                 {investigation.run === "stopping" ? "Stopping…" : "Stop"}
               </Button>
             ) : investigation.status !== "failed" ? (
-              <ResumeButton needsBudget={needsBudget} cap={cap} pending={resume.isPending} onResume={(b) => resume.mutate(b)} />
+              <Button disabled={resume.isPending} onClick={() => resume.mutate(undefined)}>{resume.isPending ? "Resuming…" : "Resume"}</Button>
             ) : null}
           </div>
         </div>
         <ErrorNote error={stop.error ?? resume.error} />
         {stoppedEarly ? (
           <div role="status" className={cx("rounded-md px-4 py-3 body-s", lastRun.reason === "failed" || lastRun.reason === "account_refused" ? "bg-red-soft text-red" : "bg-amber-soft text-amber")}>
-            {lastRun.message}
+            {endedText(lastRun.reason, lastRun.message)}
           </div>
         ) : null}
       </header>
@@ -173,15 +172,19 @@ export function ProgressView({ investigation }: { investigation: Investigation }
 
           <Card className="flex flex-col gap-3 p-5">
             <div className="flex items-center justify-between">
-              <MonoLabel>Cost so far</MonoLabel>
-              <span className="heading-s">${cost.toFixed(2)} of ${cap.toFixed(2)} cap</span>
+              <MonoLabel>Credits</MonoLabel>
+              <span className="heading-s">{creditsText(credits, running)}</span>
             </div>
-            <div className="h-2.5 overflow-hidden rounded-pill bg-surface-muted" role="progressbar" aria-valuemin={0} aria-valuemax={cap} aria-valuenow={cost}>
-              <div className="h-full rounded-pill bg-accent transition-all" style={{ width: `${Math.min(100, (cost / cap) * 100)}%` }} />
-            </div>
+            {credits.free ? null : (
+              <div className="h-2.5 overflow-hidden rounded-pill bg-surface-muted" role="progressbar" aria-label="Credits used"
+                aria-valuemin={0} aria-valuemax={Math.max(credits.limit, 1)} aria-valuenow={credits.used}>
+                <div className="h-full rounded-pill bg-accent transition-all" style={{ width: `${Math.min(100, (credits.used / Math.max(credits.limit, 1)) * 100)}%` }} />
+              </div>
+            )}
             <p className="body-s text-ink-3">
-              Every paid step checks the cap first. If Anthropic refuses the account, the run pauses here instead of
-              finishing with no evidence.
+              {credits.free
+                ? "Your free evaluation: nothing is charged."
+                : "You never pay more than the price shown when it started; what a run doesn't use comes back when it ends."}
             </p>
           </Card>
 
@@ -197,8 +200,7 @@ export function ProgressView({ investigation }: { investigation: Investigation }
                 <li key={event.seq} className="flex flex-col gap-1.5 border-t border-line py-3 sm:flex-row sm:items-center sm:gap-3.5">
                   <span className="font-mono text-[11px] text-ink-3">{time(event.at)}</span>
                   <span className="w-24 shrink-0"><Pill tone={KIND_TONES[event.kind] ?? "neutral"}>{KIND_LABELS[event.kind] ?? event.kind}</Pill></span>
-                  <span className="body-s flex-1">{event.message}</span>
-                  {event.cost_usd !== null ? <span className="font-mono text-[11px] text-ink-3">${event.cost_usd.toFixed(2)}</span> : null}
+                  <span className="body-s flex-1">{event.kind === "ended" ? endedText(String(event.data?.reason ?? ""), event.message) : event.message}</span>
                 </li>
               ))}
             </ol>
@@ -216,17 +218,3 @@ function StatusPill({ run, label, failed }: { run: Investigation["run"]; label?:
   return <Pill>Paused</Pill>;
 }
 
-function ResumeButton({ needsBudget, cap, pending, onResume }: {
-  needsBudget: boolean; cap: number; pending: boolean; onResume: (budget?: number) => void;
-}) {
-  const [budget, setBudget] = useState(Math.min(20, cap + 3));
-  if (!needsBudget) return <Button disabled={pending} onClick={() => onResume()}>{pending ? "Resuming…" : "Resume"}</Button>;
-  return (
-    <span className="flex items-center gap-2">
-      <label className="body-s text-ink-2" htmlFor="new-budget">New budget $</label>
-      <Input id="new-budget" type="number" min={cap + 0.5} max={20} step="0.5" value={budget}
-        onChange={(e) => setBudget(Number(e.target.value))} className="w-24 py-2" />
-      <Button disabled={pending || budget <= cap} onClick={() => onResume(budget)}>{pending ? "Resuming…" : "Resume"}</Button>
-    </span>
-  );
-}

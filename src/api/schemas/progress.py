@@ -6,6 +6,7 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
+from src.api.schemas.billing import InvestigationCredits
 from src.api.schemas.common import ApiModel, Timestamp
 from src.db.models import ProgressEvent
 
@@ -78,5 +79,7 @@ class Progress(ApiModel):
     counters: Counters
     cost_usd: float
     budget_usd: float
+    credits: InvestigationCredits
+    """The progress bar (step P4): users see credits, not dollars."""
     last_seq: int
     last_run: LastRun | None

@@ -7,6 +7,7 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+import { ProfileTabs } from "@/components/profile-tabs";
 import { initials } from "@/components/top-nav";
 import { Button, Card, ErrorNote, Field, Input, MonoLabel, Segmented, TextArea } from "@/components/ui";
 import {
@@ -94,6 +95,7 @@ function ProfileForm({ me, profile }: { me: Me; profile: Profile }) {
           Eureka judges feasibility for you, so it needs to know what you can do. Every new investigation copies
           these limits; anything you type for one run overrides them for that run.
         </p>
+        <ProfileTabs />
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[360px_1fr]">

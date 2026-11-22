@@ -12,7 +12,7 @@ import { useState } from "react";
 
 import { FacetGroups } from "@/components/facets";
 import { Button, Card, ErrorNote, Input, MonoLabel, Pill, cx } from "@/components/ui";
-import { useAnswerClarification, useClarification, type Clarification, type Investigation } from "@/lib/api/hooks";
+import { useAnswerClarification, useClarification, useMe, type Clarification, type Investigation } from "@/lib/api/hooks";
 
 export function ClarificationView({ investigation }: { investigation: Investigation }) {
   const clarification = useClarification(investigation.id);
@@ -50,6 +50,9 @@ function ClarificationForm({ investigation, reading }: { investigation: Investig
     });
 
   const proposed = facets.some((f) => f.is_key && !f.stated_by_user);
+  // what is left of the action's price after Eureka's first reading (step P4)
+  const prices = useMe().data?.plan.prices;
+  const priceLeft = prices ? Math.max(0, prices[discover ? "discover" : "evaluate"] - investigation.credits.used) : "the rest of the price in";
   return (
     <div className="flex flex-col gap-8">
       <header className="flex flex-col gap-2.5">
@@ -182,8 +185,10 @@ function ClarificationForm({ investigation, reading }: { investigation: Investig
           <Card dark className="flex flex-col gap-3.5 p-6">
             <MonoLabel className="text-accent">Next: {discover ? "discovery" : "full evaluation"}</MonoLabel>
             <p className="body-s text-ink-3">
-              {discover ? "About $8–12 and 25–40 minutes." : "About $3–5 and 10–15 minutes."} Capped at $
-              {investigation.budget_usd.toFixed(0)}: it stops before going over.
+              {investigation.credits.free
+                ? "Your free evaluation, 10–15 minutes. "
+                : `Up to ${priceLeft} more credits, ${discover ? "25–40" : "10–15"} minutes. `}
+              You never pay more than the price shown; what it doesn&apos;t use comes back.
             </p>
             <ErrorNote error={answer.error} />
             <div className="flex flex-wrap gap-2.5">

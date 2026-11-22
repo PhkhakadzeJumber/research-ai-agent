@@ -5,6 +5,7 @@ allows and what runs are charged is decided in src/api/billing.py; buying Pro an
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import timedelta
 
 from fastapi import APIRouter
 from sqlalchemy import select
@@ -14,13 +15,24 @@ from src.api import billing
 from src.api.auth import CurrentUser
 from src.api.deps import SessionDep
 from src.api.routes.investigations import describe
-from src.api.schemas.billing import Billing, BillingEntry, Credits, PlanInfo, Prices
+from src.api.schemas.billing import Billing, BillingEntry, Credits, PlanInfo, Plans, Prices
 from src.api.schemas.common import ERRORS
 from src.config import get_billing_settings
 from src.db.models import Candidate, CreditGrant, CreditHold, Investigation, User
-from src.timeutil import now
+from src.timeutil import TZ, now
 
 router = APIRouter(prefix="/billing", tags=["billing"])
+public = APIRouter(tags=["billing"])
+
+
+@public.get("/plans", response_model=Plans)
+async def get_plans() -> Plans:
+    """What Free and Pro include and cost, for the Pricing page: no login needed."""
+    s = get_billing_settings()
+    return Plans(prices=Prices(evaluate=s.price_evaluate, discover=s.price_discover, package=s.price_package),
+                 pro_monthly_credits=s.pro_monthly_credits, free_evaluations=s.free_evaluations,
+                 pro_monthly_usd=s.pro_monthly_usd, pro_yearly_usd=s.pro_yearly_usd, topup_credits=s.topup_credits,
+                 topup_usd=s.topup_usd)
 
 HISTORY = 100
 GRANT_TITLES = {"monthly": "Monthly credits · Pro", "topup": "Top-up", "admin": "Credits from Eureka"}
@@ -39,6 +51,13 @@ async def plan_info(session: AsyncSession, user: User) -> PlanInfo:
                     prices=Prices(evaluate=s.price_evaluate, discover=s.price_discover, package=s.price_package))
 
 
+def _expiry(grant: CreditGrant) -> str:
+    """When a grant's credits expire, as the user's calendar says it (Tbilisi): monthly credits last through the
+    month's last day (they expire at midnight on the 1st)."""
+    last_day = (grant.expires_at.astimezone(TZ) - timedelta(microseconds=1))
+    return f"{'expire after' if grant.source == 'monthly' else 'valid until'} {last_day.day} {last_day:%b %Y}"
+
+
 def _detail(price: int, charged: int, outcomes: set[str], running: bool, free: bool) -> tuple[str, str]:
     """(detail, status) of one action, from its runs' holds."""
     if running:
@@ -53,7 +72,7 @@ def _detail(price: int, charged: int, outcomes: set[str], running: bool, free: b
 async def history(session: AsyncSession, user: User) -> list[BillingEntry]:
     entries = [BillingEntry(at=g.created_at, kind="grant", title=GRANT_TITLES[g.source] + (
                    f" · {g.note}" if g.note and g.source != "monthly" else ""),
-                            detail=f"valid until {g.expires_at:%d %b %Y}", credits=g.amount, status="granted")
+                            detail=_expiry(g), credits=g.amount, status="granted")
                for g in (await session.execute(select(CreditGrant).where(CreditGrant.user_id == user.id)
                                                .order_by(CreditGrant.created_at.desc()).limit(HISTORY))).scalars()]
     holds = list((await session.execute(select(CreditHold).where(CreditHold.user_id == user.id)

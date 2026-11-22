@@ -7,6 +7,7 @@ import uuid
 from typing import Literal
 
 from src.api.schemas.common import ApiModel, Labelled, Timestamp
+from src.api.schemas.billing import InvestigationCredits
 from src.api.schemas.progress import LastRun
 
 Mode = Literal["evaluate", "discover"]
@@ -26,7 +27,9 @@ class InvestigationSummary(ApiModel):
     waiting_for: Literal["clarification"] | None
     """What the user must do before it can go on (answer the clarification), if anything."""
     cost_usd: float
+    """What it cost us (admins); users see `credits`."""
     budget_usd: float
+    credits: InvestigationCredits
     created_at: Timestamp
     updated_at: Timestamp
 

@@ -117,7 +117,9 @@ A side panel in the workspace for questions about the investigation. Answers car
 
 Exports include the coverage report and the "not a guarantee of originality" note.
 
-### 3.11 Plans and billing (doc 18 §6)
+### 3.11 Plans and billing (doc 18 §6) ✅ step P4
+
+Built from Figma screens 12, 13 and 01b. What a plan allows is explained before the click (`lib/plan.ts`: `canStart`, `priceText`, `chipText`); the server still decides. Until payments (step P5), Go Pro, Manage billing and Buy credits say "Payments open soon".
 
 - **Pricing** (`/pricing`, public): Free vs Pro, the credit price of each action, FAQ.
 - **Profile → Plan & billing**: plan and renewal, credits left (monthly / top-up), credit history, Manage billing, top-up.

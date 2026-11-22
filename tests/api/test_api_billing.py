@@ -243,6 +243,9 @@ async def test_a_run_through_the_api_reserves_then_is_charged_when_it_ends(clien
     assert run["detail"] == f"price 25, used {hold.charged}"
     assert {e["title"] for e in page["history"] if e["kind"] == "grant"} == {"Monthly credits · Pro",
                                                                              "Credits from Eureka · tests"}
+    monthly = next(e for e in page["history"] if e["title"] == "Monthly credits · Pro")
+    last_day = billing.next_month(now()) - timedelta(days=1)  # the month's last day, in Tbilisi
+    assert monthly["detail"] == f"expire after {last_day.day} {last_day:%b %Y}"
 
 
 async def test_the_api_refuses_what_the_plan_does_not_allow(app, db_session, runs):
@@ -277,3 +280,33 @@ async def test_nobody_sees_or_spends_someone_elses_credits(client, db_session, u
     assert page["credits"]["held"] == 0 and page["credits"]["available"] == 1100
     assert (await db_session.execute(select(func.count()).select_from(CreditGrant).where(
         CreditGrant.user_id == user.id))).scalar_one() == 2
+
+
+# --- what the pages show (step P4) ----------------------------------------------------------------------------
+
+async def test_the_plans_are_public(bare_client):
+    response = await bare_client.get("/api/v1/plans")
+    assert response.status_code == 200
+    plans = response.json()
+    assert plans["prices"] == {"evaluate": 25, "discover": 60, "package": 5}
+    assert (plans["pro_monthly_usd"], plans["pro_yearly_usd"], plans["topup_credits"], plans["topup_usd"]) == (
+        10.0, 96.0, 50, 5.0)
+    assert (plans["pro_monthly_credits"], plans["free_evaluations"]) == (100, 1)
+
+
+async def test_an_investigation_shows_its_credits_while_running_and_after(client, db_session, user):
+    investigation = await new_investigation(db_session, user)
+    await billing.reserve(db_session, user, investigation, "evaluate")
+    await spend(db_session, investigation, "0.10")
+    url = f"/api/v1/investigations/{investigation.id}"
+    running = (await client.get(url)).json()["credits"]
+    assert running == {"used": 3, "limit": 25, "free": False}  # ceil(0.10 / 0.04), of the 25 reserved
+    await billing.settle(db_session, investigation.id, "nothing")
+    assert (await client.get(f"{url}/progress")).json()["credits"] == {"used": 3, "limit": 3, "free": False}
+    listed = (await client.get("/api/v1/investigations")).json()["items"]
+    assert next(i for i in listed if i["id"] == str(investigation.id))["credits"]["used"] == 3
+
+    free_user = await new_user(db_session)
+    theirs = await new_investigation(db_session, free_user)
+    await billing.reserve(db_session, free_user, theirs, "evaluate")
+    assert (await billing.investigation_credits(db_session, theirs.id))["free"] is True

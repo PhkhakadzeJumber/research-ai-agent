@@ -14,7 +14,7 @@ import { IdeaDetail } from "@/components/idea";
 import { ButtonLink, Card, ErrorNote, MonoLabel, Pill, buttonClass, cx } from "@/components/ui";
 import { API } from "@/lib/api/client";
 import { useLandscape, useResults, type Investigation, type RankedIdea, type Results } from "@/lib/api/hooks";
-import { money, verdictTone, words } from "@/lib/format";
+import { verdictTone, words } from "@/lib/format";
 
 export function ResultsView({ investigation }: { investigation: Investigation }) {
   const results = useResults(investigation.id);
@@ -58,7 +58,7 @@ function DiscoverResults({ investigation, results }: { investigation: Investigat
     ["Read closely", landscape.data?.papers_read, "in the landscape"],
     ["Open problems", landscape.data?.open_problems.length, "3+ papers each"],
     ["Ideas proposed", ideas, `${results.finalists.length} finalist${results.finalists.length === 1 ? "" : "s"}`],
-    ["Cost", money(investigation.cost_usd), `of ${money(investigation.budget_usd)}`],
+    ["Credits", investigation.credits.free ? "Free" : investigation.credits.used, investigation.credits.free ? "free plan" : "used"],
   ] as const;
 
   return (

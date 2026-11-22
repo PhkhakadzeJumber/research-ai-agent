@@ -4,8 +4,10 @@
  * - Mode 1 (Evaluate my idea): the idea as text, or the user's own document (.pdf / .md / .txt, sent to Claude only
  *   with their consent), plus papers they already know (seeds: DOIs, arXiv IDs or titles).
  * - Mode 2 (Find me an idea): field, interests, what to avoid, how many ideas.
- * - The limits bar: complexity, available weeks, compute and the budget. Weeks and compute start from the profile;
- *   only what is changed here is sent, and it overrides the profile for this run (the backend merges the two).
+ * - The limits bar: complexity, available weeks and compute, and the plan. Weeks and compute start from the
+ *   profile; only what is changed here is sent, and it overrides the profile for this run (the backend merges the two).
+ * - Prices are in credits (step P4; docs/18): the plan sets what a run may cost, so there is no budget to type. A
+ *   free account sees Mode 2 locked and its free evaluation; a click the plan wouldn't allow says why first.
  */
 "use client";
 
@@ -13,13 +15,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 
-import { Button, Card, ErrorNote, Field, Input, MonoLabel, Pill, Segmented, TextArea, cx } from "@/components/ui";
-import { useCreateFromDocument, useCreateInvestigation, useProfile, type ResearchLimits } from "@/lib/api/hooks";
+import { PlanNote } from "@/components/plan-note";
+import { Button, ButtonLink, Card, ErrorNote, Field, Input, MonoLabel, Pill, Segmented, TextArea, cx } from "@/components/ui";
+import { useCreateFromDocument, useCreateInvestigation, useMe, useProfile, type ResearchLimits } from "@/lib/api/hooks";
+import { canStart, chipText, priceText, type Plan } from "@/lib/plan";
 
 const MAX_IDEA = 2000;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const FILE_TYPES = [".pdf", ".md", ".txt"];
-const DEFAULT_BUDGET = { evaluate: 5, discover: 12 };
 
 type Complexity = "beginner" | "intermediate" | "advanced";
 type Compute = NonNullable<ResearchLimits["compute"]>;
@@ -65,8 +68,8 @@ function Start({ limits }: { limits: ResearchLimits | undefined }) {
     limits?.academic_level === "phd" || limits?.academic_level === "researcher" ? "advanced" : "beginner",
   );
   const [run, setRun] = useState<RunLimits>({ weeks: limits?.weeks_available ?? null, compute: limits?.compute ?? null });
-  const [budget, setBudget] = useState<number | null>(null);
-  const shared = { complexity, constraints: typedConstraints(limits, run), budget };
+  const plan = useMe().data?.plan;
+  const shared = { complexity, constraints: typedConstraints(limits, run), plan };
 
   return (
     <div className="flex flex-col gap-10">
@@ -94,8 +97,7 @@ function Start({ limits }: { limits: ResearchLimits | undefined }) {
         setComplexity={setComplexity}
         run={run}
         setRun={setRun}
-        budget={budget}
-        setBudget={setBudget}
+        plan={plan}
         hasProfile={Boolean(limits && Object.keys(limits).length)}
       />
       <HowItWorks />
@@ -103,14 +105,14 @@ function Start({ limits }: { limits: ResearchLimits | undefined }) {
   );
 }
 
-type Shared = { complexity: Complexity; constraints: Record<string, string>; budget: number | null };
+type Shared = { complexity: Complexity; constraints: Record<string, string>; plan: Plan | undefined };
 
 function useGoTo() {
   const router = useRouter();
   return (id: string) => router.push(`/investigations/${id}`);
 }
 
-function EvaluateCard({ complexity, constraints, budget }: Shared) {
+function EvaluateCard({ complexity, constraints, plan }: Shared) {
   const goTo = useGoTo();
   const create = useCreateInvestigation();
   const upload = useCreateFromDocument();
@@ -143,12 +145,10 @@ function EvaluateCard({ complexity, constraints, budget }: Shared) {
         if (published) form.append("published", "true");
         form.append("complexity", complexity);
         if (Object.keys(constraints).length) form.append("constraints", JSON.stringify(constraints));
-        form.append("budget_usd", String(budget ?? DEFAULT_BUDGET.evaluate));
         goTo((await upload.mutateAsync(form)).id);
       } else {
         const summary = await create.mutateAsync({
           mode: "evaluate", idea: idea.trim(), seed_papers: parseSeeds(seeds), complexity, constraints,
-          budget_usd: budget ?? DEFAULT_BUDGET.evaluate,
         });
         goTo(summary.id);
       }
@@ -157,12 +157,13 @@ function EvaluateCard({ complexity, constraints, budget }: Shared) {
     }
   }
 
-  const ready = file ? consent : idea.trim().length > 0;
+  const allowed = canStart(plan, "evaluate");
+  const ready = (file ? consent : idea.trim().length > 0) && allowed.ok;
   return (
     <Card className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <MonoLabel>Mode 1</MonoLabel>
-        <Pill>~$3–5 · 10–15 min</Pill>
+        <Pill tone={plan?.plan === "free" ? "green" : "neutral"}>{[priceText(plan, "evaluate"), "10–15 min"].filter(Boolean).join(" · ")}</Pill>
       </div>
       <h2 className="display-m">Evaluate my idea</h2>
       <p className="body-m text-ink-2">
@@ -225,6 +226,7 @@ function EvaluateCard({ complexity, constraints, budget }: Shared) {
           </Field>
         ) : null}
         <ErrorNote error={create.error ?? upload.error} />
+        {allowed.ok ? null : <PlanNote check={allowed} />}
         <div className="flex flex-wrap items-center justify-between gap-3">
           {!file && !seedsOpen ? (
             <button type="button" onClick={() => setSeedsOpen(true)} className="body-s text-left">
@@ -239,7 +241,7 @@ function EvaluateCard({ complexity, constraints, budget }: Shared) {
   );
 }
 
-function DiscoverCard({ complexity, constraints, budget }: Shared) {
+function DiscoverCard({ complexity, constraints, plan }: Shared) {
   const goTo = useGoTo();
   const create = useCreateInvestigation();
   const [field, setField] = useState("");
@@ -253,7 +255,6 @@ function DiscoverCard({ complexity, constraints, budget }: Shared) {
       const summary = await create.mutateAsync({
         mode: "discover", field: field.trim(), interests: interests.trim() || null,
         exclusions: avoid.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 10), count, complexity, constraints,
-        budget_usd: budget ?? DEFAULT_BUDGET.discover,
       });
       goTo(summary.id);
     } catch {
@@ -262,11 +263,13 @@ function DiscoverCard({ complexity, constraints, budget }: Shared) {
   }
 
   const dark = "border-0 bg-white/10 text-paper placeholder:text-ink-3 focus:border-white/40";
+  const allowed = canStart(plan, "discover");
+  const locked = plan?.plan === "free";
   return (
     <Card dark className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <MonoLabel className="text-accent">Mode 2</MonoLabel>
-        <Pill tone="spark">~$8–12 · 25–40 min</Pill>
+        <Pill tone="spark">{[priceText(plan, "discover"), "25–40 min"].filter(Boolean).join(" · ")}</Pill>
       </div>
       <h2 className="display-m">Find me an idea</h2>
       <p className="body-m text-ink-3">
@@ -274,6 +277,7 @@ function DiscoverCard({ complexity, constraints, budget }: Shared) {
         that fit you.
       </p>
       <form onSubmit={submit} className="flex flex-col gap-4 [&_label>span:first-child]:text-paper">
+        <fieldset disabled={locked} className={cx("flex flex-col gap-4", locked && "opacity-40")}>
         <Field label="Field">
           <Input value={field} onChange={(e) => setField(e.target.value)} placeholder="e.g. NLP" maxLength={300} required className={dark} />
         </Field>
@@ -283,15 +287,26 @@ function DiscoverCard({ complexity, constraints, budget }: Shared) {
         <Field label="Avoid">
           <Input value={avoid} onChange={(e) => setAvoid(e.target.value)} placeholder="e.g. medical, robotics hardware (comma-separated)" className={dark} />
         </Field>
+        </fieldset>
         <ErrorNote error={create.error} />
+        {allowed.ok || locked ? null : <PlanNote check={allowed} dark />}
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <label className="flex items-center gap-2 whitespace-nowrap body-s text-ink-3">
-            How many ideas
-            <Input type="number" min={1} max={10} value={count} onChange={(e) => setCount(Math.min(10, Math.max(1, Number(e.target.value) || 1)))} className={cx(dark, "w-16 py-1.5")} />
-          </label>
-          <Button type="submit" kind="accent" disabled={!field.trim() || create.isPending}>
-            {create.isPending ? "Starting…" : "Discover ideas →"}
-          </Button>
+          {locked ? (
+            <>
+              <span className="body-s text-ink-3">Finding ideas is part of Pro.</span>
+              <ButtonLink href="/pricing" kind="accent">Upgrade to Pro →</ButtonLink>
+            </>
+          ) : (
+            <>
+              <label className="flex items-center gap-2 whitespace-nowrap body-s text-ink-3">
+                How many ideas
+                <Input type="number" min={1} max={10} value={count} onChange={(e) => setCount(Math.min(10, Math.max(1, Number(e.target.value) || 1)))} className={cx(dark, "w-16 py-1.5")} />
+              </label>
+              <Button type="submit" kind="accent" disabled={!field.trim() || create.isPending || !allowed.ok}>
+                {create.isPending ? "Starting…" : "Discover ideas →"}
+              </Button>
+            </>
+          )}
         </div>
       </form>
     </Card>
@@ -299,10 +314,10 @@ function DiscoverCard({ complexity, constraints, budget }: Shared) {
 }
 
 function LimitsBar({
-  complexity, setComplexity, run, setRun, budget, setBudget, hasProfile,
+  complexity, setComplexity, run, setRun, plan, hasProfile,
 }: {
   complexity: Complexity; setComplexity: (c: Complexity) => void; run: RunLimits; setRun: (r: RunLimits) => void;
-  budget: number | null; setBudget: (b: number | null) => void; hasProfile: boolean;
+  plan: Plan | undefined; hasProfile: boolean;
 }) {
   return (
     <Card className="flex flex-col gap-5 p-6 lg:flex-row lg:items-end lg:gap-8">
@@ -334,10 +349,12 @@ function LimitsBar({
           {(Object.keys(COMPUTE_LABELS) as Compute[]).map((c) => <option key={c} value={c}>{COMPUTE_LABELS[c]}</option>)}
         </select>
       </LimitField>
-      <LimitField label="Budget ($)">
-        <Input type="number" min={1} max={20} step="0.5" value={budget ?? ""} placeholder="5 / 12" className="w-28"
-          onChange={(e) => setBudget(e.target.value ? Number(e.target.value) : null)} />
-      </LimitField>
+      {plan ? (
+        <div className="flex flex-col gap-1.5">
+          <span className="label-mono">Plan</span>
+          <Link href="/profile/billing" className="py-2.5 heading-s hover:underline">{chipText(plan).join(" · ")}</Link>
+        </div>
+      ) : null}
     </Card>
   );
 }

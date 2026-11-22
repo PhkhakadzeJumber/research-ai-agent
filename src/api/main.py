@@ -63,6 +63,7 @@ def create_app(database: Database | None = None) -> FastAPI:
     v1 = APIRouter(prefix=API_PREFIX)
     for module in (accounts, actions, investigations, progress, candidates, papers, billing_routes):
         v1.include_router(module.router)
+    v1.include_router(billing_routes.public)
     app.include_router(v1)
     return app
 

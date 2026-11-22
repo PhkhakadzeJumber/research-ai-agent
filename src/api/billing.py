@@ -149,6 +149,25 @@ async def price_left(session: AsyncSession, investigation_id: uuid.UUID, action:
     return price - int(charged)
 
 
+async def investigation_credits(session: AsyncSession, investigation_id: uuid.UUID) -> dict:
+    """What an investigation's runs used, in credits, and the most it may use so far: what settled runs were charged,
+    plus (for a run in progress) its estimate so far and its reserved price. `free` for a free evaluation."""
+    s = get_billing_settings()
+    holds = list((await session.execute(select(CreditHold).where(
+        CreditHold.investigation_id == investigation_id))).scalars())
+    investigation = await session.get(Investigation, investigation_id)
+    used = limit = 0
+    for hold in holds:
+        if hold.status == "settled":
+            used += hold.charged or 0
+            limit += hold.charged or 0
+        else:
+            spent = max(Decimal(0), Decimal(investigation.cost_usd or 0) - Decimal(hold.cost_at_start))
+            used += min(hold.price, credits_for(spent, s))
+            limit += hold.price
+    return dict(used=used, limit=limit, free=bool(holds) and all(h.free for h in holds))
+
+
 # --- reserving ------------------------------------------------------------------------------------------------
 
 async def reserve(session: AsyncSession, user: User, investigation: Investigation, action: str, *,

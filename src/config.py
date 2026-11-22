@@ -365,6 +365,14 @@ class BillingSettings:
     run_cap_factor: float = 1.5
     """A run may cost up to this times its price in dollars before it stops (EUREKA_RUN_CAP_FACTOR); we absorb the
     overrun above the price."""
+    pro_monthly_usd: float = 10.0
+    """What Pro costs month to month (EUREKA_PRO_MONTHLY_USD), shown on the Pricing page."""
+    pro_yearly_usd: float = 96.0
+    """What Pro costs for a year (EUREKA_PRO_YEARLY_USD)."""
+    topup_credits: int = 50
+    """Credits in a top-up pack (EUREKA_TOPUP_CREDITS)."""
+    topup_usd: float = 5.0
+    """What a top-up pack costs (EUREKA_TOPUP_USD)."""
 
 
 def load_billing_settings(environ: Mapping[str, str]) -> BillingSettings:
@@ -376,7 +384,9 @@ def load_billing_settings(environ: Mapping[str, str]) -> BillingSettings:
             ("EUREKA_PRO_MONTHLY_CREDITS", "pro_monthly_credits", int),
             ("EUREKA_FREE_EVALUATIONS", "free_evaluations", int),
             ("EUREKA_FREE_MONTHLY_BUDGET_USD", "free_monthly_budget_usd", float),
-            ("EUREKA_RUN_CAP_FACTOR", "run_cap_factor", float)):
+            ("EUREKA_RUN_CAP_FACTOR", "run_cap_factor", float),
+            ("EUREKA_PRO_MONTHLY_USD", "pro_monthly_usd", float), ("EUREKA_PRO_YEARLY_USD", "pro_yearly_usd", float),
+            ("EUREKA_TOPUP_CREDITS", "topup_credits", int), ("EUREKA_TOPUP_USD", "topup_usd", float)):
         raw = environ.get(name, "").strip()
         if not raw:
             continue
@@ -385,7 +395,8 @@ def load_billing_settings(environ: Mapping[str, str]) -> BillingSettings:
         except ValueError:
             value = -1
         floor = 0 if attribute in ("free_evaluations", "free_monthly_budget_usd") else 1 if kind is int else 0
-        if value < floor or (attribute in ("credit_usd", "run_cap_factor") and value <= 0):
+        if value < floor or (attribute in ("credit_usd", "run_cap_factor", "pro_monthly_usd", "pro_yearly_usd",
+                                           "topup_usd") and value <= 0):
             raise ConfigError(f"{name} must be a {'whole ' if kind is int else ''}number"
                               f"{' of at least ' + str(floor) if floor else ' above 0'}; got {raw!r}.")
         values[attribute] = value

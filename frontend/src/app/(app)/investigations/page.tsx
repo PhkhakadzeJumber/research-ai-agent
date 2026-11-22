@@ -9,7 +9,7 @@ import { useState } from "react";
 
 import { ButtonLink, Card, ErrorNote, Pill, cx } from "@/components/ui";
 import { useInvestigations, useMe } from "@/lib/api/hooks";
-import { money, statusOf, whenText } from "@/lib/format";
+import { statusOf, whenText } from "@/lib/format";
 
 const FILTERS = [
   { status: null, label: "All" },
@@ -28,7 +28,7 @@ export default function InvestigationsPage() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-col gap-2.5">
           <h1 className="display-l">Your <em>investigations</em></h1>
-          <p className="body-m text-ink-2">Everything Eureka has evaluated or discovered for you, with what it cost.</p>
+          <p className="body-m text-ink-2">Everything Eureka has evaluated or discovered for you, with the credits each used.</p>
         </div>
         <div className="flex flex-wrap gap-2.5">
           <ButtonLink href="/" kind="secondary">Find me an idea</ButtonLink>
@@ -48,7 +48,7 @@ export default function InvestigationsPage() {
       {list.error ? <ErrorNote error={list.error} /> : null}
       <Card className="overflow-hidden p-0">
         <div className="hidden grid-cols-[1fr_120px_220px_90px_110px_24px] gap-4 px-6 py-3.5 label-mono text-ink-3 md:grid">
-          <span>Investigation</span><span>Mode</span><span>Status</span><span>Cost</span><span>Updated</span><span />
+          <span>Investigation</span><span>Mode</span><span>Status</span><span>Credits</span><span>Updated</span><span />
         </div>
         {list.isPending ? <p className="body-s border-t border-line px-6 py-5 text-ink-3">Loading…</p> : null}
         {!list.isPending && items.length === 0 ? (
@@ -70,7 +70,7 @@ export default function InvestigationsPage() {
               </span>
               <span className="hidden md:block"><Pill tone={item.mode === "discover" ? "violet" : "indigo"}>{item.mode === "discover" ? "Mode 2" : "Mode 1"}</Pill></span>
               <span><Pill tone={tone}>{label}</Pill></span>
-              <span className="hidden font-mono text-sm md:block">{money(item.cost_usd)}</span>
+              <span className="hidden font-mono text-sm md:block">{item.credits.free ? "free" : `${item.credits.used} cr`}</span>
               <span className="hidden body-s text-ink-3 md:block">{whenText(item.updated_at)}</span>
               <span aria-hidden className="hidden text-ink-3 md:block">→</span>
             </Link>
@@ -79,12 +79,14 @@ export default function InvestigationsPage() {
       </Card>
 
       {me.data ? (
-        <Card tone="accent" className="flex items-center gap-4 p-5">
+        <Card tone="accent" className="flex flex-wrap items-center gap-4 p-5">
           <span aria-hidden className="text-2xl">✦</span>
-          <p className="body-m">
-            This month: {money(me.data.spent_this_month_usd)} across all your investigations. Each one stops before its
-            own budget, and you can resume any paused one.
+          <p className="body-m flex-1">
+            {me.data.plan.plan === "pro"
+              ? `Pro · ${me.data.plan.credits.available} credits left. A run never costs more than the price shown when it starts, and you can resume any paused one.`
+              : `Free plan · ${me.data.plan.free_evaluations_left ?? 0} evaluation(s) left this month. Pro adds discovery and research packages.`}
           </p>
+          <Link href="/profile/billing" className="body-s font-semibold text-indigo">Plan & billing →</Link>
         </Card>
       ) : null}
     </div>

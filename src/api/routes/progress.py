@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.ai.workflows.budget import cost_cap
 from src.ai.workflows.ranking import FINALIST_STATUSES
+from src.api.billing import investigation_credits
 from src.api.auth import COOKIE_NAME, CurrentUser, authenticate
 from src.api.errors import ApiError
 from src.api.deps import RunsDep, SessionDep
@@ -144,7 +145,7 @@ async def get_progress(investigation_id: uuid.UUID, session: SessionDep, user: C
     return Progress(mode=investigation.mode, stage=investigation.stage, step=step, run=run, rail=stages,
                     counters=await counters(session, investigation_id),
                     cost_usd=float(investigation.cost_usd or 0), budget_usd=float(cost_cap(investigation)),
-                    last_seq=newest.seq if newest else 0, last_run=await last_run(session, investigation_id))
+                    credits=await investigation_credits(session, investigation_id), last_seq=newest.seq if newest else 0, last_run=await last_run(session, investigation_id))
 
 
 @router.get("/{investigation_id}/activity", response_model=Activity, responses=ERRORS)

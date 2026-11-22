@@ -576,6 +576,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Plans
+         * @description What Free and Pro include and cost, for the Pricing page: no login needed.
+         */
+        get: operations["get_plans_api_v1_plans_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1170,6 +1190,18 @@ export interface components {
             /** Novelty Claims */
             novelty_claims: components["schemas"]["NoveltyClaim"][];
         };
+        /**
+         * InvestigationCredits
+         * @description What the investigation's runs used, in credits (step P4; docs/18).
+         */
+        InvestigationCredits: {
+            /** Used */
+            used: number;
+            /** Limit */
+            limit: number;
+            /** Free */
+            free: boolean;
+        };
         /** InvestigationDetail */
         InvestigationDetail: {
             /**
@@ -1201,6 +1233,7 @@ export interface components {
             cost_usd: number;
             /** Budget Usd */
             budget_usd: number;
+            credits: components["schemas"]["InvestigationCredits"];
             /** Created At */
             created_at: string;
             /** Updated At */
@@ -1251,6 +1284,7 @@ export interface components {
             cost_usd: number;
             /** Budget Usd */
             budget_usd: number;
+            credits: components["schemas"]["InvestigationCredits"];
             /** Created At */
             created_at: string;
             /** Updated At */
@@ -1551,6 +1585,25 @@ export interface components {
             free_evaluations_left: number | null;
             prices: components["schemas"]["Prices"];
         };
+        /**
+         * Plans
+         * @description What the plans offer and cost: the public Pricing page (no login).
+         */
+        Plans: {
+            prices: components["schemas"]["Prices"];
+            /** Pro Monthly Credits */
+            pro_monthly_credits: number;
+            /** Free Evaluations */
+            free_evaluations: number;
+            /** Pro Monthly Usd */
+            pro_monthly_usd: number;
+            /** Pro Yearly Usd */
+            pro_yearly_usd: number;
+            /** Topup Credits */
+            topup_credits: number;
+            /** Topup Usd */
+            topup_usd: number;
+        };
         /** Prices */
         Prices: {
             /** Evaluate */
@@ -1597,6 +1650,7 @@ export interface components {
             cost_usd: number;
             /** Budget Usd */
             budget_usd: number;
+            credits: components["schemas"]["InvestigationCredits"];
             /** Last Seq */
             last_seq: number;
             last_run: components["schemas"]["LastRun"] | null;
@@ -3475,6 +3529,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_plans_api_v1_plans_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plans"];
                 };
             };
         };

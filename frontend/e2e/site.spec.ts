@@ -22,7 +22,38 @@ test.describe("not logged in", () => {
     await expect(page).toHaveURL(/\/investigations$/);
     await expect(page.getByRole("heading", { name: /Your investigations/ })).toBeVisible();
   });
+
+  test("the pricing page is public, with the server's prices", async ({ page }) => {
+    await page.goto("/pricing");
+    await expect(page.getByRole("heading", { name: /Good research shouldn.t cost a fortune/ })).toBeVisible();
+    await expect(page.getByText("Evaluate ideas: 25 credits each")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Start free" })).toBeVisible();
+    await page.getByRole("button", { name: "Monthly" }).click();
+    await expect(page.getByText("$10", { exact: true })).toBeVisible();
+  });
 });
+
+// the test account is on the free plan (step P4)
+test("a free account sees its free evaluation, and discovery locked", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: "Your plan and credits" })).toContainText("Free");
+  await expect(page.getByText(/Free · \d left this month · 10–15 min|Free evaluation used · 10–15 min/)).toBeVisible();
+  await expect(page.getByText("Pro · 60 credits · 25–40 min")).toBeVisible();
+  await expect(page.getByLabel("Field")).toBeDisabled();
+  await page.getByRole("link", { name: "Upgrade to Pro →" }).click();
+  await expect(page).toHaveURL(/\/pricing$/);
+  await expect(page.getByText("Your plan")).toBeVisible(); // on the free card
+});
+
+test("plan & billing shows the plan and the credit history", async ({ page }) => {
+  await page.goto("/profile");
+  await page.getByRole("link", { name: "Plan & billing" }).click();
+  await expect(page).toHaveURL(/\/profile\/billing$/);
+  await expect(page.getByRole("heading", { name: /Your plan and credits/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Credit history" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "See Pro →" })).toBeVisible();
+});
+
 
 test("the start page offers both ways in", async ({ page }) => {
   await page.goto("/");

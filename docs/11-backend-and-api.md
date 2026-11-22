@@ -140,9 +140,10 @@ Every other route needs a login (`401 not_logged_in`). Someone else's investigat
 
 | Method | Route | Purpose |
 |---|---|---|
+| GET | `/plans` ✅ | Public (no login): credits per action, Pro's monthly credits, the free evaluations, what Pro and a top-up cost (env vars): the Pricing page |
 | GET | `/billing` ✅ | `{plan, plan_until, credits: {available, monthly, other, held}, free_evaluations_left, prices, history}`; the history is newest first: grants (+) and one line per action (−, with "price 25, used 22", "failed on our side · refunded", "running · up to 24 reserved") |
 
-`/auth/me` carries the same plan, credits and prices (without the history). Every route that starts a run reserves its credits first (`src/api/billing.py`) and refuses with nothing stored or reserved:
+`/auth/me` carries the same plan, credits and prices (without the history). Each investigation (list, detail, progress) has `credits: {used, limit, free}`: charged so far plus a running run's estimate, and the most it may use so far. Every route that starts a run reserves its credits first (`src/api/billing.py`) and refuses with nothing stored or reserved:
 
 | Status | Code | When |
 |---|---|---|

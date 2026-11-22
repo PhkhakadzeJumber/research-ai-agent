@@ -12,6 +12,17 @@ from src.api.schemas.common import ApiModel, Timestamp
 Plan = Literal["free", "pro"]
 
 
+class InvestigationCredits(ApiModel):
+    """What the investigation's runs used, in credits (step P4; docs/18)."""
+
+    used: int
+    """Charged so far (with a running run's estimate)."""
+    limit: int
+    """The most it may use so far: what was charged, plus a running run's reserved price."""
+    free: bool
+    """A free plan evaluation: no credits are charged."""
+
+
 class Credits(ApiModel):
     available: int
     """What a new run may use: monthly + other, minus what running ones reserved."""
@@ -51,6 +62,20 @@ class BillingEntry(ApiModel):
     """+ granted, − charged (or reserved, while running)."""
     status: Literal["granted", "reserved", "charged", "refunded", "free"]
     investigation_id: uuid.UUID | None = None
+
+
+class Plans(ApiModel):
+    """What the plans offer and cost: the public Pricing page (no login)."""
+
+    prices: Prices
+    """Credits per action."""
+    pro_monthly_credits: int
+    free_evaluations: int
+    """Full evaluations a free account may start each month."""
+    pro_monthly_usd: float
+    pro_yearly_usd: float
+    topup_credits: int
+    topup_usd: float
 
 
 class Billing(PlanInfo):

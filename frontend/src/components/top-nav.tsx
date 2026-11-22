@@ -1,6 +1,6 @@
 /**
- * The top navigation (Figma component TopNav): the logo, the main links (the current one in ink), this month's
- * spend, and the avatar, which opens the profile. Step 10a.
+ * The top navigation (Figma component TopNav): the logo, the main links (the current one in ink), the plan chip
+ * (credits left, or the free evaluation; it opens Plan & billing; step P4), and the avatar, which opens the profile.
  */
 "use client";
 
@@ -9,6 +9,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 import { useMe } from "@/lib/api/hooks";
+import { chipText } from "@/lib/plan";
 
 import { Logo, cx } from "./ui";
 
@@ -17,6 +18,7 @@ const LINKS = [
   { href: "/", label: "New" },
   { href: "/library", label: "Library" },
   { href: "/#how-it-works", label: "How it works" },
+  { href: "/pricing", label: "Pricing" },
 ];
 
 export function initials(name: string | null | undefined, email: string | undefined) {
@@ -64,10 +66,11 @@ export function TopNav() {
           {menuOpen ? "Close" : "Menu"}
         </button>
         {me ? (
-          <span className="hidden items-center gap-2 rounded-pill border border-line bg-surface px-3 py-1 sm:inline-flex">
-            <span className="label-mono">This month</span>
-            <span className="text-sm font-semibold">${me.spent_this_month_usd.toFixed(2)}</span>
-          </span>
+          <Link href="/profile/billing" aria-label="Your plan and credits"
+            className="hidden items-center gap-2 rounded-pill border border-line bg-surface px-3 py-1 hover:border-ink-3 sm:inline-flex">
+            <span className="label-mono">{chipText(me.plan)[0]}</span>
+            <span className="text-sm font-semibold">{chipText(me.plan)[1]}</span>
+          </Link>
         ) : null}
         <Link
           href="/profile"
@@ -87,7 +90,11 @@ export function TopNav() {
               {link.label}
             </Link>
           ))}
-          {me ? <span className="py-3 body-s text-ink-3">This month: ${me.spent_this_month_usd.toFixed(2)}</span> : null}
+          {me ? (
+            <Link href="/profile/billing" onClick={() => setMenuOpen(false)} className="py-3 body-s text-ink-3">
+              {chipText(me.plan).join(" · ")}
+            </Link>
+          ) : null}
         </nav>
       ) : null}
     </header>

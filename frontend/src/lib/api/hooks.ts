@@ -18,7 +18,20 @@ export const keys = {
 };
 
 export function useMe() {
-  return useQuery({ queryKey: keys.me, queryFn: () => api<Me>("/auth/me"), retry: false, staleTime: 60_000 });
+  return useQuery({ queryKey: keys.me, queryFn: () => api<Me>("/auth/me"), retry: false, staleTime: 15_000 });
+}
+
+export type Billing = Schemas["Billing"];
+export type Plans = Schemas["Plans"];
+
+/** The plan, credits and credit history (Profile → Plan & billing; step P4). */
+export function useBilling() {
+  return useQuery({ queryKey: ["billing"], queryFn: () => api<Billing>("/billing") });
+}
+
+/** What the plans include and cost: public, for the Pricing page. */
+export function usePlans() {
+  return useQuery({ queryKey: ["plans"], queryFn: () => api<Plans>("/plans"), staleTime: 3_600_000 });
 }
 
 export function useLogin() {
@@ -120,6 +133,7 @@ function useRefreshInvestigation() {
   const client = useQueryClient();
   return (id: string, summary?: InvestigationSummary) => {
     if (summary) client.setQueryData(investigationKeys.detail(id), (old: Investigation | undefined) => (old ? { ...old, ...summary } : old));
+    client.invalidateQueries({ queryKey: keys.me }); // credits were reserved or returned
     return client.invalidateQueries({ queryKey: ["investigation", id] });
   };
 }
@@ -129,7 +143,10 @@ export function useCreateInvestigation() {
   return useMutation({
     mutationFn: (body: NewEvaluation | NewDiscovery) =>
       api<InvestigationSummary>("/investigations", { method: "POST", body: body as Record<string, unknown> }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["investigations"] }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: keys.me });
+      return client.invalidateQueries({ queryKey: ["investigations"] });
+    },
   });
 }
 
@@ -137,7 +154,10 @@ export function useCreateFromDocument() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (form: FormData) => api<InvestigationSummary>("/investigations/document", { method: "POST", body: form }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["investigations"] }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: keys.me });
+      return client.invalidateQueries({ queryKey: ["investigations"] });
+    },
   });
 }
 
@@ -223,6 +243,7 @@ export function useWritePackage(ideaId: string) {
   return useMutation({
     mutationFn: () => api<InvestigationSummary>(`/candidates/${ideaId}/proposal`, { method: "POST" }),
     onSuccess: (summary) => {
+      client.invalidateQueries({ queryKey: keys.me });
       client.invalidateQueries({ queryKey: ["investigation", summary.id] });
       client.invalidateQueries({ queryKey: ideaKeys.part(ideaId, "proposal") });
     },
