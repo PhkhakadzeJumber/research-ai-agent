@@ -681,7 +681,7 @@ The papers the Skeptic finds flow back into the search trail as SearchQuery (ori
 | created candidate id | The new version created by a `refine` decision | Closes the loop: the UI draws "refined from … because …" | `cand_3` |
 | timestamp | When | Ordering in the UI timeline | — |
 
-### 7.7 ResearchPackage
+### 7.7 ResearchPackage (built in step 7, migration 0017)
 
 **What it is:** the final deliverable for a strong candidate: the 17 sections from doc 02.
 
@@ -696,6 +696,8 @@ A package is grounded in **one specific evaluation**. If the candidate is re-eva
 | sections (17) | Each with content, statement-type tags and referenced claim/paper IDs | Honest labelling per section; references are IDs that the backend turns into citations after checking they exist | Section 13: experiment design |
 | generation model, prompt version | How it was produced | Reproducibility; evaluation | `proposal v1` |
 | export history | When and in which format it was exported | Convenience; auditing | md, 2026-11-20 |
+
+*As built (step 7, table `research_packages`):* `candidate_id`, `evaluation_id`, `revision` (unique per candidate), `sections` (A7's checked sections and code's check counts), `model`, `prompt_version`. The code-rendered sections aren't copied in; they're rendered from that evaluation when shown. Export history comes with the API.
 
 ---
 

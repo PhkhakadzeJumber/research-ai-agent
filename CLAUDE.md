@@ -32,6 +32,8 @@ python -m scripts.evaluate "your idea" [--field NLP] [--complexity beginner] [--
 python -m scripts.evaluate --continue <investigation id> [--budget N]  # resume where it stopped
 python -m scripts.evaluate --idea-file draft.pdf [--consent] [--published --arxiv ID]  # evaluate your own document (.md/.txt/.pdf, private; sent to Claude only with consent): paid API, ask first
 python -m scripts.report <investigation id> [--out report.md]  # the full report from stored data, both modes (Mode 2: ranked ideas): free
+python -m scripts.proposal <investigation id> [--candidate ID] [--out package.md]  # the 17-section research package for the top (or a chosen) finalist, A7, about 25-40 cents: paid API, ask first
+python -m scripts.proposal <investigation id> --show  # the latest stored package: free
 python -m scripts.discover "NLP" [--interests ...] [--exclude ...] [--complexity beginner] [--count 3] [--budget 12] [--max-light 5 (light evaluations in all)]  # Workflow B, end to end: field brief, clarification, landscape, mining, the Scout's candidates, pre-screening, light evaluation (about $1-1.40 per candidate), refinements, replenishing, full evaluation of the best (about $1.60-2.20 each), ranking: paid API, ask first
 
 # Backend

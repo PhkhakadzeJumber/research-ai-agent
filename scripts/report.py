@@ -27,6 +27,7 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.ai.citations import cite, paper_link  # noqa: F401  (paper_link: kept importable from here)
 from src.ai.evidence.verdicts import LABELS
 from src.ai.workflows.concluding import stored_verdicts
 from src.ai.workflows.landscape import confirmed_brief
@@ -54,20 +55,6 @@ from src.db.session import Database
 DIMENSIONS = ("novelty", "significance", "feasibility", "recommendation")
 FOOTER = ("*Novelty verdicts are limited to the sources and papers searched: Eureka never claims an idea is "
           "original, only what it did and did not find.*")
-
-
-def paper_link(paper: Paper) -> str:
-    if paper.doi:
-        return f"https://doi.org/{paper.doi}"
-    if paper.arxiv_id:
-        return f"https://arxiv.org/abs/{paper.arxiv_id}"
-    return f"https://openalex.org/{paper.openalex_id}" if paper.openalex_id else ""
-
-
-def cite(paper: Paper) -> str:
-    kind = "peer-reviewed" if paper.tier == 1 else "preprint"
-    link = paper_link(paper)
-    return f"*{paper.title}* ({paper.year or 'n.d.'}, {kind})" + (f" <{link}>" if link else "")
 
 
 async def facet_lines(session: AsyncSession, candidate: Candidate) -> list[str]:

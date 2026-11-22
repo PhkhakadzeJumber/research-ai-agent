@@ -250,6 +250,7 @@ ROLE_DEFAULT_EFFORT = {
 # non-streaming calls above about 21k output tokens, so 20k is the ceiling here.
 ROLE_DEFAULT_MAX_TOKENS = {
     "scout": 20000,
+    "proposal": 20000,  # the research package's written sections (step 7)
 }
 
 

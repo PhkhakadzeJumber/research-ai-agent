@@ -16,6 +16,7 @@ from src.db.models.evaluations import (  # region 5: judging a candidate
     TriageDecision,
     Verdict,
 )
+from src.db.models.packages import ResearchPackage  # region 5: the final deliverable
 from src.db.models.library import Chunk, Paper, PaperAnalysis, Quote  # region 3: science library
 from src.db.models.opportunities import OpportunityItem  # region 4: mined material for the Scout
 from src.db.models.run import Intake, Investigation, LlmCall, User  # region 1: request & run control
@@ -39,6 +40,7 @@ __all__ = [
     "Paper",
     "PaperAnalysis",
     "Quote",
+    "ResearchPackage",
     "RetrievalHit",
     "SearchQuery",
     "TriageDecision",

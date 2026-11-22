@@ -32,7 +32,7 @@ ABSTRACT_ONLY_NOTE = (
 )
 FULL_TEXT_NOTE = "Passages from the full text are included as chunks, each with its ID and section."
 
-_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints|field_brief|subtopic|items|item|pairs|pair|finding|setting|statement|statements|quote|material|candidates|candidate|research_question|facets|data|fit|limits|triage|verdicts|closest_works|work|facet_matrix|cell|feasibility|blocking|simplification|skill_gap|motivation|contribution|already_tried|idea)\b",
+_TAGS = re.compile(r"<(/?)(paper|papers|title|authors|note|abstract|chunk|reading|coverage|claims|claim|verdict|examined|challenges|challenge|complexity|constraints|field_brief|subtopic|items|item|pairs|pair|finding|setting|statement|statements|quote|material|candidates|candidate|research_question|facets|data|fit|limits|triage|verdicts|closest_works|work|facet_matrix|cell|feasibility|blocking|simplification|skill_gap|motivation|contribution|already_tried|idea|user|quote)\b",
                    re.IGNORECASE)
 _QUOTE_IN_ATTRIBUTE = re.compile(r'["<>]')
 
@@ -928,4 +928,81 @@ def render_document_idea(request: IdeaForAnalysis, document: DocumentForAnalysis
                      for name, items in document.reading if items)
         lines.append("</reading>")
     lines.append("</document>")
+    return "\n".join(lines)
+
+
+# --- the Proposal Designer's packet (A7, step 7) -----------------------------------------------------------
+#
+#     (the candidate block)
+#     <verdicts>novelty: Potential opportunity (rule N4: ...) | ...</verdicts>
+#     <claims><claim label="C1" kind="gap" status="verified">text<quote paper="P2">...</quote></claim></claims>
+#     <closest_works>...</closest_works> <facet_matrix>...</facet_matrix>
+#     <challenges><challenge label="K1" type="prior_work_found" resolution="accepted">argument</challenge></challenges>
+#     <feasibility>data / compute / timeline / risks / simplifications</feasibility>
+#     <papers><paper label="P2" year="2025">title | methods: ... | datasets: ... | metrics: ... | baselines: ...</paper></papers>
+#     <user>complexity, constraints</user>
+
+
+@dataclass(frozen=True)
+class ClaimForProposal:
+    label: str
+    kind: str
+    status: str
+    text: str
+    quotes: tuple[tuple[str, str], ...] = ()  # (paper label, verified quote)
+
+
+@dataclass(frozen=True)
+class PaperForProposal:
+    label: str
+    title: str
+    year: int | None
+    methods: tuple[str, ...] = ()
+    datasets: tuple[str, ...] = ()
+    metrics: tuple[str, ...] = ()
+    baselines: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ProposalRequest:
+    candidate: CandidateForPlanning
+    verdicts: tuple[str, ...]
+    claims: tuple[ClaimForProposal, ...]
+    closest_works: tuple[tuple[str, bool, str, str], ...]  # (paper label, minor only, what they did, how it differs)
+    cells: tuple[tuple[str, int, str], ...]  # (paper label, facet number, overlap)
+    challenges: tuple[tuple[str, str, str, str], ...]  # (label, type, resolution, argument)
+    feasibility: tuple[str, ...]
+    papers: tuple[PaperForProposal, ...]
+    complexity: str
+    constraints: tuple[tuple[str, str], ...]
+
+
+def render_proposal(r: ProposalRequest) -> str:
+    """The Proposal Designer's input: everything the evaluation found, labelled."""
+    lines = [render_query_task(r.candidate, task="Write the research proposal for this idea."),
+             "<verdicts>" + " | ".join(_contain(v) for v in r.verdicts) + "</verdicts>", "<claims>"]
+    for c in r.claims:
+        quotes = "".join(f'<quote paper="{_attribute(p)}">{_contain(q)}</quote>' for p, q in c.quotes)
+        lines.append(f'<claim label="{_attribute(c.label)}" kind="{_attribute(c.kind)}" status="{_attribute(c.status)}">'
+                     f"{_contain(c.text)}{quotes}</claim>")
+    lines += ["</claims>", "<closest_works>"]
+    lines.extend(f'<work paper="{_attribute(p)}" minor_difference_only="{str(minor).lower()}">{_contain(did)} -> '
+                 f"{_contain(differs)}</work>" for p, minor, did, differs in r.closest_works)
+    lines += ["</closest_works>", "<facet_matrix>"]
+    lines.extend(f'<cell paper="{_attribute(p)}" facet="{f}" overlap="{_attribute(o)}"/>' for p, f, o in r.cells)
+    lines += ["</facet_matrix>", "<challenges>"]
+    lines.extend(f'<challenge label="{_attribute(k)}" type="{_attribute(t)}" resolution="{_attribute(res)}">'
+                 f"{_contain(arg)}</challenge>" for k, t, res, arg in r.challenges)
+    lines += ["</challenges>", "<feasibility>"]
+    lines.extend(f"- {_contain(item)}" for item in r.feasibility)
+    lines += ["</feasibility>", "<papers>"]
+    for p in r.papers:
+        parts = [_contain(p.title)] + [f"{name}: {', '.join(_contain(v) for v in values)}"
+                                       for name, values in (("methods", p.methods), ("datasets", p.datasets),
+                                                            ("metrics", p.metrics), ("baselines", p.baselines)) if values]
+        year = f' year="{p.year}"' if p.year else ""
+        lines.append(f'<paper label="{_attribute(p.label)}"{year}>{" | ".join(parts)}</paper>')
+    lines += ["</papers>", "<user>", f"complexity: {COMPLEXITY_NOTES.get(r.complexity, r.complexity)}"]
+    lines.extend(f"- {_contain_user_text(name)}: {_contain_user_text(value)}" for name, value in r.constraints)
+    lines.append("</user>")
     return "\n".join(lines)

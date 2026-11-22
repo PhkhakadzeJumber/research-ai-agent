@@ -332,6 +332,8 @@ It also reports the round's **saturation statistic**: the number of new relevant
 - Limitations must include the Skeptic's unresolved challenges.
 - No new factual claims that aren't in the ledger. If a claim is needed, flag it as "to verify".
 
+*As built (step 7; `src/ai/agents/proposal_designer.py`, `src/ai/workflows/proposal.py`, `scripts/proposal.py`):* A7 writes only the sections that need writing: the title, background, motivation, contribution, methodology, hypotheses, tools, experiment design, limitations, and the recommendation's explanation (`ProposalOutput`, prompt `proposal`, up to 20k output tokens, not streamed). Code renders the rest from the one frozen evaluation: the research question, novelty, closest works, evidence, datasets, feasibility, references and the recommendation. Every statement is tagged evidence / interpretation / hypothesis / to_verify and cites only labels. Code drops unknown labels, and re-tags "evidence" without a verified or defended claim, or a paper with a verified quote, as "to verify". The Skeptic's unresolved challenges are always listed under limitations.
+
 **Tests:**
 
 - All 17 sections are present.
