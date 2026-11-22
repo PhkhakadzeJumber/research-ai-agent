@@ -198,8 +198,12 @@ export function useIdeaPart<T>(id: string, part: "matrix" | "claims" | "challeng
   return useQuery({ queryKey: ideaKeys.part(id, part), queryFn: () => api<T>(`/candidates/${id}/${part}`), enabled });
 }
 
+/** Whether to check for the package again: while it's being written, until it arrives (fixed after hand testing: polling
+ * stopped when the run ended, so a package saved after the last check never showed and the page said "Writing" forever). */
+export const packagePoll = (waiting: boolean, pkg: unknown) => (waiting && !pkg ? 5_000 : false);
+
 /** The latest research package, or null if none was written yet (a 404 here is an answer, not an error). */
-export function usePackage(id: string, refreshWhile: boolean) {
+export function usePackage(id: string, waiting: boolean) {
   return useQuery({
     queryKey: ideaKeys.part(id, "proposal"),
     queryFn: async () => {
@@ -210,7 +214,7 @@ export function usePackage(id: string, refreshWhile: boolean) {
         throw error;
       }
     },
-    refetchInterval: refreshWhile ? 5_000 : false,
+    refetchInterval: (query) => packagePoll(waiting, query.state.data),
   });
 }
 

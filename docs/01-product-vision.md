@@ -26,6 +26,9 @@ In both modes the output isn't prose. It's a **structured research workspace**: 
 | Researcher | Wants a fast prior-work and counterevidence check before investing | Mode 1, deeper search budgets, Advanced complexity |
 | Supervisor | Wants to check a student's proposal quickly | Mode 1, evidence explorer, exported report |
 
+Eureka is a **public product** for these users, with a free plan (one evaluation a month) and a low-cost Pro plan
+($10 a month); plans and credits are in doc 18.
+
 ## 4. What Eureka is not
 
 - **Not an originality certificate.** It reports what it searched and found. The researcher and their supervisor make the call.

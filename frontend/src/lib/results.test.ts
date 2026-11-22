@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { traceText } from "@/components/idea";
 import { shortTitle } from "@/components/package";
 import { ownIdea } from "@/components/results";
-import type { Results } from "@/lib/api/hooks";
+import { packagePoll, type Results } from "@/lib/api/hooks";
 import { statusOf, verdictTone, whenText } from "@/lib/format";
 
 describe("verdict colours", () => {
@@ -70,5 +70,13 @@ describe("the idea, in parts", () => {
     expect(groups.map(([kind, parts]) => [kind, parts.map((p) => p.position)])).toEqual([
       ["problem", [1, 4]], ["method", [2, 0]], ["contribution", [3]],
     ]);
+  });
+});
+
+describe("the research package page", () => {
+  it("keeps checking after the click until the package arrives, even once the run has ended", () => {
+    expect(packagePoll(true, null)).toBe(5_000);
+    expect(packagePoll(true, { revision: 1 })).toBe(false);
+    expect(packagePoll(false, null)).toBe(false);
   });
 });

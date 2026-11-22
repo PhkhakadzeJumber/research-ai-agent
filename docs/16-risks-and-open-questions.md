@@ -21,6 +21,10 @@
 | 15 | Cloud Run throttles background runs | Stuck investigations | Medium | CPU always allocated + min instances in demos; resumable stages; Cloud Tasks later |
 | 16 | Key/account setup problems (e.g. key not workspace-scoped, Semantic Scholar key delay) | Blocked development | Medium | Day-1 checklist: workspace-scoped Anthropic key, Semantic Scholar key request, GCP project with billing |
 
+- **Payments from Georgia** (doc 18 §7): Stripe may not accept a Georgia-based seller; a merchant of record (Paddle,
+  Lemon Squeezy) is the expected route. Verify before step P5.
+- **The cheaper model mix** (doc 18 §5) is unmeasured until step 11; if quality drops, move single roles back up.
+
 ## 2. Open questions
 
 Decisions still to make. Recommendations are included.

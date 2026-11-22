@@ -55,6 +55,11 @@
 6. Ablation runs + an evaluation dashboard page.
 7. Hacker News / RSS signals.
 
+### 1.2b Public launch: plans and billing (decided 2026-11-22; doc 18 §8)
+
+P1 model mix → P2 plans and credits (backend) → P3 email verification and password reset → P4 pricing and billing UI →
+P5 payments → P6 terms and privacy; then one test round (step 11) and deployment (step 12).
+
 ### 1.3 Later / future
 
 - "Ask about this investigation" chat panel.

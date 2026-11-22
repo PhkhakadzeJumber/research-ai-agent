@@ -25,8 +25,8 @@ export function PackageScreen({ ideaId }: { ideaId: string }) {
   const idea = useIdea(ideaId);
   const investigation = useInvestigation(idea.data?.investigation_id ?? "");
   const writing = investigation.data?.run === "running";
-  const pkg = usePackage(ideaId, writing);
   const write = useWritePackage(ideaId);
+  const pkg = usePackage(ideaId, writing || write.isSuccess);
 
   if (idea.isPending || pkg.isPending) return <p className="body-s text-ink-3">Loading…</p>;
   if (idea.error || pkg.error) return <ErrorNote error={idea.error ?? pkg.error} />;

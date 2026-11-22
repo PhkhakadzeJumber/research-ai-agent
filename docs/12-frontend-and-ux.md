@@ -117,6 +117,14 @@ A side panel in the workspace for questions about the investigation. Answers car
 
 Exports include the coverage report and the "not a guarantee of originality" note.
 
+### 3.11 Plans and billing (doc 18 §6)
+
+- **Pricing** (`/pricing`, public): Free vs Pro, the credit price of each action, FAQ.
+- **Profile → Plan & billing**: plan and renewal, credits left (monthly / top-up), credit history, Manage billing, top-up.
+- **Start**: a 🔒 Pro badge on Mode 2 for free users; credit prices on the start buttons; "1 free evaluation left".
+- **Nav chip**: credits left, or "Free · 1 evaluation left".
+- No dollar amounts or model names on user pages (the upload consent still names the AI provider).
+
 ## 4. Visual language
 
 | Element | Convention |

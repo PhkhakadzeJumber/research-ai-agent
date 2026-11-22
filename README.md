@@ -44,6 +44,7 @@ Read them in order the first time. Each document is self-contained enough to rev
 | 15 | [Roadmap](docs/15-roadmap.md) | MVP vs optional features, the solo 4-week plan, cut lines, exit criteria |
 | 16 | [Risks and open questions](docs/16-risks-and-open-questions.md) | What could go wrong, and the decisions we still need to make together |
 | 17 | [Course references](docs/17-course-references.md) | Which course examples to learn from (read-only; we never change the course repo) |
+| 18 | [Plans, credits and billing](docs/18-plans-and-billing.md) | Free and Pro plans, credit prices, unit economics, payments |
 
 ---
 

@@ -26,6 +26,11 @@ How Eureka calls Claude: models, settings, structured outputs, prompts, context 
 | A7 Proposal Designer | claude-opus-5-5 | medium | Long output, streamed |
 | Contradiction-pair check, signal summaries | claude-opus-5-5 | low | Small calls |
 
+**Decided 2026-11-22 (doc 18 §5): the launch mix.** The table above is the all-Opus default the system was built and
+measured on ($3.51 for a Mode 1 run). For the public product: Haiku 5.5 for the Paper Reader, relevance screening and
+opportunity mining; Sonnet 5.5 for every other role. Set in `.env` only; its quality is checked in the single test
+round (step 11).
+
 The model and effort for each role are **configuration**, not code. The table lives in one config file and is recorded with every call.
 
 **Current price reference** (per million tokens, input / output):
@@ -110,7 +115,7 @@ Paper reading dominates the cost. One paper read ≈ 3k input + 0.8k output toke
 
 The paper-analysis cache makes repeated runs in the same field much cheaper.
 
-### 7.2 Decision to make
+### 7.2 Decision to make (decided 2026-11-22: Haiku for the reader and screening, Sonnet for reasoning; doc 18 §5)
 
 **Whether to use a cheaper model** (e.g. Haiku 5.5) for the Paper Reader and relevance screening is a decision to make after measuring extraction quality on the 10 hand-labelled papers (doc 13). If the quality drop is small, the savings are large; if not, keep Opus.
 
