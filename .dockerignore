@@ -1,0 +1,19 @@
+# What the API image must never contain (secrets) or doesn't need (the website, tests, local tools, caches).
+.env
+.env.*
+!.env.example
+.git
+.venv
+venv
+frontend
+tests
+eval
+docs
+infra
+.cache
+.pytest_cache
+**/__pycache__
+**/*.pyc
+*.egg-info
+.vscode
+.idea

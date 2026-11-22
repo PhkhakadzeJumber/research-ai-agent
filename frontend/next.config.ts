@@ -5,6 +5,8 @@ import type { NextConfig } from "next";
 const backend = (process.env.BACKEND_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 
 const nextConfig: NextConfig = {
+  // a self-contained server in .next/standalone: what the Docker image runs (frontend/Dockerfile)
+  output: "standalone",
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {

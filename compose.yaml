@@ -1,13 +1,17 @@
-# Local development database: PostgreSQL 17 + pgvector (doc 11, doc 14).
+# Eureka on this computer: the database, the API and the website (doc 11, doc 14).
 #
-#   docker compose up -d db      start (first start also runs infra/db/init/)
-#   docker compose ps            status (should say "healthy")
-#   docker compose stop db       stop; data is kept in the eureka-db-data volume
-#   docker compose down -v       stop AND delete all data (careful)
+#   docker compose up --build -d   everything: http://localhost:3000 (website), :8000 (API), :5434 (database)
+#   docker compose up -d db        only the database (for `uvicorn --reload` and `npm run dev` while coding)
+#   docker compose ps              status (each should say "healthy" / "running")
+#   docker compose logs -f api     follow the API's log
+#   docker compose stop            stop; the data is kept in the eureka-db-data volume
+#   docker compose down -v         stop AND delete all data (careful)
 #
-# Values come from .env in this folder (names in .env.example). POSTGRES_PASSWORD
-# has no default on purpose: Docker refuses to start without it.
-# Port 5434, because 5432/5433 are often taken by locally installed Postgres servers.
+# Values come from .env in this folder (names in .env.example); they are passed to the containers at run time and
+# never built into an image. POSTGRES_PASSWORD has no default on purpose: Docker refuses to start without it.
+# Port 5434, because 5432/5433 are often taken by locally installed Postgres servers. Every port is published on
+# 127.0.0.1 only: reachable from this computer, not from the network.
+# Starting a run on the website calls paid APIs (Claude), exactly as with uvicorn.
 
 services:
   db:
@@ -28,6 +32,38 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # The API (Dockerfile in this folder): migrates the database on start, then serves on port 8000.
+  api:
+    build: .
+    image: eureka-api
+    container_name: eureka-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # inside Docker the database is the `db` service on its own port (these override .env's local values)
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # The website (frontend/Dockerfile): forwards /api/* to the api service, so the browser talks to one site.
+  web:
+    build:
+      context: ./frontend
+      args:
+        BACKEND_URL: http://api:8000
+    image: eureka-web
+    container_name: eureka-web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   eureka-db-data:

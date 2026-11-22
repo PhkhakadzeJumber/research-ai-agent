@@ -14,7 +14,11 @@ python -m venv .venv && source .venv/Scripts/activate
 pip install -r requirements.txt && pip install -e ".[dev]"   # exact pinned versions, then the app + dev tools
 pip freeze --exclude-editable > requirements.txt             # after changing dependencies in pyproject.toml (keep the header)
 
-# Database: Postgres 17 + pgvector in Docker (compose.yaml; needs Docker Desktop running and POSTGRES_PASSWORD in .env)
+# Everything in Docker (compose.yaml: db + api + web; needs Docker Desktop running and .env): one command
+docker compose up --build -d                 # website http://localhost:3000, API :8000, database :5434 (localhost only); the API migrates on start
+docker compose logs -f api                   # follow the API's log; `docker compose stop` stops all (data kept)
+
+# Database only (Postgres 17 + pgvector), for coding with instant reloads (uvicorn --reload, npm run dev)
 docker compose up -d db                      # start; port 5434 on localhost only
 docker compose ps                            # should show eureka-db as healthy
 python -m scripts.db_check                   # checks main + test database and pgvector

@@ -5,6 +5,8 @@ UI". Design and screens: `../docs/12-frontend-and-ux.md`.
 
 ## Run it locally
 
+The simplest: from the repo root, `docker compose up --build -d` starts the database, the API and this website
+(http://localhost:3000) together. While changing the frontend, run it with instant reloads instead.
 The backend must be running (from the repo root: `docker compose up -d db`, then `uvicorn src.api.main:app`).
 
 ```bash

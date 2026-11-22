@@ -1,0 +1,8 @@
+# Not part of the website image: installed packages and builds (made inside the image), env files, test output.
+node_modules
+.next
+.env*
+!.env.example
+test-results
+playwright-report
+coverage
