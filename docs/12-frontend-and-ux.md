@@ -121,7 +121,9 @@ Exports include the coverage report and the "not a guarantee of originality" not
 
 | Element | Convention |
 |---|---|
-| Novelty categories | Neutral colors, never a "green = original" signal: previously investigated (grey), incremental (amber), potential (blue), supported (teal), insufficient evidence (hatched) |
+| Verdicts (as built, step 10c, `frontend/src/lib/format.ts`) | Green = good, amber = has problems, red = blocks it, grey = unclear: Pursue / Refine / Reconsider; Feasible / with adjustments / not feasible; Strong / Moderate / Weak |
+| Novelty categories | Never a "green = original" signal: supported opportunity (indigo), potential opportunity (amber), incremental variation (grey), previously investigated (red), insufficient evidence (grey) |
+| Statement types (research package) | Evidence (green), interpretation (indigo), hypothesis (violet), to verify (amber), each with its source chips |
 | Statement types | Evidence (plain + citation chip), interpretation (italic label), hypothesis (dashed border), signal (labelled "community signal, not evidence") |
 | Badges | "Abstract only", "Preprint", "Full text" |
 | Rejected candidates | Muted, but readable, with the reason visible |

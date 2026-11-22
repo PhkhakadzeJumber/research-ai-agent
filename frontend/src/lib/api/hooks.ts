@@ -84,10 +84,11 @@ export const investigationKeys = {
 };
 
 /** One investigation; refreshed every few seconds while a run works on it, so the page follows the stage. */
-export function useInvestigation(id: string) {
+export function useInvestigation(id: string, enabled = true) {
   return useQuery({
     queryKey: investigationKeys.detail(id),
     queryFn: () => api<Investigation>(`/investigations/${id}`),
+    enabled: enabled && Boolean(id),
     refetchInterval: (query) => (query.state.data && query.state.data.run !== "idle" ? 4_000 : false),
   });
 }
@@ -154,6 +155,73 @@ export function useStop(id: string) {
   return useMutation({
     mutationFn: () => api<InvestigationSummary>(`/investigations/${id}/stop`, { method: "POST" }),
     onSuccess: (summary) => refresh(id, summary),
+  });
+}
+
+// --- results, ideas, research packages, the list (step 10c) ----------------------------------------------------
+
+export type Results = Schemas["Results"];
+export type RankedIdea = Schemas["RankedIdea"];
+export type Landscape = Schemas["Landscape"];
+export type CandidateDetail = Schemas["CandidateDetail"];
+export type Matrix = Schemas["Matrix"];
+export type ClaimOut = Schemas["ClaimOut"];
+export type SkepticLog = Schemas["SkepticLog"];
+export type ResearchPackage = Schemas["ResearchPackageOut"];
+
+export function useResults(id: string, enabled = true) {
+  return useQuery({ queryKey: ["investigation", id, "results"], queryFn: () => api<Results>(`/investigations/${id}/results`), enabled });
+}
+
+export function useLandscape(id: string, enabled: boolean) {
+  return useQuery({ queryKey: ["investigation", id, "landscape"], queryFn: () => api<Landscape>(`/investigations/${id}/landscape`), enabled });
+}
+
+export function useInvestigations(status: string | null) {
+  return useQuery({
+    queryKey: ["investigations", status],
+    queryFn: () => api<Schemas["Page_InvestigationSummary_"]>(`/investigations?limit=100${status ? `&status=${status}` : ""}`),
+    refetchInterval: (query) => (query.state.data?.items.some((i) => i.run !== "idle") ? 8_000 : false),
+  });
+}
+
+export const ideaKeys = {
+  detail: (id: string) => ["idea", id] as const,
+  part: (id: string, part: string) => ["idea", id, part] as const,
+};
+
+export function useIdea(id: string) {
+  return useQuery({ queryKey: ideaKeys.detail(id), queryFn: () => api<CandidateDetail>(`/candidates/${id}`) });
+}
+
+export function useIdeaPart<T>(id: string, part: "matrix" | "claims" | "challenges", enabled: boolean) {
+  return useQuery({ queryKey: ideaKeys.part(id, part), queryFn: () => api<T>(`/candidates/${id}/${part}`), enabled });
+}
+
+/** The latest research package, or null if none was written yet (a 404 here is an answer, not an error). */
+export function usePackage(id: string, refreshWhile: boolean) {
+  return useQuery({
+    queryKey: ideaKeys.part(id, "proposal"),
+    queryFn: async () => {
+      try {
+        return await api<ResearchPackage>(`/candidates/${id}/proposal`);
+      } catch (error) {
+        if (error instanceof Error && "status" in error && (error as { status: number }).status === 404) return null;
+        throw error;
+      }
+    },
+    refetchInterval: refreshWhile ? 5_000 : false,
+  });
+}
+
+export function useWritePackage(ideaId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<InvestigationSummary>(`/candidates/${ideaId}/proposal`, { method: "POST" }),
+    onSuccess: (summary) => {
+      client.invalidateQueries({ queryKey: ["investigation", summary.id] });
+      client.invalidateQueries({ queryKey: ideaKeys.part(ideaId, "proposal") });
+    },
   });
 }
 

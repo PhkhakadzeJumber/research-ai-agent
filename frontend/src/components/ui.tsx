@@ -62,13 +62,17 @@ export function Pill({ tone = "neutral", children, className }: { tone?: Tone; c
 
 // --- Card, labels --------------------------------------------------------------------------------------------
 
-export function Card({ className, dark, ...props }: ComponentProps<"div"> & { dark?: boolean }) {
-  return (
-    <div
-      className={cx("rounded-lg p-7", dark ? "bg-ink text-paper" : "border border-line bg-surface", className)}
-      {...props}
-    />
-  );
+const CARD_TONES = {
+  plain: "border border-line bg-surface",
+  dark: "bg-ink text-paper",
+  accent: "bg-accent-soft",
+  muted: "bg-surface-muted",
+};
+
+/** A card: white with a border by default; `tone` gives the design's dark, yellow (accent) and grey (muted) cards.
+ *  (A tone, not a background class in className: two background classes would fight and the default could win.) */
+export function Card({ className, dark, tone, ...props }: ComponentProps<"div"> & { dark?: boolean; tone?: keyof typeof CARD_TONES }) {
+  return <div className={cx("rounded-lg p-7", CARD_TONES[tone ?? (dark ? "dark" : "plain")], className)} {...props} />;
 }
 
 export function MonoLabel({ children, className }: { children: ReactNode; className?: string }) {

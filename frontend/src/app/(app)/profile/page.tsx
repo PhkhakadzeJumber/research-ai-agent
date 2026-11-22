@@ -126,7 +126,7 @@ function ProfileForm({ me, profile }: { me: Me; profile: Profile }) {
               Log out
             </Button>
           </Card>
-          <Card className="flex flex-col gap-2 border-0 bg-accent-soft p-6">
+          <Card tone="accent" className="flex flex-col gap-2 p-6">
             <MonoLabel className="text-ink-2">Why we ask</MonoLabel>
             <p className="body-s">
               Time and compute are hard limits: an idea that needs a cluster or 30 weeks is marked not feasible for

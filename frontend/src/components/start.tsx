@@ -285,7 +285,7 @@ function DiscoverCard({ complexity, constraints, budget }: Shared) {
         </Field>
         <ErrorNote error={create.error} />
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <label className="flex items-center gap-2 body-s text-ink-3">
+          <label className="flex items-center gap-2 whitespace-nowrap body-s text-ink-3">
             How many ideas
             <Input type="number" min={1} max={10} value={count} onChange={(e) => setCount(Math.min(10, Math.max(1, Number(e.target.value) || 1)))} className={cx(dark, "w-16 py-1.5")} />
           </label>
