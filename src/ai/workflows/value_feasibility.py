@@ -60,7 +60,7 @@ from src.db.models import (
 )
 from src.db.repositories.analyses import QuoteToStore, store_quotes
 from src.db.repositories.llm_calls import record_llm_calls
-from src.llm import LlmError
+from src.llm import LlmAccountError, LlmError
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +147,8 @@ async def value_step(
             claims=tuple(ClaimForSkeptic(f"C{n}", c.kind, c.text, c.status) for n, c in enumerate(claims, start=1)),
             challenges=tuple(ChallengeSummary(c.type, c.argument, c.resolution) for c in challenges),
             papers=views, settings=settings, model=model)
+    except LlmAccountError:  # the whole account is refused: stop, don't degrade
+        raise
     except LlmError as error:
         outcome.error = f"the Value & Feasibility Evaluator failed ({type(error).__name__}: {error})"
         async with sessions() as session:

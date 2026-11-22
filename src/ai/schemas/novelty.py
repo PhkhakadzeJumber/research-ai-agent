@@ -28,6 +28,9 @@ NoveltyCategory = Literal["previously_investigated", "incremental_variation", "p
 Label = Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^P\d{1,3}$")]
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
 QuoteText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=600)]
+# A claim (also a rebuttal) states something precise and may need a few clauses: 1000, like the Skeptic's arguments.
+# The step 5.6a live run had a rebuttal over 300 characters, which forced a paid rewrite.
+ClaimText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
 
 QUOTE_DESCRIPTION = (
     "A passage copied EXACTLY, word for word, from this paper's text in the input (its abstract or a "
@@ -76,7 +79,7 @@ class EvidenceOut(_Strict):
 
 class ClaimOut(_Strict):
     kind: ClaimKind
-    text: Text = Field(description="One statement. Never 'not studied': say 'not found among the papers examined'.")
+    text: ClaimText = Field(description="One statement. Never 'not studied': say 'not found among the papers examined'.")
     statement_type: Literal["evidence", "interpretation"] = Field(
         description="evidence: a paper states it. interpretation: your reasoning from the evidence (e.g. a gap)."
     )

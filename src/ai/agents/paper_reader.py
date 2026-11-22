@@ -31,7 +31,7 @@ from src.ai.prompts import SHARED_PREAMBLE, load_prompt, system_prompt
 from src.ai.schemas.paper_analysis import SCHEMA_VERSION, PaperAnalysisOutput
 from src.config import RoleLlmSettings
 from src.db.models import Chunk, Paper
-from src.llm import LlmCallRecord, LlmError, run_structured
+from src.llm import LlmCallRecord, LlmAccountError, LlmError, run_structured
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +136,8 @@ async def read_papers(
         async with semaphore:
             try:
                 return ReadOutcome(paper.paper_id, reading=await read_paper(paper, settings=settings, model=model))
+            except LlmAccountError:  # the whole account is refused: stop, don't degrade
+                raise
             except (LlmError, ValueError) as error:
                 logger.warning("paper_reader: %s failed: %s", paper.paper_id, error)
                 return ReadOutcome(paper.paper_id, error=f"{type(error).__name__}: {error}")

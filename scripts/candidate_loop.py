@@ -34,6 +34,9 @@ from src.db.models import Investigation
 from src.llm import LlmError
 
 
+ACCOUNT_REFUSED = ("Anthropic refused the request for your account (a usage or spending limit, the credit, or the API key). Stopped at {where}; nothing was concluded. Fix it in the Anthropic Console, then resume: python -m scripts.{command} --continue {investigation_id}")
+
+
 @dataclass
 class LoopModels:
     """Fakes for tests; None means the configured models."""
@@ -170,6 +173,10 @@ async def evaluate_light(sessions: Sessions, investigation_id: uuid.UUID, *, mod
               f"{outcome.stopped_at}. Resume with: python -m scripts.{command} --continue {investigation_id} "
               "--budget <more>")
         return 3
+    if outcome.stopped == "account_refused":
+        print("\n" + ACCOUNT_REFUSED.format(where=outcome.stopped_at, command=command,
+                                            investigation_id=investigation_id))
+        return 1
     if outcome.stopped:
         print(f"\nThe light evaluation stopped ({outcome.stopped}) at {outcome.stopped_at}. "
               f"Run --continue to try again.")
@@ -209,6 +216,10 @@ async def evaluate_full(sessions: Sessions, investigation_id: uuid.UUID, models:
               f"{outcome.stopped_at}. Resume with: python -m scripts.{command} --continue {investigation_id} "
               "--budget <more>")
         return 3
+    if outcome.stopped == "account_refused":
+        print("\n" + ACCOUNT_REFUSED.format(where=outcome.stopped_at, command=command,
+                                            investigation_id=investigation_id))
+        return 1
     if outcome.stopped:
         print(f"\nThe full evaluation stopped ({outcome.stopped}) at {outcome.stopped_at}. Run --continue to try again.")
         return 1

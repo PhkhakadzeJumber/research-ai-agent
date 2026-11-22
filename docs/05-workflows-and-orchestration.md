@@ -144,6 +144,7 @@ These are default values to tune with real runs. They're all configuration, not 
 
 - **Skeptic loop:** saturation (a round finds 0 new relevant papers), the round limit, or the budget runs out.
 - **Mode 2 overall:** the requested number of finalists is reached, or the budget is exhausted, or candidate generation is exhausted (replenish limit used).
+- **An account refusal stops the run.** *(As built after the step 6a.2 live check.)* When Anthropic refuses the account itself (a usage or spending limit, no credit, an invalid key), `src/llm.py` raises `LlmAccountError`. No step treats it as a one-off failure: the evaluation stops at that step, unchanged and not concluded, and `--continue` resumes it once access is back. Ordinary failures (a timed-out batch, an invalid answer) still degrade the step as before.
 - **Budget exhaustion is never silent.** The run finishes with what it has. Verdicts degrade to "insufficient evidence" or "needs further investigation" where coverage is low, and the report says which budget stopped it.
 
 Budgets are enforced in two places:

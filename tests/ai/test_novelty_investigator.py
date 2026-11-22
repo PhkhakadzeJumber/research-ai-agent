@@ -134,3 +134,15 @@ def test_labels_in_stored_text_become_titles():
         '"RAG for Georgian QA" (2026) differs from "' + "x" * 59 + '…" (n.d.)/P9.')  # unknown P9 kept
     assert name_papers({"a": ["see P1"], "b": 3}, papers) == {"a": ['see "RAG for Georgian QA" (2026)'], "b": 3}
     assert name_papers("APP1 and P12x stay", papers) == "APP1 and P12x stay"  # whole labels only
+
+
+def test_claims_and_rebuttals_may_run_to_1000_characters():
+    # raised from 300 after the step 5.6a live run, where a longer rebuttal forced a paid rewrite
+    from pydantic import ValidationError
+
+    from src.ai.schemas.novelty import ClaimOut
+
+    claim = {"kind": "gap", "statement_type": "interpretation", "inferred": True}
+    assert len(ClaimOut.model_validate({**claim, "text": "x" * 1000}).text) == 1000
+    with pytest.raises(ValidationError, match="at most 1000"):
+        ClaimOut.model_validate({**claim, "text": "x" * 1001})

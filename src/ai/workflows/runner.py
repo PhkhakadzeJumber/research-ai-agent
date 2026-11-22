@@ -3,7 +3,8 @@
 run_evaluation(sessions, evaluation_id) picks the evaluation up wherever it stands and runs
 step after step (planning_queries -> retrieving -> screening -> reading -> assessing_novelty
 -> skeptic_review <-> revising_novelty -> assessing_value_feasibility -> concluding) until it
-ends, fails, or the investigation's budget is used up. Before every paid step the cost cap
+ends, fails, the investigation's budget is used up, or Anthropic refuses the account (usage limit, credit,
+key): then it stops at that step, unchanged, so it resumes once access is back. Before every paid step the cost cap
 is checked (doc 05 §6), so a run stops cleanly and can be resumed later.
 
 It prints nothing. A `report(step, phase, outcome)` callback is told when each step starts
@@ -36,6 +37,7 @@ from src.ai.workflows.states import EvaluationStep
 from src.ai.workflows.value_feasibility import value_step
 from src.db.models import Evaluation, Investigation
 from src.db.repositories.cache import DbResponseCache
+from src.llm import LlmAccountError
 from src.retrieval.search import LiteratureSearch
 
 PAID_STEPS = {EvaluationStep.PLANNING_QUERIES, EvaluationStep.SCREENING, EvaluationStep.READING,
@@ -67,7 +69,8 @@ class EvaluationModels:
 @dataclass(frozen=True)
 class RunResult:
     ended: str
-    """done / partial (the evaluation ended), failed, retrieval_failed, or budget (stopped before a paid step)."""
+    """done / partial (the evaluation ended), failed, retrieval_failed, budget (stopped before a paid step), or
+    account_refused (Anthropic refused the account: the step was left as it was, to resume later)."""
     step: str
     """The step it ended or stopped at."""
 
@@ -103,35 +106,44 @@ async def run_evaluation(
                     return RunResult("budget", step)
 
         await report(step, "start", None)
-        if step == EvaluationStep.PLANNING_QUERIES:
-            outcome = await plan_step(sessions, evaluation_id, settings=models.settings, model=models.model)
-        elif step == EvaluationStep.RETRIEVING:
-            async with factory() as search:
-                outcome = await retrieve_step(sessions, evaluation_id, search)
-        elif step == EvaluationStep.SCREENING:
-            outcome = await screen_step(sessions, evaluation_id, max_read=models.max_read,
-                                        settings=models.screen_settings, model=models.screen_model)
-        elif step == EvaluationStep.READING:
-            outcome = await read_step(sessions, evaluation_id, settings=models.read_settings, model=models.read_model)
-        elif step == EvaluationStep.ASSESSING_NOVELTY:
-            outcome = await novelty_step(sessions, evaluation_id, settings=models.novelty_settings,
-                                         model=models.novelty_model)
-        elif step == EvaluationStep.SKEPTIC_REVIEW:
-            async with factory() as search:
-                outcome = await skeptic_round_step(
-                    sessions, evaluation_id, search, settings=models.skeptic_settings, model=models.skeptic_model,
-                    screen_settings=models.screen_settings, screen_model=models.screen_model,
-                    read_settings=models.read_settings, read_model=models.read_model)
-        elif step == EvaluationStep.REVISING_NOVELTY:
-            outcome = await revision_step(sessions, evaluation_id, settings=models.novelty_settings,
-                                          model=models.novelty_model)
-        elif step == EvaluationStep.ASSESSING_VALUE_FEASIBILITY:
-            outcome = await value_step(sessions, evaluation_id, settings=models.value_settings,
-                                       model=models.value_model)
-        elif step == EvaluationStep.CONCLUDING:
-            outcome = await conclude_step(sessions, evaluation_id)
-        else:
-            raise ValueError(f"Evaluation {evaluation_id} is at {step}, which the runner can't run.")
+        try:
+            outcome = await _run_step(sessions, evaluation_id, step, models, factory)
+        except LlmAccountError:
+            return RunResult("account_refused", step)
         await report(step, "done", outcome)
         if step == EvaluationStep.RETRIEVING and outcome.failed:
             return RunResult("retrieval_failed", step)
+
+
+async def _run_step(sessions: Sessions, evaluation_id: uuid.UUID, step: str, models: EvaluationModels, factory):
+    """Runs one step and returns its outcome (for the report callback)."""
+    if step == EvaluationStep.PLANNING_QUERIES:
+        outcome = await plan_step(sessions, evaluation_id, settings=models.settings, model=models.model)
+    elif step == EvaluationStep.RETRIEVING:
+        async with factory() as search:
+            outcome = await retrieve_step(sessions, evaluation_id, search)
+    elif step == EvaluationStep.SCREENING:
+        outcome = await screen_step(sessions, evaluation_id, max_read=models.max_read,
+                                    settings=models.screen_settings, model=models.screen_model)
+    elif step == EvaluationStep.READING:
+        outcome = await read_step(sessions, evaluation_id, settings=models.read_settings, model=models.read_model)
+    elif step == EvaluationStep.ASSESSING_NOVELTY:
+        outcome = await novelty_step(sessions, evaluation_id, settings=models.novelty_settings,
+                                     model=models.novelty_model)
+    elif step == EvaluationStep.SKEPTIC_REVIEW:
+        async with factory() as search:
+            outcome = await skeptic_round_step(
+                sessions, evaluation_id, search, settings=models.skeptic_settings, model=models.skeptic_model,
+                screen_settings=models.screen_settings, screen_model=models.screen_model,
+                read_settings=models.read_settings, read_model=models.read_model)
+    elif step == EvaluationStep.REVISING_NOVELTY:
+        outcome = await revision_step(sessions, evaluation_id, settings=models.novelty_settings,
+                                      model=models.novelty_model)
+    elif step == EvaluationStep.ASSESSING_VALUE_FEASIBILITY:
+        outcome = await value_step(sessions, evaluation_id, settings=models.value_settings,
+                                   model=models.value_model)
+    elif step == EvaluationStep.CONCLUDING:
+        outcome = await conclude_step(sessions, evaluation_id)
+    else:
+        raise ValueError(f"Evaluation {evaluation_id} is at {step}, which the runner can't run.")
+    return outcome

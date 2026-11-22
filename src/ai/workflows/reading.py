@@ -39,7 +39,7 @@ from src.db.models import Chunk, Paper
 from src.db.models import PaperAnalysis
 from src.db.repositories.analyses import QuoteToStore, find_analysis, store_analysis, store_quotes
 from src.db.repositories.llm_calls import record_llm_calls
-from src.llm import LlmError
+from src.llm import LlmAccountError, LlmError
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +149,8 @@ async def read_into_library(
         async with semaphore:
             try:
                 reading: PaperReading = await read_paper(view, settings=settings, model=model)
+            except LlmAccountError:  # the whole account is refused: stop, don't degrade
+                raise
             except (LlmError, ValueError) as error:
                 logger.warning("reading: %s failed: %s", paper_id, error)
                 return LibraryOutcome(paper_id, error=f"{type(error).__name__}: {error}")

@@ -30,8 +30,9 @@ Label = Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^P\d{1
 # in all 3 rounds, each a paid repeat call)
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
 # Up to 8 words: since step 4.4b an arXiv query that finds nothing is retried with its first 4 words,
-# so a longer attack query loses nothing (step 4.7b live run: a 6-word limit forced a rewrite each round)
-MAX_ATTACK_QUERY_WORDS = 8
+# so a longer attack query loses nothing (step 4.7b live run: a 6-word limit forced a rewrite each round).
+# 10 since the step 5.6a live run, where 9-10 word queries forced a paid rewrite again: a sanity cap, not a style rule.
+MAX_ATTACK_QUERY_WORDS = 10
 
 
 class _Strict(BaseModel):
@@ -40,7 +41,7 @@ class _Strict(BaseModel):
 
 class AttackQuery(_Strict):
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=120)] = Field(
-        description=("2-6 keywords, most important first, as a paper would phrase them (never more than 8). "
+        description=("2-6 keywords, most important first, as a paper would phrase them (never more than 10). "
                      "No boolean operators or quotes.")
     )
     angle: Angle

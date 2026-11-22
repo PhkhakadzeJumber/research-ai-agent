@@ -46,6 +46,7 @@ from src.db.models import (
     Paper,
     RetrievalHit,
     TriageDecision,
+    UserDocument,
 )
 from src.db.repositories.evaluations import latest_evaluation
 from src.db.session import Database
@@ -173,6 +174,52 @@ async def candidate_section(session: AsyncSession, candidate: Candidate, evaluat
     return lines
 
 
+def document_lines(document: UserDocument) -> list[str]:
+    """Where the idea came from: the user's own document (step 6a)."""
+    reading = document.reading or {}
+    extras = document.idea_extras or {}
+    published = ("already published" + (f" ({', '.join(f'{k} {v}' for k, v in document.external_ids.items())})"
+                                        if document.external_ids else "")) if document.published else "not published"
+    lines = ["", "## Your document", "",
+             f"*{document.file_name}*: {len(document.sections or [])} sections; {published}; "
+             f"{reading.get('verified_quotes', 0)} of {reading.get('quotes', 0)} quotes checked against your text. "
+             "Private to this investigation; its quotes are never evidence for a verdict."]
+    sources = extras.get("facet_sources") or {}
+    if sources:
+        lines.append("")
+        lines.extend(f"- {text} *(from {section})*" for text, section in sources.items())
+    return lines
+
+
+async def document_vs_literature(session: AsyncSession, document: UserDocument, evaluation: Evaluation) -> list[str]:
+    """The document's own novelty claims next to what the evaluation found (step 6a.2)."""
+    claims = (document.idea_extras or {}).get("novelty_claims") or []
+    own = (evaluation.counters or {}).get("own_work", [])
+    if not claims and not own:
+        return []
+    frozen = await stored_verdicts(session, evaluation.id)
+    novelty = frozen.get("novelty")
+    challenges = (await session.execute(select(Challenge).where(
+        Challenge.evaluation_id == evaluation.id,
+        Challenge.type.in_(("prior_work_found", "overstated_contribution"))))).scalars().all()
+    lines = ["", "## Your document's claims vs the literature", ""]
+    lines.extend(f"- ({c['section']}) \"{c['claim']}\"" for c in claims)
+    if claims:
+        verdict = LABELS.get(novelty.category, novelty.category) if novelty else "not concluded yet"
+        lines += ["", f"What the evaluation found: novelty **{verdict}**; {len(challenges)} Skeptic challenge(s) "
+                      "citing earlier work or an overstated contribution "
+                      f"({sum(1 for c in challenges if c.resolution == 'accepted')} accepted, "
+                      f"{sum(1 for c in challenges if c.resolution == 'rebutted')} rebutted). "
+                      "The closest works and the Skeptic log above show the evidence."]
+    if own:
+        lines += ["", "Set aside as your own work (never counted against you):"]
+        for paper_id in own:
+            paper = await session.get(Paper, uuid.UUID(paper_id))
+            if paper is not None:
+                lines.append(f"- {cite(paper)}")
+    return lines
+
+
 async def cost_lines(session: AsyncSession, investigation_id: uuid.UUID) -> list[str]:
     rows = (await session.execute(
         select(LlmCall.role, func.count(), func.coalesce(func.sum(LlmCall.cost_usd), 0))
@@ -206,8 +253,12 @@ async def build_report(session: AsyncSession, investigation_id: uuid.UUID) -> st
         lines += ["", "No confirmed idea yet: continue the investigation first."]
         return "\n".join(lines)
 
+    document = (await session.execute(select(UserDocument).where(
+        UserDocument.investigation_id == investigation_id))).scalar_one_or_none()
     lines += ["", "## Your idea", "", f"**Research question:** {candidate.research_question}", ""]
     lines += await facet_lines(session, candidate)
+    if document is not None:
+        lines += document_lines(document)
     constraints = investigation.constraints_snapshot or {}
     if constraints:
         lines += ["", "Constraints: " + "; ".join(f"{k.replace('_', ' ')}: {v}" for k, v in constraints.items() if v)]
@@ -222,6 +273,8 @@ async def build_report(session: AsyncSession, investigation_id: uuid.UUID) -> st
         lines += ["", "The evaluation hasn't started yet."]
         return "\n".join(lines)
     lines += await candidate_section(session, candidate, evaluation)
+    if document is not None:
+        lines += await document_vs_literature(session, document, evaluation)
 
     # refined versions and alternatives (steps 5.5a-5.6), ranked like Mode 2's ideas
     results = await ranked_results(session, investigation_id)

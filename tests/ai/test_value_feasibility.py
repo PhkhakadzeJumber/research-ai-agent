@@ -58,7 +58,7 @@ def test_user_text_cannot_fake_constraints():
 
 def test_the_prompt():
     system = system_prompt("value_feasibility")
-    assert system.version_id == "shared_preamble@1+value_feasibility@1"
+    assert system.version_id == "shared_preamble@1+value_feasibility@2"  # v2: the user's own plan (6a.2)
     assert "not for a well-funded lab" in system.text and '"It is an interesting area" is not evidence' in system.text
 
 

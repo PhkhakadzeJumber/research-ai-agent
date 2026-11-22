@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
@@ -58,6 +59,7 @@ from src.ai.context import (
 from src.ai.evidence.coverage import compute_coverage, coverage_note
 from src.ai.evidence.verdicts import MatchFact, NoveltyInputs, VerdictResult, novelty_verdict
 from src.ai.schemas.query_plan import PlannedQuery, QueryPlanOutput
+from src.ai.workflows.own_work import set_aside_own_work
 from src.ai.workflows.reading import LibraryOutcome, read_into_library
 from src.ai.workflows.states import EvaluationStep
 from src.ai.workflows.transitions import (
@@ -82,6 +84,7 @@ from src.db.models import (
     PaperAnalysis,
     Quote,
     RetrievalHit,
+    UserDocument,
 )
 from src.db.repositories.analyses import QuoteToStore, store_quotes
 from src.db.repositories.candidates import candidate_facets
@@ -89,7 +92,7 @@ from src.db.repositories.evaluations import count_hits
 from src.db.repositories.llm_calls import record_llm_calls
 from src.db.repositories.papers import PaperMergeConflict
 from src.db.repositories.search_trail import save_search
-from src.llm import LlmError
+from src.llm import LlmAccountError, LlmError
 from src.retrieval.records import SearchRequest, SearchResult
 
 logger = logging.getLogger(__name__)
@@ -140,12 +143,27 @@ async def begin_evaluation(sessions: Sessions, candidate_id: uuid.UUID, *, depth
 
 # --- planning_queries -----------------------------------------------------------------------------------
 
+PLAN_HEADINGS = re.compile(r"method|approach|data|experiment|evaluation|setup|plan|timeline|schedule", re.I)
+PLAN_SECTION_CHARS, PLAN_SECTIONS = 1200, 4
+
+
 async def candidate_for_planning(session: AsyncSession, candidate: Candidate) -> CandidateForPlanning:
     facets = await candidate_facets(session, candidate.id)
+    claims, plan = (), ""
+    if candidate.origin == "user":  # the user's own document, if any (step 6a.2)
+        document = (await session.execute(select(UserDocument).where(
+            UserDocument.investigation_id == candidate.investigation_id))).scalar_one_or_none()
+        if document is not None:
+            claims = tuple(f"({c['section']}) {c['claim']}"
+                           for c in (document.idea_extras or {}).get("novelty_claims", []))
+            plan = "\n\n".join(f"({s['label']}) {s['heading']}: {s['text'][:PLAN_SECTION_CHARS]}"
+                                for s in (document.sections or []) if PLAN_HEADINGS.search(s["heading"])
+                                )[: PLAN_SECTION_CHARS * PLAN_SECTIONS]
     return CandidateForPlanning(
         title=candidate.title, research_question=candidate.research_question,
         facets=tuple(FacetForPlanning(number=f.position + 1, kind=f.kind, text=f.text, is_key=f.is_key)
                      for f in facets),
+        document_claims=claims, document_plan=plan,
     )
 
 
@@ -195,6 +213,8 @@ async def plan_step(
     try:
         reading = await plan_queries(view, depth=depth, settings=settings, model=model)
         records, outcome = reading.records, PlanOutcome(reading.output, reading.problems, reading.regenerated)
+    except LlmAccountError:  # the whole account is refused: stop, don't degrade
+        raise
     except LlmError as error:
         logger.warning("query plan failed for evaluation %s: %s", evaluation_id, error)
         records = getattr(error, "records", [])
@@ -320,7 +340,10 @@ async def score_unscreened(
     model: Any | None = None,
 ) -> tuple[int, int]:
     """Scores every not-yet-screened paper of the evaluation, in parallel batches.
-    Returns (screened, not_screened). Used by screening and by each Skeptic round."""
+    Returns (screened, not_screened). Used by screening and by each Skeptic round. The user's own work
+    (step 6a.2) is set aside first, so it is never scored, read or counted as prior work."""
+    async with sessions() as session:
+        await set_aside_own_work(session, evaluation_id)
     return await score_hits(
         sessions, investigation_id, evaluation_id,
         lambda papers: screen_batch(view, papers, settings=settings, model=model),
@@ -360,6 +383,8 @@ async def score_hits(
         async with limiter:
             try:
                 return await screen(papers)
+            except LlmAccountError:  # the whole account is refused: stop, don't degrade
+                raise
             except LlmError as error:
                 logger.warning("screening batch failed for investigation %s: %s", investigation_id, error)
                 return error
@@ -589,6 +614,8 @@ async def novelty_step(
 
     try:
         reading = await assess_novelty(view, views, coverage=coverage_note(coverage), settings=settings, model=model)
+    except LlmAccountError:  # the whole account is refused: stop, don't degrade
+        raise
     except LlmError as error:
         reason = f"the Novelty Investigator failed ({type(error).__name__}: {error})"
         await _finish_without_assessment(sessions, evaluation_id, investigation_id, reason,

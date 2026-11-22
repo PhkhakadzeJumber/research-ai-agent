@@ -45,6 +45,23 @@ class LlmError(RuntimeError):
     """Base class for Eureka's LLM errors."""
 
 
+class LlmAccountError(LlmError):
+    """Anthropic refused the account itself: a usage or spending limit was reached, the credit ran out, the API
+    key is invalid or lacks permission. Every further call would fail the same way, so a run must stop here and be
+    resumed once access is back, never carry on "degraded" (the step 6a.2 live check concluded an evaluation with
+    no evidence that way)."""
+
+
+ACCOUNT_MARKERS = ("usage limit", "spend limit", "spending limit", "credit balance", "billing")
+
+
+def is_account_error(error: Exception) -> bool:
+    """True for refusals that concern the whole account, not this one request."""
+    if isinstance(error, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+        return True
+    return isinstance(error, anthropic.BadRequestError) and any(m in str(error).lower() for m in ACCOUNT_MARKERS)
+
+
 class LlmRefusal(LlmError):
     """Claude (and any fallback model) declined the request."""
 
@@ -418,6 +435,9 @@ async def run_structured(
                 if event.is_final_response():
                     final = event
         except anthropic.APIError as error:
+            if is_account_error(error):
+                raise LlmAccountError(f"{role}: Anthropic refused the account ({type(error).__name__}): {error}") \
+                    from error
             raise LlmError(f"{role}: API error ({type(error).__name__}): {error}") from error
 
         if final is None:

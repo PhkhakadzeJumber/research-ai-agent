@@ -81,7 +81,7 @@ from src.ai.schemas.query_plan import QueryPlanOutput
 from src.ai.workflows.evaluation import begin_evaluation, novelty_verdict_for, selected_papers
 from src.ai.workflows.concluding import finish_investigation
 from src.ai.workflows.runner import EvaluationModels, run_evaluation
-from scripts.candidate_loop import LoopModels, continue_at
+from scripts.candidate_loop import ACCOUNT_REFUSED, LoopModels, continue_at
 from src.ai.workflows.states import EvaluationStep, Stage
 from src.ai.workflows.understanding import understand_idea
 from src.ai.workflows.user_document import DocumentError, attach_document, prepare_document, understand_document
@@ -334,6 +334,9 @@ async def evaluate(sessions: Sessions, investigation_id: uuid.UUID, *, max_read:
         print(f"\nThe evaluation failed (at {result.step}).")
         return 1
     if result.ended == "retrieval_failed":
+        return 1
+    if result.ended == "account_refused":
+        print("\n" + ACCOUNT_REFUSED.format(where=result.step, command="evaluate", investigation_id=investigation_id))
         return 1
     if result.ended == "budget":
         async with sessions() as session:

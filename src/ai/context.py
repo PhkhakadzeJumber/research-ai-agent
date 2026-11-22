@@ -110,7 +110,7 @@ def render_paper(paper: PaperForReading, *, max_authors: int = 10) -> str:
 #     - available time: 8 weeks
 #     </constraints>
 
-_IDEA_TAGS = re.compile(r"<(/?)(idea|field|seed_papers|complexity|constraints|field_request|interests|technologies|exclusions|domain|count|document|sections|section|reading)\b",
+_IDEA_TAGS = re.compile(r"<(/?)(idea|field|seed_papers|complexity|constraints|field_request|interests|technologies|exclusions|domain|count|document|sections|section|reading|document_claims|user_plan)\b",
                         re.IGNORECASE)
 
 COMPLEXITY_NOTES = {
@@ -218,6 +218,10 @@ class CandidateForPlanning:
     title: str
     research_question: str
     facets: tuple[FacetForPlanning, ...]
+    # The user's own document (Mode 1, step 6a.2): its novelty claims, "(D3) ..." (for the Skeptic), and its
+    # plan: method, data and timeline excerpts (for Value & Feasibility). Empty for every other candidate.
+    document_claims: tuple[str, ...] = ()
+    document_plan: str = ""
 
 
 def _contain_candidate_text(text: str) -> str:
@@ -385,6 +389,10 @@ def _skeptic_context(candidate: CandidateForPlanning, claims: tuple[ClaimForSkep
                      f"{_contain(claim.text)}</claim>")
     lines.append("</claims>")
     lines.append(f"<verdict>{_contain(verdict)}</verdict>")
+    if candidate.document_claims:
+        lines.append("<document_claims>")
+        lines.extend(f"- {_document_text(claim)}" for claim in candidate.document_claims)
+        lines.append("</document_claims>")
     return lines
 
 
@@ -484,6 +492,8 @@ def render_value_feasibility(candidate: CandidateForPlanning, *, complexity: str
                              challenges: tuple[ChallengeSummary, ...], papers: tuple[PaperForNovelty, ...]) -> str:
     """The Value & Feasibility Evaluator's input."""
     lines = [render_query_task(candidate, task="Judge significance and feasibility for this user.")]
+    if candidate.document_plan:
+        lines.append(f"<user_plan>\n{_document_text(candidate.document_plan)}\n</user_plan>")
     lines.append(f"<complexity>{_contain(COMPLEXITY_NOTES.get(complexity, complexity))}</complexity>")
     lines.append("<constraints>")
     lines.extend(f"- {_contain(_contain_user_text(name))}: {_contain(_contain_user_text(value))}"

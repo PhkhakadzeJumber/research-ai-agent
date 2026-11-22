@@ -28,7 +28,8 @@ def test_attack_plans_need_4_to_8_short_distinct_queries():
     assert len(SkepticQueriesOutput.model_validate(queries("a b c", "d e f", "g h i", "j k l")).queries) == 4
     for bad in (queries("a b c", "d e f", "g h i"),                                       # too few
                 queries("a b c", "A  b c", "g h i", "j k l"),                              # repeated
-                queries("one two three four five six seven eight nine", "d e f", "g h i", "j k l")):  # 9 words
+                queries("one two three four five six seven eight nine ten eleven", "d e f", "g h i",
+                        "j k l")):  # 11 words: over the cap of 10 (raised from 8 after the step 5.6a live run)
         with pytest.raises(ValidationError):
             SkepticQueriesOutput.model_validate(bad)
 
@@ -67,8 +68,8 @@ def test_the_challenge_packet_shows_the_new_papers_and_keeps_their_text_inside()
 
 def test_the_skeptic_prompts():
     queries_prompt, challenges_prompt = system_prompt("skeptic", task="queries"), system_prompt("skeptic", task="challenges")
-    assert queries_prompt.version_id == "shared_preamble@1+skeptic_queries@2"
-    assert challenges_prompt.version_id == "shared_preamble@1+skeptic_challenges@1"
+    assert queries_prompt.version_id == "shared_preamble@1+skeptic_queries@3"  # v3: the document's claims (6a.2)
+    assert challenges_prompt.version_id == "shared_preamble@1+skeptic_challenges@2"
     assert "would NOT have written" in queries_prompt.text
     assert "Never soften a challenge" in challenges_prompt.text and "never from what you remember" in challenges_prompt.text
 
@@ -105,3 +106,8 @@ def test_limits_fit_what_the_skeptic_writes_well():
     assert ChallengeSetOutput.model_validate(challenge(argument=long_argument)).challenges[0].argument
     with pytest.raises(ValidationError):
         ChallengeSetOutput.model_validate(challenge(argument="x" * 1001))
+
+
+def test_ten_word_queries_are_fine_now():
+    ten = "one two three four five six seven eight nine ten"
+    assert SkepticQueriesOutput.model_validate(queries(ten, "d e f", "g h i", "j k l")).queries[0].text == ten

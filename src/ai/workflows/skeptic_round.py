@@ -72,7 +72,7 @@ from src.db.models import (
 from src.db.repositories.analyses import QuoteToStore, store_quotes
 from src.db.repositories.llm_calls import record_llm_calls
 from src.db.repositories.search_trail import save_search
-from src.llm import LlmCallRecord, LlmError
+from src.llm import LlmCallRecord, LlmAccountError, LlmError
 from src.retrieval.records import SearchRequest
 
 logger = logging.getLogger(__name__)
@@ -168,6 +168,8 @@ async def skeptic_round_step(
     try:
         outcome.plan = await plan_attack(view, claim_views, verdict_text, examined, settings=settings, model=model)
         records += outcome.plan.records
+    except LlmAccountError:  # the whole account is refused: stop, don't degrade
+        raise
     except LlmError as error:
         outcome.error = f"the Skeptic failed to plan its searches ({type(error).__name__}: {error})"
         await _finish_round(sessions, evaluation_id, investigation_id, outcome, getattr(error, "records", []),
@@ -229,6 +231,8 @@ async def skeptic_round_step(
             outcome.challenges = reading.challenges
             if reading.dropped:
                 logger.info("evaluation %s: Skeptic named unknown labels: %s", evaluation_id, reading.dropped)
+        except LlmAccountError:  # the whole account is refused: stop, don't degrade
+            raise
         except LlmError as error:
             records += getattr(error, "records", [])
             outcome.error = f"the Skeptic failed to write challenges ({type(error).__name__}: {error})"
@@ -361,6 +365,8 @@ async def revision_step(
             outcome.reading = await revise_novelty(view, claim_views, tuple(challenge_views), tuple(views),
                                                    settings=settings, model=model)
             records = outcome.reading.records
+        except LlmAccountError:  # the whole account is refused: stop, don't degrade
+            raise
         except LlmError as error:
             records = getattr(error, "records", [])
             outcome.error = f"the Novelty Investigator's revision failed ({type(error).__name__}: {error})"
