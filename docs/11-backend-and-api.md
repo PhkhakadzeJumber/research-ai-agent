@@ -124,18 +124,17 @@ All routes are under `/api/v1`. They require authentication, except health check
 | GET/PUT | `/profile` | Constraints profile |
 | GET | `/health`, `/ready` | Health checks |
 
-### 3.4 Progress event format
+### 3.4 Progress events ✅ (step 9c)
 
-Each SSE event carries:
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/investigations/{id}/events` ✅ | **SSE stream**: stored events after `?after=` (or the browser's `Last-Event-ID`), then new ones as the run stores them; a comment line every 15 s keeps proxies from closing it; it ends after the run's `ended` event, or right after the replay if nothing runs |
+| GET | `/investigations/{id}/activity?after=&limit=` ✅ | The same events as a JSON list (first page load, the activity feed) |
+| GET | `/investigations/{id}/progress` ✅ | The progress screen at once: the stage rail for the mode (each stage done / active / paused / failed / to do / skipped), counters from the database, cost against budget, run state, how the last run ended |
 
-- event type: stage started / stage finished / counter update / candidate status change / warning / error / completed
-- stage name
-- a human-readable message
-- counters
-- cost so far
-- the affected candidate ID, if any
+Each event (SSE `id` = its sequence number, SSE `event` = its kind) carries: `seq`, `kind` (stage / step_started / step_done / candidate / warning / error / ended), `stage`, `step`, a human-readable `message`, `data` (the numbers behind it; for `ended`, the reason: done / stopped / budget / account_refused / failed / nothing), `candidate_id`, `cost_usd` (spend at that moment) and `at`.
 
-Events are also stored, so a reconnecting client can replay them.
+Events are stored (doc 10 §3.3) by the driver's recorder (`src/ai/progress.py`) for runs started from the API **and** from the command line, so a reconnecting client can replay them and a command-line run shows on the website too. `GET /investigations/{id}` carries `last_run` (from the last `ended` event).
 
 ## 4. Background execution
 

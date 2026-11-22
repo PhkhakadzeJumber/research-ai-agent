@@ -7,6 +7,7 @@ import uuid
 from typing import Literal
 
 from src.api.schemas.common import ApiModel, Labelled, Timestamp
+from src.api.schemas.progress import LastRun
 
 Mode = Literal["evaluate", "discover"]
 
@@ -47,6 +48,8 @@ class InvestigationDetail(InvestigationSummary):
     constraints: dict
     assumptions: list[str]
     document: DocumentCard | None
+    last_run: LastRun | None
+    """How the last run ended (done, stopped, budget, account refused, failed, or waiting for you), if any."""
 
 
 class Facet(ApiModel):

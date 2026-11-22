@@ -20,6 +20,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from src.ai.progress import Recorder
 from src.ai.workflows.driver import DriverModels, Emit, Ended, Event, advance
 from src.ai.workflows.evaluation import Sessions
 from src.ai.workflows.light_evaluation import LightOutcome, short_step_line
@@ -270,9 +271,17 @@ def print_ended(ended: Ended, investigation_id: uuid.UUID, command: str) -> int:
 
 async def drive(sessions: Sessions, investigation_id: uuid.UUID, models: DriverModels, *, command: str,
                 only: str | None = None) -> int:
-    """Runs the investigation on from its stage with the driver, printing as it goes; returns the exit code."""
-    ended = await advance(sessions, investigation_id, models=models, only=only,
-                          emit=make_printer(sessions, investigation_id, command))
+    """Runs the investigation on from its stage with the driver, printing as it goes; returns the exit code.
+    The events are also stored as progress events (step 9c), so the website shows a command-line run too."""
+    printer, recorder = make_printer(sessions, investigation_id, command), Recorder(sessions, investigation_id)
+
+    async def emit(event: Event) -> None:
+        await printer(event)
+        await recorder(event)
+
+    ended = await advance(sessions, investigation_id, models=models, only=only, emit=emit)
+    if not (only is not None and ended.reason == "done"):  # one stage of several isn't the run's end
+        await recorder.ended(ended)
     return print_ended(ended, investigation_id, command)
 
 

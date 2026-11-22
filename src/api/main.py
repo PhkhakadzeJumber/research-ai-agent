@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api import errors
 from src.api.errors import REQUEST_ID_HEADER
-from src.api.routes import actions, candidates, health, investigations, papers
+from src.api.routes import actions, candidates, health, investigations, papers, progress
 from src.api.runs import Runs
 from src.config import get_api_settings
 from src.db.session import Database
@@ -47,7 +47,7 @@ def create_app(database: Database | None = None) -> FastAPI:
     errors.install(app)
     app.include_router(health.router)
     v1 = APIRouter(prefix=API_PREFIX)
-    for module in (actions, investigations, candidates, papers):
+    for module in (actions, investigations, progress, candidates, papers):
         v1.include_router(module.router)
     app.include_router(v1)
     return app

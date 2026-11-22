@@ -182,7 +182,7 @@ Deferred: ConversationMessage, ToolCall (section 8)
 | status | created / running / clarifying / completed / failed / cancelled | The coarse lifecycle state for the UI and the resume logic. `completed` means results are ready; user actions (proposal, deep dive, steering) set it back to `running` | running |
 | stage | The orchestrator's position: one of the exact stage names in doc 05 §11.1, e.g. `light_evaluation` | Resume from the last completed stage; show progress. A stage counts as completed only when its output rows are committed in the same transaction | full_evaluation |
 | budget | Limits and counters: papers screened/read, rounds, refinements, cost, time | The orchestrator **reserves** budget before a stage and settles it after, so parallel candidate evaluations can't overspend | read 23/40, cost $1.10/$5 |
-| cost so far, timings | Running totals | Fast budget checks (reconciled with the LlmCall rows), UI display | $1.10, 6 min |
+| cost so far, timings | Running totals. The cost keeps 6 decimals, like each LlmCall's cost (migration 0018; at 4 it was rounded on every addition) | Fast budget checks (reconciled with the LlmCall rows), UI display | $1.10, 6 min |
 | assumptions | Assumptions recorded when clarification was skipped | Honesty: the report lists what Eureka assumed instead of asking | "Assumed English-language QA benchmarks are acceptable" |
 | config version | Versions of the prompts, rule tables and model settings used | Reproducibility: evaluation results must be tied to the exact configuration | `prompts v3, rules v2` |
 
@@ -230,21 +230,25 @@ Deferred: ConversationMessage, ToolCall (section 8)
 | landscape query plan | Queries per subtopic (recent work, surveys, highly cited, latest preprints) | Drives the landscape retrieval stage | "survey hallucination evaluation multilingual" |
 | signal queries | Queries for GitHub / Hugging Face / news | Drives the signal service | "low-resource language QA dataset" |
 
-### 3.3 ProgressEvent
+### 3.3 ProgressEvent (built in step 9c, migration 0018)
 
 **What it is:** one progress update during a run.
 
-**Why it exists:** runs take minutes. Stored events feed the live progress view (over server-sent events) and let a reconnecting browser replay what it missed.
+**Why it exists:** runs take minutes. Stored events feed the live progress view (over server-sent events) and let a reconnecting browser replay what it missed. The last event of every run (kind `ended`) says how it ended, so a stopped or failed run explains itself.
 
 | Field | Meaning | Why we need it | Example |
 |---|---|---|---|
 | investigation | Owner | — | `inv_204` |
-| sequence number | Order within the investigation | Replay: a browser asks for "everything after event 57" | 58 |
+| sequence number | Order within the investigation (unique per investigation) | Replay: a browser asks for "everything after event 57" | 58 |
 | time | When it happened | Display | — |
-| stage | The current investigation stage (doc 05 §11.1) | The stage rail | full_evaluation |
-| message | Human-readable text | The activity feed | "Found 1 new relevant paper" |
-| counters snapshot | Counts at this moment | Live counters, funnel chart | read 27 |
+| kind | stage / step_started / step_done / candidate / warning / error / ended | The feed's icons and colours; `ended` closes the live stream | step_done |
+| stage, step | The investigation stage (doc 05 §11.1) and evaluation step, when the event belongs to one | The stage rail | full_evaluation, skeptic_review |
+| message | Human-readable text, written by code from stored outcomes (never by a model) | The activity feed | "Skeptic round 2: 1 new relevant paper, 2 challenges" |
+| data | The numbers behind the message (JSON) | Live counters; `ended` events hold the reason (done, stopped, budget, account_refused, failed) | `{"round": 2, "new_relevant": 1}` |
+| idea | The candidate it is about, if any | Linking the feed to an idea | `cand_9` |
 | cost so far | Spend at this moment | The live cost display | $1.40 |
+
+The progress screen's counters (papers found, relevant, read, quotes verified) are read from the search trail and the library, not added up from events, so they are right even for runs whose events were never recorded.
 
 ### 3.4 UserDocument (doc 02 §2.4; built in step 6a.1, migration 0016)
 

@@ -122,7 +122,8 @@ class Investigation(UUIDPrimaryKey, Timestamps, Base):
     status: Mapped[str] = mapped_column(String(16), default="created", server_default="created")
     stage: Mapped[str] = mapped_column(String(32), default="intake", server_default="intake")
     budget: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default=sql_text("'{}'::jsonb"))
-    cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("0"), server_default="0")
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), default=Decimal("0"), server_default="0")
+    """6 decimals, like each call's cost (step 9c; at 4 the total was rounded on every addition)."""
     assumptions: Mapped[list[Any]] = mapped_column(JSONB, default=list, server_default=sql_text("'[]'::jsonb"))
     config_version: Mapped[str | None] = mapped_column(String(64))
 

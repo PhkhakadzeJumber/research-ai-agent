@@ -22,6 +22,8 @@ from src.ai.workflows.transitions import StaleState
 from src.api.deps import RunsDep, SessionDep
 from src.api.errors import ApiError, not_found
 from src.api.runs import Runs
+from src.api.schemas.progress import LastRun
+from src.db.repositories.progress import last_event
 from src.api.schemas.common import ERRORS, Page, labelled
 from src.api.schemas.investigations import (
     CandidateSummary,
@@ -58,6 +60,16 @@ from src.db.models import (
 from src.db.repositories.intakes import find_intake
 
 router = APIRouter(prefix="/investigations", tags=["investigations"])
+
+
+async def last_run(session: AsyncSession, investigation_id: uuid.UUID) -> LastRun | None:
+    """How the investigation's last run ended: its last "ended" progress event (step 9c)."""
+    row = await last_event(session, investigation_id, kind="ended")
+    if row is None:
+        return None
+    data = row.data or {}
+    return LastRun(reason=data.get("reason", "done"), where=data.get("where"), message=row.message,
+                   at=row.created_at)
 
 
 async def get_investigation(session: AsyncSession, investigation_id: uuid.UUID) -> Investigation:
@@ -137,7 +149,8 @@ async def get_investigation_detail(investigation_id: uuid.UUID, session: Session
     return InvestigationDetail(**await summary_of(session, investigation, runs), input=investigation.input or {},
                                complexity=investigation.complexity,
                                constraints=investigation.constraints_snapshot or {},
-                               assumptions=[str(a) for a in investigation.assumptions or []], document=card)
+                               assumptions=[str(a) for a in investigation.assumptions or []], document=card,
+                               last_run=await last_run(session, investigation_id))
 
 
 @router.get("/{investigation_id}/clarification", response_model=Clarification, responses=ERRORS)

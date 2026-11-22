@@ -25,6 +25,7 @@ from typing import Any, Literal
 
 from sqlalchemy import select
 
+from src.ai.progress import Entry, Recorder
 from src.ai.workflows.clarification import answers_for, apply_answers, apply_edits, confirm_idea, load_pending
 from src.ai.workflows.driver import DriverModels, Ended, advance
 from src.ai.workflows.evaluation import Sessions
@@ -38,7 +39,8 @@ from src.ai.workflows.field import (
 from src.ai.workflows.proposal import write_proposal
 from src.ai.workflows.understanding import understand_idea
 from src.ai.workflows.user_document import understand_document
-from src.db.models import Investigation, UserDocument
+from src.ai.workflows.states import Stage
+from src.db.models import Investigation, ProgressEvent, UserDocument
 
 log = logging.getLogger("eureka.runs")
 
@@ -85,7 +87,9 @@ class Runs:
         self._tasks: set[asyncio.Task] = set()
         self._slots = asyncio.Semaphore(max_parallel)
         self.last_ended: dict[uuid.UUID, Ended | str] = {}
-        """How each investigation's last run ended (an Ended, or the error text). In memory only, until step 9c."""
+        """How each investigation's last run in this process ended (an Ended, or the error text). Stored for good
+        as the run's last progress event ("ended"), which the API reads."""
+        self._listeners: dict[uuid.UUID, set[asyncio.Queue]] = {}
 
     # --- state ----------------------------------------------------------------------------------------------
 
@@ -104,6 +108,27 @@ class Runs:
     def should_stop(self, investigation_id: uuid.UUID) -> Callable[[], bool]:
         return lambda: investigation_id in self._stopping
 
+    # --- progress events (step 9c) --------------------------------------------------------------------------
+
+    def subscribe(self, investigation_id: uuid.UUID) -> asyncio.Queue:
+        """A queue that receives each progress event of this investigation as it is stored (the live stream)."""
+        queue: asyncio.Queue = asyncio.Queue()
+        self._listeners.setdefault(investigation_id, set()).add(queue)
+        return queue
+
+    def unsubscribe(self, investigation_id: uuid.UUID, queue: asyncio.Queue) -> None:
+        listeners = self._listeners.get(investigation_id, set())
+        listeners.discard(queue)
+        if not listeners:
+            self._listeners.pop(investigation_id, None)
+
+    def recorder(self, investigation_id: uuid.UUID) -> Recorder:
+        async def broadcast(row: ProgressEvent) -> None:
+            for queue in self._listeners.get(investigation_id, ()):
+                queue.put_nowait(row)
+
+        return Recorder(self.sessions, investigation_id, on_stored=broadcast)
+
     # --- starting -------------------------------------------------------------------------------------------
 
     def start(self, investigation_id: uuid.UUID, what: str, work: Callable[[], Awaitable[Any]]) -> None:
@@ -118,14 +143,26 @@ class Runs:
         task.add_done_callback(self._tasks.discard)
 
     async def _run(self, investigation_id: uuid.UUID, what: str, work: Callable[[], Awaitable[Any]]) -> None:
+        recorder = self.recorder(investigation_id)
         try:
-            async with self._slots:
-                result = await work()
-            self.last_ended[investigation_id] = result if isinstance(result, Ended) else Ended("done")
-            log.info("run %s (%s) ended: %s", investigation_id, what, self.last_ended[investigation_id])
-        except Exception as error:  # noqa: BLE001 - a failed run must never take the server down
-            self.last_ended[investigation_id] = f"{type(error).__name__}: {error}"
-            log.exception("run %s (%s) failed", investigation_id, what)
+            try:
+                async with self._slots:
+                    result = await work()
+                ended = result if isinstance(result, Ended) else Ended("done")
+                self.last_ended[investigation_id] = ended
+                log.info("run %s (%s) ended: %s", investigation_id, what, ended)
+            except Exception as error:  # noqa: BLE001 - a failed run must never take the server down
+                self.last_ended[investigation_id] = f"{type(error).__name__}: {error}"
+                log.exception("run %s (%s) failed", investigation_id, what)
+                ended = None
+            # the run is idle before its last event goes out, so a live stream that sees "ended" can close
+            self._active.pop(investigation_id, None)
+            self._stopping.discard(investigation_id)
+            if ended is not None:
+                await recorder.ended(ended)
+            else:
+                await recorder.store(Entry("ended", f"Something went wrong while {what}. Nothing is lost: resume to "
+                                                    "try again.", data={"reason": "failed", "where": what}))
         finally:
             self._active.pop(investigation_id, None)
             self._stopping.discard(investigation_id)
@@ -146,6 +183,11 @@ class Runs:
             mode = investigation.mode
             has_document = (await session.execute(select(UserDocument.id).where(
                 UserDocument.investigation_id == investigation_id))).first() is not None
+        recorder = self.recorder(investigation_id)
+        what = ("Mapping your field" if mode == "discover" else
+                "Reading your document (the Paper Reader, then the Idea Analyst)" if has_document else
+                "Reading your idea")
+        await recorder.store(Entry("step_started", what, stage=Stage.UNDERSTANDING))
         if mode == "discover":
             outcome = await understand_field(self.sessions, investigation_id, settings=m.idea_settings,
                                              model=m.idea_model)
@@ -155,15 +197,31 @@ class Runs:
         else:
             outcome = await understand_idea(self.sessions, investigation_id, settings=m.idea_settings,
                                             model=m.idea_model)
-        return Ended("failed", "understanding") if outcome.error else Ended("nothing", "awaiting_clarification")
+        if outcome.error:
+            await recorder.store(Entry("error", f"The Idea Analyst failed: {outcome.error}",
+                                       stage=Stage.UNDERSTANDING))
+            return Ended("failed", "understanding")
+        if mode == "discover":
+            message = f"Proposed {len(outcome.brief.subtopics)} subtopics to explore"
+            questions = len(outcome.brief.clarifying_questions)
+        else:
+            message = f"Read “{outcome.reading.title}”: {len(outcome.reading.facets)} parts"
+            questions = len(outcome.reading.clarifying_questions)
+        await recorder.store(Entry("step_done", f"{message}, {questions} question{'' if questions == 1 else 's'} "
+                                                "for you", stage=Stage.UNDERSTANDING, data={"questions": questions}))
+        return Ended("nothing", "awaiting_clarification")
 
     async def drive(self, investigation_id: uuid.UUID) -> Ended:
         return await advance(self.sessions, investigation_id, models=self.models.driver,
-                             should_stop=self.should_stop(investigation_id))
+                             emit=self.recorder(investigation_id), should_stop=self.should_stop(investigation_id))
 
     async def clarify(self, investigation_id: uuid.UUID, mode: str, clarified: Clarified) -> Ended:
         """The user's answers (one Idea Analyst call if any were given), edits and confirmation, then the run."""
         m = self.models
+        recorder = self.recorder(investigation_id)
+        if any((reply or "").strip() for reply in clarified.replies):
+            await recorder.store(Entry("step_started", "Applying your answers (one Idea Analyst call)",
+                                       stage=Stage.AWAITING_CLARIFICATION))
         if mode == "discover":
             pending = await load_pending_brief(self.sessions, investigation_id)
             # subtopics are removed from the brief the user saw; their answers then refine what is left
@@ -174,8 +232,10 @@ class Runs:
                                                  settings=m.idea_settings, model=m.idea_model)
             if revision.error:
                 return Ended("failed", f"applying your answers: {revision.error}")
-            await confirm_brief(self.sessions, investigation_id, final=revision.brief, answers=answers,
-                                removed=removed)
+            final = await confirm_brief(self.sessions, investigation_id, final=revision.brief, answers=answers,
+                                        removed=removed)
+            await recorder.store(Entry("stage", f"Confirmed: {len(final.subtopics)} subtopics to explore",
+                                       stage=Stage.AWAITING_CLARIFICATION))
         else:
             pending = await load_pending(self.sessions, investigation_id)
             # the user's edits are made on the reading they saw; their answers then refine it
@@ -187,9 +247,18 @@ class Runs:
                 return Ended("failed", f"applying your answers: {outcome.error}")
             await confirm_idea(self.sessions, investigation_id, final=outcome.reading, answers=answers,
                                edits=clarified.edits, explicit=True)
+            await recorder.store(Entry("stage", "Confirmed: your idea goes to the full evaluation",
+                                       stage=Stage.AWAITING_CLARIFICATION))
         return await self.drive(investigation_id)
 
     async def write_package(self, investigation_id: uuid.UUID, candidate_id: uuid.UUID) -> Ended:
-        await write_proposal(self.sessions, investigation_id, candidate_id=candidate_id,
-                             settings=self.models.proposal_settings, model=self.models.proposal_model)
+        recorder = self.recorder(investigation_id)
+        await recorder.store(Entry("step_started", "Writing the research package (the Proposal Designer, one call)",
+                                   stage=Stage.WRITING_PROPOSAL, candidate_id=candidate_id))
+        outcome = await write_proposal(self.sessions, investigation_id, candidate_id=candidate_id,
+                                       settings=self.models.proposal_settings, model=self.models.proposal_model)
+        await recorder.store(Entry("step_done", f"Research package written (revision {outcome.package.revision}; "
+                                                f"{outcome.retagged} statement(s) marked 'to verify')",
+                                   stage=Stage.WRITING_PROPOSAL, candidate_id=candidate_id,
+                                   data={"revision": outcome.package.revision, "retagged": outcome.retagged}))
         return Ended("done")
