@@ -1,8 +1,9 @@
 """Ranking the results of an investigation (stage `ranking`, doc 05 §3 and §11.1, step 5.6b), both workflows.
 
 ranked_results(session, investigation_id) orders what the investigation produced, from stored data only:
-  - finalists: ordered by the ranking rules (src/ai/evidence/ranking.py) on the verdicts of their latest
-    full evaluation, each with the reason it comes before the next one;
+  - finalists (also once selected or given a research package): ordered by the ranking rules
+    (src/ai/evidence/ranking.py) on the verdicts of their latest full evaluation, each with the reason it comes
+    before the next one;
   - passed screening, not fully evaluated: `advanced` candidates (light verdicts), in the same order;
   - the rest, with what happened and why: rejected, screened out, refined (superseded by a later version),
     waiting in reserve, and evaluations left open (e.g. rule 7, expand search, which isn't carried out yet).
@@ -29,6 +30,9 @@ from src.db.models import Candidate, Evaluation
 OTHER_ORDER = (CandidateStatus.FULL_EVALUATING, CandidateStatus.LIGHT_EVALUATING, CandidateStatus.NEEDS_REFINEMENT,
                CandidateStatus.PROPOSED, CandidateStatus.REFINED, CandidateStatus.REJECTED,
                CandidateStatus.SCREENED_OUT)
+# A finalist stays a finalist after it is chosen or gets its research package (step 7): without these, the idea
+# with a package dropped out of the results and the report (found in step 9a)
+FINALIST_STATUSES = (CandidateStatus.FINALIST, CandidateStatus.SELECTED, CandidateStatus.PROPOSAL_READY)
 OTHER_NOTES = {
     CandidateStatus.FULL_EVALUATING: "flagged: its evaluation asked for an expanded search, which isn't carried out yet",
     CandidateStatus.LIGHT_EVALUATING: "its light evaluation didn't finish",
@@ -79,7 +83,8 @@ async def ranked_results(session, investigation_id: uuid.UUID) -> RankedResults:
     for c in candidates:
         by_status.setdefault(c.status, []).append(c)
     results = RankedResults(
-        finalists=await _ordered(session, by_status.get(CandidateStatus.FINALIST, []), "full"),
+        finalists=await _ordered(session, [c for status in FINALIST_STATUSES for c in by_status.get(status, [])],
+                                 "full"),
         advanced=await _ordered(session, by_status.get(CandidateStatus.ADVANCED, []), "light"),
     )
     later = {c.parent_id: c for c in candidates if c.parent_id}

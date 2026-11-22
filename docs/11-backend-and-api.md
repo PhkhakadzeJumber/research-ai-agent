@@ -72,21 +72,25 @@ Folders are created when their first file is written, not in advance.
 
 ## 3. API
 
-All routes are under `/api/v1`. They require authentication, except health checks.
+All routes are under `/api/v1`. They require authentication, except health checks (from step 9d; until then the API runs on your own machine only).
+
+**Built so far (step 9a):** the read-only routes marked ✅ below, in `src/api/`. Every response has its own Pydantic model (`src/api/schemas/`); timestamps are ISO with the +04:00 offset; every category comes with its label (`{"category": "potential_opportunity", "label": "Potential opportunity"}`); lists are `{"items": [...], "total": N}`; errors are `{"error": {"code", "message", "request_id"}}`, and every response carries an `X-Request-ID` header.
 
 ### 3.1 Investigations (both modes)
 
 | Method | Route | Purpose |
 |---|---|---|
 | POST | `/investigations` | Create. Body: mode, input (idea or field brief inputs), complexity, constraints (or "use my profile"). Returns the investigation ID |
-| GET | `/investigations` | List the user's investigations |
-| GET | `/investigations/{id}` | Status, stage, mode, summary, budgets and counters |
-| GET | `/investigations/{id}/clarification` | The structured reading (facets or field brief) + questions |
+| GET | `/investigations` ✅ | List the user's investigations |
+| GET | `/investigations/{id}` ✅ | Status, stage, mode, summary, budgets and counters |
+| GET | `/investigations/{id}/clarification` ✅ | The structured reading (facets or field brief) + questions |
 | POST | `/investigations/{id}/clarification` | Answers / edits / skip → starts the main run |
 | GET | `/investigations/{id}/events` | **SSE** stream of progress events |
 | POST | `/investigations/{id}/cancel` | Cancel (stops at the next stage boundary) |
 | GET | `/investigations/{id}/coverage` | Investigation-level coverage summary |
-| GET | `/investigations/{id}/landscape` | Mode 2: subtopic map, limitation clusters, contradictions, combination hints |
+| GET | `/investigations/{id}/results` ✅ | The ranked results: finalists (with why each comes before the next), ideas that passed screening, and everything set aside with its reason |
+| GET | `/investigations/{id}/cost` ✅ | Cost per agent role and in total, against the budget |
+| GET | `/investigations/{id}/landscape` ✅ | Mode 2: subtopic map, limitation clusters, contradictions, combination hints |
 | GET | `/investigations/{id}/signals` | Mode 2: tier-3 signals used |
 
 ### 3.2 Candidates
@@ -94,24 +98,24 @@ All routes are under `/api/v1`. They require authentication, except health check
 | Method | Route | Purpose |
 |---|---|---|
 | GET | `/investigations/{id}/candidates` | All candidates with status, verdict summaries, rejection reasons. Filters: status, origin |
-| GET | `/candidates/{cid}` | Full candidate: facets, motivation, lineage, evaluations, verdicts, triage history |
-| GET | `/candidates/{cid}/matrix` | Facet × paper matrix |
-| GET | `/candidates/{cid}/claims` | Claims with evidence (filter by kind or status) |
-| GET | `/candidates/{cid}/challenges` | Skeptic log |
+| GET | `/candidates/{cid}` ✅ | Full candidate: facets, motivation, lineage, evaluations, verdicts, triage history |
+| GET | `/candidates/{cid}/matrix` ✅ | Facet × paper matrix |
+| GET | `/candidates/{cid}/claims` ✅ | Claims with evidence (filter by kind or status) |
+| GET | `/candidates/{cid}/challenges` ✅ | Skeptic log |
 | GET | `/candidates/{cid}/coverage` | Coverage report |
 | GET | `/candidates/compare?ids=…` | Side-by-side comparison data |
 | POST | `/candidates/{cid}/steer` | Mode 2 steering: more like this / simpler / exclude X / combine with Y → a Scout task |
 | POST | `/candidates/{cid}/deep-dive` | Run Workflow A (full evaluation) on this candidate |
 | POST | `/candidates/{cid}/proposal` | Generate the research package (async; progress over SSE) |
-| GET | `/candidates/{cid}/proposal` | Get the research package |
+| GET | `/candidates/{cid}/proposal` ✅ | Get the research package |
 | GET | `/candidates/{cid}/graph` | Evidence graph nodes and edges |
 
 ### 3.3 Papers, export, conversation, profile
 
 | Method | Route | Purpose |
 |---|---|---|
-| GET | `/investigations/{id}/papers` | Paper library (sort/filter: relevance, year, tier, full text vs abstract, used by which candidate) |
-| GET | `/papers/{pid}` | Metadata + analysis + quotes used |
+| GET | `/papers` ✅ | The shared paper library across investigations: search titles and abstracts (`q`), filter read closely / found in your investigations / year. (Per-investigation filtering can come later) |
+| GET | `/papers/{pid}` ✅ | Metadata + analysis + quotes used |
 | GET | `/investigations/{id}/report?format=md\|pdf` | Investigation report |
 | GET | `/candidates/{cid}/proposal/export?format=md\|pdf\|docx` | Package export (docx later) |
 | POST | `/investigations/{id}/messages` | "Ask about this investigation" (optional feature) |
@@ -146,7 +150,7 @@ Events are also stored, so a reconnecting client can replay them.
 | LLM calls | SDK retries → stage retry → partial stage (doc 08) |
 | Verifier failures | Downgrade claims; never block the run |
 | Orchestrator | Catch per stage; mark the stage failed/partial; continue where the rules allow; mark the investigation failed only if a mandatory stage (intake, any retrieval at all) fails |
-| API | Consistent error responses with a correlation ID; no stack traces to clients |
+| API | One error shape with a request ID (also in the `X-Request-ID` header); no stack traces to clients |
 
 ## 6. Observability
 

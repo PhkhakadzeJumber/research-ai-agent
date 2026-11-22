@@ -13,6 +13,7 @@ There are independent groups, so a missing value in one never blocks the others:
 - DatabaseSettings (get_database_settings): the database connections.
 - EmbeddingSettings (get_embedding_settings): the Vertex AI embedding model.
 - RoleLlmSettings (get_role_llm_settings): model and effort per agent role.
+- ApiSettings (get_api_settings): the HTTP API (which frontend origins may call it).
 """
 
 from __future__ import annotations
@@ -290,3 +291,30 @@ def get_role_llm_settings(role: str) -> RoleLlmSettings:
     """The model and effort for one agent role, loading `.env` on first use."""
     get_settings()  # loads .env and validates the base settings
     return load_role_llm_settings(role, os.environ)
+
+
+DEFAULT_FRONTEND_ORIGIN = "http://localhost:3000"  # the Next.js dev server
+
+
+@dataclass(frozen=True)
+class ApiSettings:
+    frontend_origins: tuple[str, ...]
+    """Origins the browser may call the API from (CORS), from FRONTEND_ORIGIN: one URL, or several separated by
+    commas. Default: the local Next.js dev server."""
+
+
+def load_api_settings(environ: Mapping[str, str]) -> ApiSettings:
+    raw = environ.get("FRONTEND_ORIGIN", "").strip() or DEFAULT_FRONTEND_ORIGIN
+    origins = tuple(origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip())
+    bad = [origin for origin in origins if not origin.startswith(("http://", "https://"))]
+    if bad or not origins:
+        raise ConfigError(f"FRONTEND_ORIGIN must be http(s) URLs separated by commas, e.g. {DEFAULT_FRONTEND_ORIGIN}; "
+                          f"got {', '.join(bad) or 'nothing'}.")
+    return ApiSettings(frontend_origins=origins)
+
+
+@lru_cache(maxsize=1)
+def get_api_settings() -> ApiSettings:
+    """Returns the API settings, loading `.env` on first use."""
+    load_dotenv()
+    return load_api_settings(os.environ)

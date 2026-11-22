@@ -14,6 +14,7 @@ from scripts.proposal import to_markdown
 from src.ai.schemas.proposal import ProposalOutput
 from src.ai.workflows.concluding import conclude_step, finish_investigation
 from src.ai.workflows.proposal import NoCandidateForProposal, check_statements, package_sections, write_proposal
+from src.ai.workflows.ranking import ranked_results
 from src.config import RoleLlmSettings
 from src.db.models import Candidate, Investigation, LlmCall, Paper, ResearchPackage
 from tests.db.test_clarification_workflow import sessions_on
@@ -162,3 +163,15 @@ def test_the_explanation_may_run_to_2000_characters():
     assert len(ProposalOutput.model_validate(output(recommendation_explanation="x" * 2000)).recommendation_explanation) == 2000
     with pytest.raises(ValidationError, match="at most 2000"):
         ProposalOutput.model_validate(output(recommendation_explanation="x" * 2001))
+
+
+@pytest.mark.anyio
+@pytest.mark.db
+async def test_the_idea_with_a_package_is_still_a_ranked_finalist(db_session):
+    # found in step 9a: `proposal_ready` wasn't counted as a finalist, so the idea dropped out of the results
+    investigation_id = await finalist_investigation(db_session)
+    outcome = await write_proposal(sessions_on(db_session), investigation_id, settings=PROPOSAL_SETTINGS,
+                                   model=FakeDesigner())
+    results = await ranked_results(db_session, investigation_id)
+    assert [r.candidate.id for r in results.finalists] == [outcome.candidate.id]
+    assert results.finalists[0].candidate.status == "proposal_ready"
