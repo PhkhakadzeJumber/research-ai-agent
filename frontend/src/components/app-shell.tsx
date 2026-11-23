@@ -9,6 +9,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
 import { TopNav } from "@/components/top-nav";
+import { VerifyBanner } from "@/components/verify-banner";
 import { ErrorNote } from "@/components/ui";
 import { isUnauthorized } from "@/lib/api/client";
 import { useMe } from "@/lib/api/hooks";
@@ -40,6 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         Skip to content
       </a>
       <TopNav />
+      {me.data && !me.data.email_verified ? <VerifyBanner email={me.data.email} /> : null}
       <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1440px] px-4 pb-24 pt-10 outline-none sm:px-10 lg:px-[120px] lg:pt-14">{children}</main>
     </div>
   );

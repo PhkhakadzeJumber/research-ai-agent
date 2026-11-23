@@ -26,6 +26,7 @@ flowchart LR
     I --- PE[ProgressEvent]
     I --- LC[LlmCall]
     U --- CG[CreditGrant]
+    U --- ET[EmailToken]
     U --- CHD[CreditHold] --- I
   end
   subgraph R2["2 · Search trail"]

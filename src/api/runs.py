@@ -159,9 +159,9 @@ class Runs:
                 ended = None
             # its credits are settled before anything says it ended: what the user then sees is final
             await billing.settle_run(self.sessions, investigation_id, ended.reason if ended is not None else None)
-            # the run is idle before its last event goes out, so a live stream that sees "ended" can close
-            self._active.pop(investigation_id, None)
-            self._stopping.discard(investigation_id)
+            # its last event goes out while the run still counts as running, then it is idle: a live stream closes on
+            # "ended", and can never see an idle run before "ended" reached it (step B fix: with the settling above,
+            # a stream's keep-alive could fall in that gap and close without "ended")
             if ended is not None:
                 await recorder.ended(ended)
             else:

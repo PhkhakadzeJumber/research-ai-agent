@@ -1,12 +1,13 @@
 /**
  * Screen 08 · Log in / Sign up (step 10a): the dark brand panel on the left, the form on the right. One component for
  * both: the tabs switch between /login and /signup. After logging in it goes back where the user was headed (?next=).
+ * AuthLayout (the two panels) is shared with the email pages (step B: forgot / reset password, verify email).
  */
 "use client";
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 
 import { Button, ErrorNote, Field, Input, Logo, cx } from "@/components/ui";
 import { useLogin, useSignup } from "@/lib/api/hooks";
@@ -24,6 +25,7 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [agreed, setAgreed] = useState(false);
   const action = mode === "login" ? login : signup;
 
   async function submit(event: FormEvent) {
@@ -47,6 +49,66 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
     </Link>
   );
 
+  return (
+    <AuthLayout>
+      <form onSubmit={submit} className="flex w-full max-w-[400px] flex-col gap-5">
+        <Logo className="lg:hidden" />
+        <nav className="flex gap-1 rounded-pill bg-surface-muted p-1">
+          {tab("login", "Log in")}
+          {tab("signup", "Sign up")}
+        </nav>
+        <div className="flex flex-col gap-1.5">
+          <h2 className="display-m">{mode === "login" ? "Welcome back" : "Create your account"}</h2>
+          <p className="body-s text-ink-2">
+            {mode === "login"
+              ? "Log in to see your investigations."
+              : "Free to start: one full evaluation every month. Pro adds discovery and research packages."}
+          </p>
+        </div>
+        {mode === "signup" ? (
+          <Field label="Name">
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" autoComplete="name" required />
+          </Field>
+        ) : null}
+        <Field label="Email">
+          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@university.edu" autoComplete="email" required />
+        </Field>
+        <Field label="Password" hint={mode === "signup" ? "At least 10 characters" : undefined}>
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••••"
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            minLength={mode === "signup" ? 10 : undefined}
+            required
+          />
+        </Field>
+        {mode === "login" ? (
+          <Link href="/forgot-password" className="-mt-2 w-fit body-s font-medium text-indigo">Forgot password?</Link>
+        ) : (
+          <label className="flex items-start gap-2.5 body-s text-ink-2">
+            <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} required className="mt-0.5" />
+            <span>
+              I agree to the <Link href="/terms" className="text-indigo">Terms of Service</Link> and the{" "}
+              <Link href="/privacy" className="text-indigo">Privacy Policy</Link>
+            </span>
+          </label>
+        )}
+        <ErrorNote error={action.error} />
+        <Button type="submit" disabled={action.isPending || (mode === "signup" && !agreed)} className="w-full">
+          {action.isPending ? "One moment…" : mode === "login" ? "Log in →" : "Create account →"}
+        </Button>
+        <p className="body-s text-ink-3">
+          Your uploaded drafts stay private: they are never added to the shared library or sent to search engines.
+        </p>
+      </form>
+    </AuthLayout>
+  );
+}
+
+/** The two panels of the account pages: the brand on the left (wide screens), the form on the right. */
+export function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <div className="grid min-h-screen lg:grid-cols-[1fr_640px]">
       <section className="hidden flex-col justify-between bg-ink px-[72px] py-14 text-paper lg:flex">
@@ -75,47 +137,7 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
       </section>
 
       <section className="flex items-center justify-center px-4 py-12">
-        <form onSubmit={submit} className="flex w-full max-w-[400px] flex-col gap-5">
-          <Logo className="lg:hidden" />
-          <nav className="flex gap-1 rounded-pill bg-surface-muted p-1">
-            {tab("login", "Log in")}
-            {tab("signup", "Sign up")}
-          </nav>
-          <div className="flex flex-col gap-1.5">
-            <h2 className="display-m">{mode === "login" ? "Welcome back" : "Create your account"}</h2>
-            <p className="body-s text-ink-2">
-              {mode === "login"
-                ? "Log in to see your investigations."
-                : "Free to start. Each investigation has a budget you choose, and it stops before going over."}
-            </p>
-          </div>
-          {mode === "signup" ? (
-            <Field label="Name">
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" autoComplete="name" required />
-            </Field>
-          ) : null}
-          <Field label="Email">
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@university.edu" autoComplete="email" required />
-          </Field>
-          <Field label="Password" hint={mode === "signup" ? "At least 10 characters" : undefined}>
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••••"
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              minLength={mode === "signup" ? 10 : undefined}
-              required
-            />
-          </Field>
-          <ErrorNote error={action.error} />
-          <Button type="submit" disabled={action.isPending} className="w-full">
-            {action.isPending ? "One moment…" : mode === "login" ? "Log in →" : "Create account →"}
-          </Button>
-          <p className="body-s text-ink-3">
-            Your uploaded drafts stay private: they are never added to the shared library or sent to search engines.
-          </p>
-        </form>
+        {children}
       </section>
     </div>
   );

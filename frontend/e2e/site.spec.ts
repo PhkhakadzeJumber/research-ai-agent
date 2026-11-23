@@ -23,6 +23,31 @@ test.describe("not logged in", () => {
     await expect(page.getByRole("heading", { name: /Your investigations/ })).toBeVisible();
   });
 
+  test("a forgotten password: the link is asked for without saying whether the account exists", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByRole("link", { name: "Forgot password?" }).click();
+    await expect(page).toHaveURL(/\/forgot-password$/);
+    await expect(page.getByRole("heading", { name: "Forgot your password?" })).toBeVisible(); // the log-in form is gone
+    await page.getByRole("textbox", { name: "Email" }).fill("nobody-here@example.com");
+    await page.getByRole("button", { name: "Send the link →" }).click();
+    await expect(page.getByText("If nobody-here@example.com has an account, the link is on its way.")).toBeVisible();
+  });
+
+  test("signing up needs the terms accepted", async ({ page }) => {
+    await page.goto("/signup");
+    await page.getByLabel("Name").fill("Someone");
+    await page.getByLabel("Email").fill("someone@example.com");
+    await page.getByLabel("Password").fill("a long enough password");
+    await expect(page.getByRole("button", { name: "Create account →" })).toBeDisabled();
+    await page.getByRole("checkbox").check();
+    await expect(page.getByRole("button", { name: "Create account →" })).toBeEnabled();
+  });
+
+  test("a verification link that isn't valid says so", async ({ page }) => {
+    await page.goto("/verify-email?token=not-a-real-token-at-all-123");
+    await expect(page.getByRole("heading", { name: "This link didn't work" })).toBeVisible();
+  });
+
   test("the pricing page is public, with the server's prices", async ({ page }) => {
     await page.goto("/pricing");
     await expect(page.getByRole("heading", { name: /Good research shouldn.t cost a fortune/ })).toBeVisible();

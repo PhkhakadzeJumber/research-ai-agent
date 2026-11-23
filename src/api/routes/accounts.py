@@ -1,11 +1,12 @@
-"""Sign up, log in, log out, the current user, the password and the profile (step 9d)."""
+"""Sign up, log in, log out, the current user, the password and the profile (step 9d); verifying the email and
+resetting a forgotten password by emailed links (step B)."""
 
 from __future__ import annotations
 
 from datetime import timedelta
 
 from fastapi import APIRouter, Request, Response
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from src.api.auth import (
     COOKIE_NAME,
@@ -22,7 +23,10 @@ from src.api.deps import SessionDep
 from src.api.routes.billing import plan_info
 from src.api.errors import ApiError
 from src.api.schemas.accounts import (
+    EmailLink,
     LoginRequest,
+    PasswordReset,
+    ResetRequest,
     Me,
     PasswordChange,
     ProfileOut,
@@ -31,7 +35,9 @@ from src.api.schemas.accounts import (
     SignupRequest,
 )
 from src.api.schemas.common import ErrorResponse
-from src.db.models import Investigation, LlmCall, User
+from src.api import email as mail
+from src.config import get_email_settings
+from src.db.models import EmailToken, Investigation, LlmCall, User
 from src.db.repositories.users import (
     EmailTaken,
     create_session,
@@ -53,7 +59,48 @@ async def me(session, user: User) -> Me:
         .join(Investigation, Investigation.id == LlmCall.investigation_id)
         .where(Investigation.user_id == user.id, LlmCall.created_at >= month_start))).scalar_one()
     return Me(id=user.id, name=user.name, email=user.email, created_at=user.created_at,
-              spent_this_month_usd=float(spent), plan=await plan_info(session, user))
+              spent_this_month_usd=float(spent), plan=await plan_info(session, user),
+              email_verified=user.email_verified_at is not None)
+
+
+# --- links sent by email (step B) ---------------------------------------------------------------------------
+
+LINK_HOURS = {"verify": 24, "reset": 1}
+RESEND_AFTER = timedelta(seconds=60)
+"""A new link of the same kind is sent at most once a minute (the inbox, and Resend's free quota, aren't flooded)."""
+
+
+async def issue_link(session, user: User, purpose: str) -> str | None:
+    """A new link for `purpose`, replacing the user's older ones; None if one was sent less than a minute ago."""
+    moment = now()
+    last = (await session.execute(select(func.max(EmailToken.created_at)).where(
+        EmailToken.user_id == user.id, EmailToken.purpose == purpose))).scalar_one()
+    if last is not None and moment - last < RESEND_AFTER:
+        return None
+    await session.execute(delete(EmailToken).where(EmailToken.user_id == user.id, EmailToken.purpose == purpose))
+    token = new_token()
+    session.add(EmailToken(user_id=user.id, purpose=purpose, token_hash=token_hash(token),
+                           expires_at=moment + timedelta(hours=LINK_HOURS[purpose]), created_at=moment))
+    await session.flush()
+    page = "verify-email" if purpose == "verify" else "reset-password"
+    return f"{get_email_settings().site_url}/{page}?token={token}"
+
+
+async def use_link(session, token: str, purpose: str) -> User:
+    """The user a link is for, marking the link used; a 400 if it is unknown, used or expired."""
+    row = (await session.execute(select(EmailToken).where(
+        EmailToken.token_hash == token_hash(token), EmailToken.purpose == purpose).with_for_update())).scalar_one_or_none()
+    if row is None or row.used_at is not None:
+        raise ApiError(400, "link_invalid", "This link isn't valid any more: it was used, or a newer one was sent.")
+    if row.expires_at <= now():
+        raise ApiError(400, "link_expired", "This link has expired: ask for a new one.")
+    row.used_at = now()
+    return await session.get(User, row.user_id)
+
+
+async def send_verification(session, user: User) -> bool:
+    link = await issue_link(session, user, "verify")
+    return link is not None and await mail.send(mail.verification_email(user.email, user.name, link))
 
 
 async def log_in(session, request: Request, response: Response, user: User) -> None:
@@ -73,6 +120,7 @@ async def signup(body: SignupRequest, request: Request, response: Response, sess
     except EmailTaken:
         raise ApiError(409, "email_taken", "An account with this email already exists: log in instead.") from None
     await log_in(session, request, response, user)
+    await send_verification(session, user)  # a failed email doesn't fail the signup: "Resend the link" is there
     return await me(session, user)
 
 
@@ -137,3 +185,51 @@ async def update_profile(body: ProfileUpdate, user: CurrentUser, session: Sessio
     user.profile = body.limits.model_dump(exclude_none=True)
     await session.flush()
     return profile_out(user)
+
+
+# --- verifying the email, resetting the password (step B) ------------------------------------------------------
+
+@router.post("/auth/verify-email/send", status_code=204, responses=AUTH_ERRORS)
+async def resend_verification(user: CurrentUser, session: SessionDep) -> Response:
+    """Sends a new verification link (the older one stops working); at most one a minute."""
+    if user.email_verified_at is not None:
+        raise ApiError(409, "already_verified", "Your email is already verified.")
+    link = await issue_link(session, user, "verify")
+    if link is None:
+        raise ApiError(429, "too_soon", "A link was just sent: check your inbox (and spam), or try again in a minute.")
+    if not await mail.send(mail.verification_email(user.email, user.name, link)):
+        raise ApiError(502, "email_failed", "The email couldn't be sent just now: try again in a minute.")
+    return Response(status_code=204)
+
+
+@router.post("/auth/verify-email", status_code=204, responses=AUTH_ERRORS)
+async def verify_email(body: EmailLink, session: SessionDep) -> Response:
+    """Verifies the email from the link (no login needed: the link may be opened on another device)."""
+    user = await use_link(session, body.token, "verify")
+    user.email_verified_at = user.email_verified_at or now()
+    await session.flush()
+    return Response(status_code=204)
+
+
+@router.post("/auth/password-reset/request", status_code=202, responses=AUTH_ERRORS)
+async def request_password_reset(body: ResetRequest, session: SessionDep) -> Response:
+    """Emails a reset link if the email has an account. The answer is the same either way, so nobody can find out
+    which emails have accounts."""
+    user = await find_user_by_email(session, body.email)
+    if user is not None:
+        link = await issue_link(session, user, "reset")
+        if link is not None:
+            await mail.send(mail.reset_email(user.email, user.name, link))
+    return Response(status_code=202)
+
+
+@router.post("/auth/password-reset", response_model=Me, responses=AUTH_ERRORS)
+async def reset_password(body: PasswordReset, request: Request, response: Response, session: SessionDep) -> Me:
+    """Sets the new password from the link, logs out every session, and logs you in here. Opening the emailed link
+    also proves the email is yours, so it counts as verified."""
+    user = await use_link(session, body.token, "reset")
+    user.password_hash = hash_password(body.password)
+    user.email_verified_at = user.email_verified_at or now()
+    await delete_other_sessions(session, user.id, None)
+    await log_in(session, request, response, user)
+    return await me(session, user)

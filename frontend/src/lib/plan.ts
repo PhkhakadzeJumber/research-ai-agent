@@ -11,9 +11,10 @@ export type Plan = Me["plan"];
 export type Check = { ok: true } | { ok: false; reason: string; upgrade: boolean };
 
 /** Whether the account can start this action now, and if not, why (and whether Pro or a top-up would help). */
-export function canStart(plan: Plan | undefined, action: Action): Check {
+export function canStart(plan: Plan | undefined, action: Action, emailVerified = true): Check {
   if (!plan) return { ok: true }; // not loaded yet: the server will say
   if (plan.plan === "free") {
+    if (action === "evaluate" && !emailVerified) return { ok: false, reason: "Verify your email first: open the link we sent you (the banner at the top can send a new one).", upgrade: false };
     if (action !== "evaluate") return { ok: false, reason: `${action === "discover" ? "Finding ideas" : "Research packages"} are part of Pro.`, upgrade: true };
     if ((plan.free_evaluations_left ?? 0) <= 0) return { ok: false, reason: "You've used this month's free evaluation. It comes back on the 1st.", upgrade: true };
     return { ok: true };

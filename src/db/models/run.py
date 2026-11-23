@@ -101,6 +101,8 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     """An Argon2 hash (src/api/auth.py), never the password. Empty for accounts without a password (e.g. a future
     Google sign-in)."""
     last_login_at: Mapped[datetime | None] = mapped_column(AwareDateTime())
+    email_verified_at: Mapped[datetime | None] = mapped_column(AwareDateTime())
+    """When the user opened the verification link (step B). A free account needs it before its free evaluation."""
     profile: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default=sql_text("'{}'::jsonb"))
     """The research limits (doc 10 §2.1; edited on the profile page, step 9d); copied into each new investigation."""
     plan: Mapped[str] = mapped_column(String(8), default="free", server_default="free")

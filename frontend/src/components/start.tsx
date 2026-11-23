@@ -68,8 +68,9 @@ function Start({ limits }: { limits: ResearchLimits | undefined }) {
     limits?.academic_level === "phd" || limits?.academic_level === "researcher" ? "advanced" : "beginner",
   );
   const [run, setRun] = useState<RunLimits>({ weeks: limits?.weeks_available ?? null, compute: limits?.compute ?? null });
-  const plan = useMe().data?.plan;
-  const shared = { complexity, constraints: typedConstraints(limits, run), plan };
+  const me = useMe().data;
+  const plan = me?.plan;
+  const shared = { complexity, constraints: typedConstraints(limits, run), plan, verified: me?.email_verified ?? true };
 
   return (
     <div className="flex flex-col gap-10">
@@ -105,14 +106,14 @@ function Start({ limits }: { limits: ResearchLimits | undefined }) {
   );
 }
 
-type Shared = { complexity: Complexity; constraints: Record<string, string>; plan: Plan | undefined };
+type Shared = { complexity: Complexity; constraints: Record<string, string>; plan: Plan | undefined; verified: boolean };
 
 function useGoTo() {
   const router = useRouter();
   return (id: string) => router.push(`/investigations/${id}`);
 }
 
-function EvaluateCard({ complexity, constraints, plan }: Shared) {
+function EvaluateCard({ complexity, constraints, plan, verified }: Shared) {
   const goTo = useGoTo();
   const create = useCreateInvestigation();
   const upload = useCreateFromDocument();
@@ -157,7 +158,7 @@ function EvaluateCard({ complexity, constraints, plan }: Shared) {
     }
   }
 
-  const allowed = canStart(plan, "evaluate");
+  const allowed = canStart(plan, "evaluate", verified);
   const ready = (file ? consent : idea.trim().length > 0) && allowed.ok;
   return (
     <Card className="flex flex-col gap-4">

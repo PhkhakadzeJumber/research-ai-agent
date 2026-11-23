@@ -15,6 +15,7 @@ There are independent groups, so a missing value in one never blocks the others:
 - RoleLlmSettings (get_role_llm_settings): model and effort per agent role.
 - ApiSettings (get_api_settings): the HTTP API (which frontend origins may call it).
 - BillingSettings (get_billing_settings): plans and credit prices (docs/18).
+- EmailSettings (get_email_settings): sending emails (Resend), the site's address, demo accounts.
 """
 
 from __future__ import annotations
@@ -410,3 +411,39 @@ def get_billing_settings() -> BillingSettings:
     """Returns the billing settings, loading `.env` on first use."""
     load_dotenv()
     return load_billing_settings(os.environ)
+
+
+# --- email (step B: verification and password reset) ----------------------------------------------------------
+
+DEFAULT_EMAIL_FROM = "Eureka <onboarding@resend.dev>"
+DEFAULT_SITE_URL = "http://localhost:3000"
+
+
+@dataclass(frozen=True)
+class EmailSettings:
+    resend_api_key: str | None = field(default=None, repr=False)
+    """Resend's API key (RESEND_API_KEY). Without one, emails are written to the API's log instead (local runs)."""
+    email_from: str = DEFAULT_EMAIL_FROM
+    """The sender (EMAIL_FROM). Resend's onboarding@resend.dev works without a domain of your own, but delivers only
+    to the address the Resend account was made with."""
+    site_url: str = DEFAULT_SITE_URL
+    """Where links in emails point (PUBLIC_SITE_URL): the website, without a trailing slash."""
+    demo_accounts: tuple[str, ...] = ()
+    """Emails whose checkout really changes their plan (EUREKA_DEMO_ACCOUNTS, comma-separated; step C)."""
+
+
+def load_email_settings(environ: Mapping[str, str]) -> EmailSettings:
+    site = (environ.get("PUBLIC_SITE_URL", "").strip() or DEFAULT_SITE_URL).rstrip("/")
+    if not site.startswith(("http://", "https://")):
+        raise ConfigError(f"PUBLIC_SITE_URL must be an http(s) URL, e.g. {DEFAULT_SITE_URL}; got {site!r}.")
+    demo = tuple(e.strip().lower() for e in environ.get("EUREKA_DEMO_ACCOUNTS", "").split(",") if e.strip())
+    return EmailSettings(resend_api_key=environ.get("RESEND_API_KEY", "").strip() or None,
+                         email_from=environ.get("EMAIL_FROM", "").strip() or DEFAULT_EMAIL_FROM, site_url=site,
+                         demo_accounts=demo)
+
+
+@lru_cache(maxsize=1)
+def get_email_settings() -> EmailSettings:
+    """Returns the email settings, loading `.env` on first use."""
+    load_dotenv()
+    return load_email_settings(os.environ)

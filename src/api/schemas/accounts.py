@@ -49,6 +49,25 @@ class LoginRequest(_WithEmail):
     password: Annotated[str, StringConstraints(min_length=1, max_length=MAX_PASSWORD)]
 
 
+class ResetRequest(_WithEmail):
+    """Asks for a password-reset link (step B)."""
+
+
+Token = Annotated[str, StringConstraints(strip_whitespace=True, min_length=20, max_length=200)]
+
+
+class EmailLink(_Request):
+    """The token from a link in an email (step B)."""
+
+    token: Token
+
+
+class PasswordReset(_Request):
+    token: Token
+    password: Password
+    """The new password: at least 10 characters."""
+
+
 class PasswordChange(_Request):
     current: Annotated[str, StringConstraints(min_length=1, max_length=MAX_PASSWORD)]
     new: Password
@@ -63,6 +82,8 @@ class Me(ApiModel):
     """What your investigations' Claude calls cost since the 1st of this month (Tbilisi time): the nav's chip."""
     plan: PlanInfo
     """The plan, credits and prices (step P2): the nav's chip and the start buttons."""
+    email_verified: bool
+    """Whether the email was verified (step B): a free account needs it before its free evaluation."""
 
 
 AcademicLevel = Literal["undergraduate", "master", "phd", "researcher"]

@@ -19,6 +19,10 @@ describe("what a plan may start", () => {
     expect(canStart(pro(60), "discover")).toEqual({ ok: true });
     expect(canStart(pro(24), "evaluate")).toEqual({ ok: false, reason: "This needs 25 credits; you have 24.", upgrade: true });
   });
+  it("a free evaluation waits for a verified email; Pro doesn't (step B)", () => {
+    expect(canStart(free(1), "evaluate", false)).toMatchObject({ ok: false, upgrade: false });
+    expect(canStart(pro(100), "evaluate", false)).toEqual({ ok: true });
+  });
   it("lets the server decide while the plan is loading", () => {
     expect(canStart(undefined, "discover")).toEqual({ ok: true });
   });

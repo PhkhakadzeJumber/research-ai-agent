@@ -58,6 +58,32 @@ export function useLogout() {
   });
 }
 
+// --- emailed links (step B) ------------------------------------------------------------------------------------
+
+export function useResendVerification() {
+  return useMutation({ mutationFn: () => api<void>("/auth/verify-email/send", { method: "POST" }) });
+}
+
+export function useVerifyEmail() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (token: string) => api<void>("/auth/verify-email", { method: "POST", body: { token } }),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.me }),
+  });
+}
+
+export function useRequestReset() {
+  return useMutation({ mutationFn: (email: string) => api<void>("/auth/password-reset/request", { method: "POST", body: { email } }) });
+}
+
+export function useResetPassword() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["PasswordReset"]) => api<Me>("/auth/password-reset", { method: "POST", body }),
+    onSuccess: (me) => client.setQueryData(keys.me, me),
+  });
+}
+
 export function useProfile() {
   return useQuery({ queryKey: keys.profile, queryFn: () => api<Profile>("/profile") });
 }

@@ -190,7 +190,7 @@ async def event_stream(runs: Runs, investigation_id: uuid.UUID, after: int,
                 continue
             yield sse(row)
             last = row.seq
-            if row.kind == "ended" and runs.state(investigation_id) == "idle":
+            if row.kind == "ended":  # a run's last event (stored while it still counts as running: src/api/runs.py)
                 return
     finally:
         runs.unsubscribe(investigation_id, queue)

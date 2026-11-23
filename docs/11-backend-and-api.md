@@ -133,6 +133,12 @@ All routes are under `/api/v1`. They require authentication, except health check
 | POST | `/auth/logout` ✅ | Ends the session (its cookie stops working at once) |
 | GET | `/auth/me` ✅ | `{id, name, email, created_at, spent_this_month_usd, plan}` (the spend: your investigations' Claude calls since the 1st of the month, Tbilisi time; `plan`: see §3.6) |
 | POST | `/auth/password` ✅ | `{current, new}`; logs out your other sessions |
+| POST | `/auth/verify-email/send` ✅ | A new verification link (the old one stops working); at most one a minute (`429 too_soon`); `409` if already verified (step B) |
+| POST | `/auth/verify-email` ✅ | `{token}` from the link; no login needed; `400 link_invalid` / `link_expired` |
+| POST | `/auth/password-reset/request` ✅ | `{email}`; always `202`, so nobody can find out which emails have accounts |
+| POST | `/auth/password-reset` ✅ | `{token, password}`: sets the password, logs out every session, logs you in here, and counts the email as verified |
+
+**Emails (step B):** `src/api/email.py` sends through Resend's HTTP API (`RESEND_API_KEY`, `EMAIL_FROM`; links point at `PUBLIC_SITE_URL`). Without a key they go to the API's log (with the link only when the site is local). Signing up sends the verification link; a free account's evaluation needs a verified email (`403 email_not_verified`), Pro doesn't. Links are stored as SHA-256 hashes (`email_tokens`), work once, and expire (verify 24 h, reset 1 h).
 
 Every other route needs a login (`401 not_logged_in`). Someone else's investigation, idea or export is `404`, exactly like one that doesn't exist. The paper library is shared, but its counts and "used in" only ever show your own investigations. Runs started from the command line have no owner until `python -m scripts.users claim <email>`.
 

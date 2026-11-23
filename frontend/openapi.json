@@ -454,6 +454,258 @@
     }
    }
   },
+  "/api/v1/auth/verify-email/send": {
+   "post": {
+    "tags": [
+     "accounts"
+    ],
+    "summary": "Resend Verification",
+    "description": "Sends a new verification link (the older one stops working); at most one a minute.",
+    "operationId": "resend_verification_api_v1_auth_verify_email_send_post",
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "401": {
+      "description": "Unauthorized",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "Conflict",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Too Many Requests",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/auth/verify-email": {
+   "post": {
+    "tags": [
+     "accounts"
+    ],
+    "summary": "Verify Email",
+    "description": "Verifies the email from the link (no login needed: the link may be opened on another device).",
+    "operationId": "verify_email_api_v1_auth_verify_email_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EmailLink"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "204": {
+      "description": "Successful Response"
+     },
+     "401": {
+      "description": "Unauthorized",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "Conflict",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Too Many Requests",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/auth/password-reset/request": {
+   "post": {
+    "tags": [
+     "accounts"
+    ],
+    "summary": "Request Password Reset",
+    "description": "Emails a reset link if the email has an account. The answer is the same either way, so nobody can find out\nwhich emails have accounts.",
+    "operationId": "request_password_reset_api_v1_auth_password_reset_request_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ResetRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "202": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "401": {
+      "description": "Unauthorized",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "Conflict",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Too Many Requests",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/auth/password-reset": {
+   "post": {
+    "tags": [
+     "accounts"
+    ],
+    "summary": "Reset Password",
+    "description": "Sets the new password from the link, logs out every session, and logs you in here. Opening the emailed link\nalso proves the email is yours, so it counts as verified.",
+    "operationId": "reset_password_api_v1_auth_password_reset_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PasswordReset"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Me"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Unauthorized",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "Conflict",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Too Many Requests",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/v1/investigations": {
    "post": {
     "tags": [
@@ -3548,6 +3800,23 @@
     "title": "DocumentCard",
     "description": "The user's own document, if the idea came from one (private: only its card, never its text)."
    },
+   "EmailLink": {
+    "properties": {
+     "token": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 20,
+      "title": "Token"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "token"
+    ],
+    "title": "EmailLink",
+    "description": "The token from a link in an email (step B)."
+   },
    "ErrorBody": {
     "properties": {
      "code": {
@@ -4646,6 +4915,10 @@
      },
      "plan": {
       "$ref": "#/components/schemas/PlanInfo"
+     },
+     "email_verified": {
+      "type": "boolean",
+      "title": "Email Verified"
      }
     },
     "additionalProperties": false,
@@ -4656,7 +4929,8 @@
      "email",
      "created_at",
      "spent_this_month_usd",
-     "plan"
+     "plan",
+     "email_verified"
     ],
     "title": "Me"
    },
@@ -5173,6 +5447,29 @@
      "new"
     ],
     "title": "PasswordChange"
+   },
+   "PasswordReset": {
+    "properties": {
+     "token": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 20,
+      "title": "Token"
+     },
+     "password": {
+      "type": "string",
+      "maxLength": 128,
+      "minLength": 10,
+      "title": "Password"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "token",
+     "password"
+    ],
+    "title": "PasswordReset"
    },
    "PlanInfo": {
     "properties": {
@@ -5885,6 +6182,23 @@
      "sections"
     ],
     "title": "ResearchPackageOut"
+   },
+   "ResetRequest": {
+    "properties": {
+     "email": {
+      "type": "string",
+      "maxLength": 320,
+      "minLength": 3,
+      "title": "Email"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "email"
+    ],
+    "title": "ResetRequest",
+    "description": "Asks for a password-reset link (step B)."
    },
    "Results": {
     "properties": {

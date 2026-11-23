@@ -117,6 +117,10 @@ A side panel in the workspace for questions about the investigation. Answers car
 
 Exports include the coverage report and the "not a guarantee of originality" note.
 
+### 3.10b Account emails ✅ step B
+
+Figma 14–16: `/forgot-password`, `/reset-password?token=`, `/verify-email?token=` share the log-in layout (`AuthLayout`). Log in has "Forgot password?"; Sign up requires accepting the Terms and the Privacy Policy. Until the email is verified, a banner under the top nav offers "Resend the link", and a free evaluation explains it waits for the verification.
+
 ### 3.11 Plans and billing (doc 18 §6) ✅ step P4
 
 Built from Figma screens 12, 13 and 01b. What a plan allows is explained before the click (`lib/plan.ts`: `canStart`, `priceText`, `chipText`); the server still decides. Until payments (step P5), Go Pro, Manage billing and Buy credits say "Payments open soon".

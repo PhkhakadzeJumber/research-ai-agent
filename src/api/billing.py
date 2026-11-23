@@ -188,6 +188,9 @@ async def reserve(session: AsyncSession, user: User, investigation: Investigatio
 
     left = await price_left(session, investigation.id, action)
     if not pro:  # a free evaluation
+        if user.email_verified_at is None:
+            raise ApiError(403, "email_not_verified", "Verify your email first: open the link we sent you (or send "
+                                                      "a new one from the banner at the top).")
         if not continuing:
             if await free_evaluations_left(session, user, at) <= 0:
                 raise ApiError(403, "free_limit_reached", "You've used this month's free evaluation. Upgrade to Pro, "

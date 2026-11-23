@@ -136,6 +136,7 @@ async def run(args: argparse.Namespace, database: Database, ask=getpass.getpass)
             except EmailTaken as error:
                 print(f"Error: {error}", file=sys.stderr)
                 return 2
+            user.email_verified_at = now()  # made by an admin: no link needed
             print(f"Created the account {user.email}.")
             return 0
         if args.command == "claim":

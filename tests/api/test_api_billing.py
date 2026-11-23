@@ -26,8 +26,12 @@ from tests.fakes import ScriptedLlm, answer
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
 
 
-async def new_user(db_session, email: str = "free@example.com"):
-    return await create_user(db_session, email=email, name="Someone", password_hash=hash_password("long enough pw"))
+async def new_user(db_session, email: str = "free@example.com", verified: bool = True):
+    """An account on the free plan; verified (step B) unless asked, since a free evaluation needs that."""
+    user = await create_user(db_session, email=email, name="Someone", password_hash=hash_password("long enough pw"))
+    user.email_verified_at = now() if verified else None
+    await db_session.flush()
+    return user
 
 
 async def new_investigation(db_session, user, mode: str = "evaluate", cost: str = "0") -> Investigation:
@@ -63,6 +67,16 @@ async def test_a_free_account_gets_one_evaluation_a_month_and_nothing_else(db_se
         with pytest.raises(billing.ApiError) as refused:
             await billing.reserve(db_session, user, await new_investigation(db_session, user, mode), action)
         assert (refused.value.status, refused.value.code) == (403, "pro_only")
+
+
+async def test_a_free_evaluation_needs_a_verified_email_but_pro_does_not(db_session):
+    unverified = await new_user(db_session, verified=False)
+    with pytest.raises(billing.ApiError) as refused:
+        await billing.reserve(db_session, unverified, await new_investigation(db_session, unverified), "evaluate")
+    assert (refused.value.status, refused.value.code) == (403, "email_not_verified")
+    await make_pro(db_session, unverified, credits=0)
+    assert (await billing.reserve(db_session, unverified, await new_investigation(db_session, unverified),
+                                  "evaluate")).free is False
 
 
 async def test_last_months_free_evaluation_does_not_count(db_session):
