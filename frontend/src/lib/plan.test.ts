@@ -5,8 +5,8 @@ import { canStart, chipText, creditsText, endedText, priceText, type Plan } from
 
 const prices = { evaluate: 25, discover: 60, package: 5 };
 const credits = (available: number) => ({ available, monthly: available, other: 0, held: 0 });
-const free = (left: number): Plan => ({ plan: "free", plan_until: null, credits: credits(0), free_evaluations_left: left, prices });
-const pro = (available: number): Plan => ({ plan: "pro", plan_until: "2027-11-22T00:00:00+04:00", credits: credits(available), free_evaluations_left: null, prices });
+const free = (left: number): Plan => ({ plan: "free", plan_until: null, credits: credits(0), free_evaluations_left: left, prices, plan_renews: false, checkout_open: false });
+const pro = (available: number): Plan => ({ plan: "pro", plan_until: "2027-11-22T00:00:00+04:00", credits: credits(available), free_evaluations_left: null, prices, plan_renews: true, checkout_open: false });
 
 describe("what a plan may start", () => {
   it("free: one evaluation a month, nothing else", () => {

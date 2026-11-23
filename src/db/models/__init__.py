@@ -6,7 +6,7 @@ a model that isn't imported here is invisible to migrations.
 """
 
 from src.db.models.accounts import EmailToken, UserSession  # region 1: login sessions and email links
-from src.db.models.billing import CreditGrant, CreditHold  # region 1: plans and credits
+from src.db.models.billing import CreditGrant, CreditHold, Payment  # region 1: plans, credits and payments
 from src.db.models.documents import UserDocument  # region 1: the user's own document
 from src.db.models.candidates import Candidate, CandidateInspiration, Facet  # region 4: where ideas come from
 from src.db.models.evaluations import (  # region 5: judging a candidate
@@ -29,6 +29,7 @@ __all__ = [
     "EmailToken",
     "CreditGrant",
     "CreditHold",
+    "Payment",
     "UserSession",
     "ProgressEvent",
     "ApiCache",

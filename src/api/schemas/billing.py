@@ -7,6 +7,8 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
+from pydantic import ConfigDict, Field
+
 from src.api.schemas.common import ApiModel, Timestamp
 
 Plan = Literal["free", "pro"]
@@ -49,6 +51,10 @@ class PlanInfo(ApiModel):
     free_evaluations_left: int | None
     """Free plan: evaluations the account may still start this month. Empty on Pro."""
     prices: Prices
+    plan_renews: bool
+    """Pro: whether it renews at plan_until (Cancel plan turns this off)."""
+    checkout_open: bool
+    """Whether this account can buy Pro and top-ups here (step C)."""
 
 
 class BillingEntry(ApiModel):
@@ -76,6 +82,48 @@ class Plans(ApiModel):
     pro_yearly_usd: float
     topup_credits: int
     topup_usd: float
+
+
+Product = Literal["pro_monthly", "pro_yearly", "topup"]
+
+
+class CheckoutRequest(ApiModel):
+    """What the card form sends: never the card number, only what a receipt shows. Extra fields are refused, so a
+    full card number can't be sent here even by mistake."""
+
+    model_config = ConfigDict(extra="forbid")
+    product: Product
+    card_brand: Literal["Visa", "Mastercard", "Amex", "Card"]
+    card_last4: str = Field(pattern=r"^[0-9]{4}$")
+    card_expiry: str = Field(pattern=r"^(0[1-9]|1[0-2]) / [0-9]{2}$")
+    """MM / YY."""
+
+
+class Invoice(ApiModel):
+    id: uuid.UUID
+    at: Timestamp
+    description: str
+    amount_usd: float
+    card: str
+    """E.g. "Visa •••• 4242"."""
+
+
+class Card(ApiModel):
+    brand: str
+    last4: str
+    expiry: str
+
+
+class Manage(ApiModel):
+    """Manage billing (step C): the subscription, the card on file and the invoices."""
+
+    plan: Plan
+    period: Literal["monthly", "yearly"] | None
+    """Pro: how it is billed (from its last payment); empty if it was granted without one."""
+    plan_until: Timestamp | None
+    plan_renews: bool
+    card: Card | None
+    invoices: list[Invoice]
 
 
 class Billing(PlanInfo):

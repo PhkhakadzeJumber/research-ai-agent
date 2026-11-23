@@ -137,3 +137,12 @@ test("the phone menu opens and navigates @phone", async ({ page, isMobile }) => 
   await expect(page).toHaveURL(/\/library$/);
   await expect(page.locator("#phone-menu")).toHaveCount(0); // closed after choosing
 });
+
+// the test account isn't one of EUREKA_DEMO_ACCOUNTS: checkout is closed for it (step C)
+test("checkout says payments aren't open for other accounts", async ({ page }) => {
+  await page.goto("/checkout?product=pro_yearly");
+  await expect(page.getByRole("heading", { name: "Payments aren't open yet" })).toBeVisible();
+  await page.goto("/profile/billing/manage");
+  await expect(page.getByRole("heading", { name: "Invoices" })).toBeVisible();
+  await expect(page.getByText("No invoices yet.")).toBeVisible();
+});

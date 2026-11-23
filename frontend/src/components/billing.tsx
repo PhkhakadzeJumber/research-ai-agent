@@ -30,12 +30,14 @@ export function BillingScreen() {
   );
 }
 
-function SoonButton({ label, kind }: { label: string; kind: "accent" | "secondary" }) {
+/** Opens checkout or Manage billing; where payments aren't open for this account, says so instead. */
+function PayButton({ label, kind, href, open }: { label: string; kind: "accent" | "secondary"; href: string; open: boolean }) {
   const [asked, setAsked] = useState(false);
+  if (open) return <ButtonLink href={href} kind={kind} className="w-fit">{label}</ButtonLink>;
   return (
     <span className="flex flex-col gap-1.5">
       <Button kind={kind} className="w-fit" onClick={() => setAsked(true)}>{label}</Button>
-      {asked ? <span role="status" className="body-s text-ink-3">Payments open soon.</span> : null}
+      {asked ? <span role="status" className="body-s text-ink-3">Payments aren&apos;t open yet.</span> : null}
     </span>
   );
 }
@@ -51,7 +53,10 @@ function PlanCard({ billing: b }: { billing: Billing }) {
           {left > 0 ? `${left} full evaluation${left === 1 ? "" : "s"} left this month.` : "This month's free evaluation is used; it comes back on the 1st."}{" "}
           Pro adds finding ideas, research packages and {b.prices.evaluate}-credit evaluations whenever you need them.
         </p>
-        <ButtonLink href="/pricing" kind="accent" className="w-fit">See Pro →</ButtonLink>
+        <div className="flex flex-wrap gap-2.5">
+          <ButtonLink href="/pricing" kind="accent" className="w-fit">See Pro →</ButtonLink>
+          {b.checkout_open ? <ButtonLink href="/profile/billing/manage" kind="secondary" className="w-fit">Manage billing</ButtonLink> : null}
+        </div>
       </Card>
     );
   }
@@ -60,9 +65,9 @@ function PlanCard({ billing: b }: { billing: Billing }) {
       <div className="flex items-center gap-2.5"><MonoLabel className="text-accent">Your plan</MonoLabel><Pill tone="green">Active</Pill></div>
       <span className="display-l">Pro</span>
       <p className="body-s text-ink-3">
-        {b.plan_until ? `Paid until ${day(b.plan_until)}. ` : ""}New credits arrive on the 1st of every month.
+        {b.plan_until ? (b.plan_renews ? `Renews on ${day(b.plan_until)}. ` : `Cancelled: Pro stays until ${day(b.plan_until)}. `) : ""}New credits arrive on the 1st of every month.
       </p>
-      <div className="flex flex-wrap gap-2.5"><SoonButton label="Manage billing" kind="accent" /></div>
+      <div className="flex flex-wrap gap-2.5"><ButtonLink href="/profile/billing/manage" kind="accent" className="w-fit">Manage billing</ButtonLink></div>
       <p className="body-s text-ink-3">Payments, invoices and your card are handled by our payment provider.</p>
     </Card>
   );
@@ -92,7 +97,7 @@ function CreditsCard({ billing: b }: { billing: Billing }) {
         Monthly credits are used first. Enough for about {evaluations} evaluation{evaluations === 1 ? "" : "s"}
         {c.available >= b.prices.discover ? `, or a discovery (${b.prices.discover})` : ""}.
       </p>
-      <SoonButton label="Buy more credits" kind="secondary" />
+      <PayButton label="Buy more credits" kind="secondary" href="/checkout?product=topup" open={b.checkout_open} />
     </Card>
   );
 }

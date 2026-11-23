@@ -1,13 +1,21 @@
 """The account's plan and credits (docs/18; step P2): GET /billing for the Plan & billing page. What the plan
-allows and what runs are charged is decided in src/api/billing.py; buying Pro and top-ups comes with payments
-(step P5)."""
+allows and what runs are charged is decided in src/api/billing.py.
+
+Checkout (step C): the accounts in EUREKA_DEMO_ACCOUNTS can buy Pro and top-ups here, and it takes effect at once;
+no payment provider is called and no money moves (the card form keeps the card number in the browser). For every
+other account checkout is closed ("Payments aren't open yet")."""
 
 from __future__ import annotations
 
+import calendar
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
+from decimal import Decimal
+
+import uuid
 
 from fastapi import APIRouter
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,10 +23,22 @@ from src.api import billing
 from src.api.auth import CurrentUser
 from src.api.deps import SessionDep
 from src.api.routes.investigations import describe
-from src.api.schemas.billing import Billing, BillingEntry, Credits, PlanInfo, Plans, Prices
+from src.api.errors import ApiError
+from src.api.schemas.billing import (
+    Billing,
+    BillingEntry,
+    Card,
+    CheckoutRequest,
+    Credits,
+    Invoice,
+    Manage,
+    PlanInfo,
+    Plans,
+    Prices,
+)
 from src.api.schemas.common import ERRORS
-from src.config import get_billing_settings
-from src.db.models import Candidate, CreditGrant, CreditHold, Investigation, User
+from src.config import get_billing_settings, get_email_settings
+from src.db.models import Candidate, CreditGrant, CreditHold, Investigation, Payment, User
 from src.timeutil import TZ, now
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -48,7 +68,12 @@ async def plan_info(session: AsyncSession, user: User) -> PlanInfo:
     return PlanInfo(plan="pro" if pro else "free", plan_until=user.plan_until if pro else None,
                     credits=Credits(available=b.available, monthly=b.monthly, other=b.other, held=b.held),
                     free_evaluations_left=None if pro else await billing.free_evaluations_left(session, user, at),
-                    prices=Prices(evaluate=s.price_evaluate, discover=s.price_discover, package=s.price_package))
+                    prices=Prices(evaluate=s.price_evaluate, discover=s.price_discover, package=s.price_package),
+                    plan_renews=bool(pro and user.plan_renews), checkout_open=checkout_open(user))
+
+
+def checkout_open(user: User) -> bool:
+    return user.email.lower() in get_email_settings().demo_accounts
 
 
 def _expiry(grant: CreditGrant) -> str:
@@ -110,3 +135,100 @@ async def get_billing(session: SessionDep, user: CurrentUser) -> Billing:
     """The plan, credits left, prices, and the credit history (grants, and what each action was charged)."""
     info = await plan_info(session, user)
     return Billing(**info.model_dump(), history=await history(session, user))
+
+
+# --- checkout and managing billing (step C) ---------------------------------------------------------------------
+
+PRODUCT_NAMES = {"pro_monthly": "Eureka Pro · monthly", "pro_yearly": "Eureka Pro · yearly", "topup": "Top-up"}
+
+
+def add_months(moment: datetime, months: int) -> datetime:
+    month = moment.month - 1 + months
+    year, month = moment.year + month // 12, month % 12 + 1
+    return moment.replace(year=year, month=month, day=min(moment.day, calendar.monthrange(year, month)[1]))
+
+
+def price_of(product: str) -> Decimal:
+    s = get_billing_settings()
+    return Decimal(str({"pro_monthly": s.pro_monthly_usd, "pro_yearly": s.pro_yearly_usd, "topup": s.topup_usd}[product]))
+
+
+@router.post("/checkout", response_model=PlanInfo, responses=ERRORS)
+async def checkout(body: CheckoutRequest, session: SessionDep, user: CurrentUser) -> PlanInfo:
+    """Buys Pro (a month or a year, added to a current Pro period) or a top-up, and returns the new plan."""
+    if not checkout_open(user):
+        raise ApiError(403, "payments_closed", "Payments aren't open yet.")
+    at = now()
+    s = get_billing_settings()
+    if body.product == "topup":
+        if not billing.is_pro(user, at):
+            raise ApiError(403, "pro_only", "Top-ups are for Pro accounts.")
+        await billing.add_grant(session, user, s.topup_credits, source="topup", expires_at=add_months(at, 12),
+                                note=f"{s.topup_credits} credits")
+    else:
+        start = user.plan_until if billing.is_pro(user, at) else at
+        user.plan, user.plan_renews = "pro", True
+        user.plan_until = add_months(start, 12 if body.product == "pro_yearly" else 1)
+        await session.flush()
+        await billing.grant_monthly(session, user, at)
+    session.add(Payment(user_id=user.id, product=body.product, amount_usd=price_of(body.product),
+                        card_brand=body.card_brand, card_last4=body.card_last4, card_expiry=body.card_expiry))
+    await session.flush()
+    return await plan_info(session, user)
+
+
+async def _manage(session: AsyncSession, user: User) -> Manage:
+    payments = list((await session.execute(select(Payment).where(Payment.user_id == user.id)
+                                           .order_by(Payment.created_at.desc()))).scalars())
+    pro = billing.is_pro(user)
+    last_pro = next((p for p in payments if p.product != "topup"), None)
+    card = Card(brand=payments[0].card_brand, last4=payments[0].card_last4, expiry=payments[0].card_expiry) \
+        if payments else None
+    return Manage(plan="pro" if pro else "free",
+                  period=("yearly" if last_pro.product == "pro_yearly" else "monthly") if pro and last_pro else None,
+                  plan_until=user.plan_until if pro else None, plan_renews=bool(pro and user.plan_renews), card=card,
+                  invoices=[Invoice(id=p.id, at=p.created_at, description=PRODUCT_NAMES[p.product]
+                                    + (f" · {get_billing_settings().topup_credits} credits" if p.product == "topup" else ""),
+                                    amount_usd=float(p.amount_usd), card=f"{p.card_brand} •••• {p.card_last4}")
+                            for p in payments])
+
+
+@router.get("/manage", response_model=Manage, responses=ERRORS)
+async def get_manage(session: SessionDep, user: CurrentUser) -> Manage:
+    """The subscription, the card on file and the invoices."""
+    return await _manage(session, user)
+
+
+@router.post("/cancel", response_model=Manage, responses=ERRORS)
+async def cancel_plan(session: SessionDep, user: CurrentUser) -> Manage:
+    """Stops Pro from renewing: it lasts until its paid date, and credits stay until they expire."""
+    if not billing.is_pro(user):
+        raise ApiError(409, "not_pro", "There's no Pro plan to cancel.")
+    user.plan_renews = False
+    await session.flush()
+    return await _manage(session, user)
+
+
+@router.post("/renew", response_model=Manage, responses=ERRORS)
+async def renew_plan(session: SessionDep, user: CurrentUser) -> Manage:
+    """Undoes Cancel plan: Pro renews again at its paid date."""
+    if not billing.is_pro(user):
+        raise ApiError(409, "not_pro", "There's no Pro plan to renew.")
+    user.plan_renews = True
+    await session.flush()
+    return await _manage(session, user)
+
+
+@router.get("/invoices/{invoice_id}", response_class=Response, responses=ERRORS)
+async def invoice_text(invoice_id: uuid.UUID, session: SessionDep, user: CurrentUser) -> Response:
+    """A receipt as a text file."""
+    payment = await session.get(Payment, invoice_id)
+    if payment is None or payment.user_id != user.id:
+        raise ApiError(404, "not_found", "Invoice not found.")
+    paid = payment.created_at.astimezone(TZ)
+    lines = ["EUREKA · RECEIPT", "", f"Receipt: {payment.id}", f"Date: {paid.day} {paid:%b %Y, %H:%M}",
+             f"Billed to: {user.name or ''} <{user.email}>", "", f"{PRODUCT_NAMES[payment.product]}",
+             f"Amount: ${payment.amount_usd:.2f} (tax included)",
+             f"Paid with: {payment.card_brand} •••• {payment.card_last4}", "", "Thank you for using Eureka."]
+    return Response("\n".join(lines) + "\n", media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="eureka-receipt-{paid:%Y%m%d}.txt"'})

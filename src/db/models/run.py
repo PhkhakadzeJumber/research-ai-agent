@@ -16,7 +16,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, Numeric, SmallInteger, String, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Integer, Numeric, SmallInteger, String, UniqueConstraint
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -109,6 +109,8 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     """free or pro (docs/18). Pro counts only while plan_until is in the future."""
     plan_until: Mapped[datetime | None] = mapped_column(AwareDateTime())
     """When the paid Pro period ends (renewed by the payment provider, step P5, or set by scripts/users.py)."""
+    plan_renews: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    """Whether Pro renews at plan_until (step C: Cancel plan turns it off; Pro still lasts until then)."""
 
 
 class Investigation(UUIDPrimaryKey, Timestamps, Base):

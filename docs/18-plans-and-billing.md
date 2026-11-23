@@ -105,7 +105,7 @@ script, so everything else is built and tested without payments.
 | P2 ✅ | Backend: plan fields on users, a credits ledger (grant / reserve / charge / refund), entitlement checks on start, resume and package, the free cap, `scripts/users.py grant-pro` / `grant-credits` | Migration, response shapes |
 | P3 ✅ | Email verification and password reset (Resend; built as step B) | An email-sending service (dependency, env vars) |
 | P4 ✅ | UI: Pricing, Plan & billing, Pro badges, credit chip, credit prices instead of dollars | — (design in Figma first) |
-| P5 | Payments: checkout, billing portal, webhooks that grant monthly credits and top-ups | Provider choice, dependency, env vars |
+| P5 ✅ (pages; no provider yet) | Payments: checkout, billing portal, webhooks that grant monthly credits and top-ups | Provider choice, dependency, env vars |
 | P6 | Terms of service, privacy policy, refund policy | — |
 
 Then the single test round (step 11) and deployment (step 12).

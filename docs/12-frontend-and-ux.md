@@ -123,6 +123,8 @@ Figma 14–16: `/forgot-password`, `/reset-password?token=`, `/verify-email?toke
 
 ### 3.11 Plans and billing (doc 18 §6) ✅ step P4
 
+**Checkout (step C; Figma 17–19):** Pricing → `/checkout?product=` (card form + order summary) → `/checkout/success` → Plan & billing → `/profile/billing/manage` (cancel / renew, card on file, invoices with receipts). The card number is checked in the browser (`lib/card.ts`: Luhn, expiry) and never sent; only brand, last four and expiry are. Checkout is open only for `EUREKA_DEMO_ACCOUNTS`; others see "Payments aren't open yet".
+
 Built from Figma screens 12, 13 and 01b. What a plan allows is explained before the click (`lib/plan.ts`: `canStart`, `priceText`, `chipText`); the server still decides. Until payments (step P5), Go Pro, Manage billing and Buy credits say "Payments open soon".
 
 - **Pricing** (`/pricing`, public): Free vs Pro, the credit price of each action, FAQ.

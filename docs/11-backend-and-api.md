@@ -147,6 +147,10 @@ Every other route needs a login (`401 not_logged_in`). Someone else's investigat
 | Method | Route | Purpose |
 |---|---|---|
 | GET | `/plans` ✅ | Public (no login): credits per action, Pro's monthly credits, the free evaluations, what Pro and a top-up cost (env vars): the Pricing page |
+| POST | `/billing/checkout` ✅ | `{product: pro_monthly / pro_yearly / topup, card_brand, card_last4, card_expiry}` (extra fields refused: a card number can't be sent). Only for `EUREKA_DEMO_ACCOUNTS` (step C): Pro is extended by a month or a year, a top-up adds credits; no payment provider is called. Others: `403 payments_closed` |
+| GET | `/billing/manage` ✅ | The subscription (period, renews), the card on file (brand, last four, expiry) and the invoices |
+| POST | `/billing/cancel`, `/billing/renew` ✅ | Stop or restart renewal; Pro lasts until its paid date either way |
+| GET | `/billing/invoices/{id}` ✅ | A receipt as a text file (your own only) |
 | GET | `/billing` ✅ | `{plan, plan_until, credits: {available, monthly, other, held}, free_evaluations_left, prices, history}`; the history is newest first: grants (+) and one line per action (−, with "price 25, used 22", "failed on our side · refunded", "running · up to 24 reserved") |
 
 `/auth/me` carries the same plan, credits and prices (without the history). Each investigation (list, detail, progress) has `credits: {used, limit, free}`: charged so far plus a running run's estimate, and the most it may use so far. Every route that starts a run reserves its credits first (`src/api/billing.py`) and refuses with nothing stored or reserved:

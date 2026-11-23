@@ -29,6 +29,39 @@ export function useBilling() {
   return useQuery({ queryKey: ["billing"], queryFn: () => api<Billing>("/billing") });
 }
 
+export type Manage = Schemas["Manage"];
+
+/** Buys Pro or a top-up (step C): sends only what a receipt shows, never the card number. */
+export function useCheckout() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["CheckoutRequest"]) => api<Schemas["PlanInfo"]>("/billing/checkout", { method: "POST", body }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: keys.me });
+      client.invalidateQueries({ queryKey: ["billing"] });
+    },
+  });
+}
+
+/** The subscription, the card on file and the invoices (Manage billing). */
+export function useManage() {
+  return useQuery({ queryKey: ["billing", "manage"], queryFn: () => api<Manage>("/billing/manage") });
+}
+
+function usePlanChange(path: "/billing/cancel" | "/billing/renew") {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<Manage>(path, { method: "POST" }),
+    onSuccess: (manage) => {
+      client.setQueryData(["billing", "manage"], manage);
+      client.invalidateQueries({ queryKey: keys.me });
+    },
+  });
+}
+
+export const useCancelPlan = () => usePlanChange("/billing/cancel");
+export const useRenewPlan = () => usePlanChange("/billing/renew");
+
 /** What the plans include and cost: public, for the Pricing page. */
 export function usePlans() {
   return useQuery({ queryKey: ["plans"], queryFn: () => api<Plans>("/plans"), staleTime: 3_600_000 });

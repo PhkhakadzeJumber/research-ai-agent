@@ -81,3 +81,26 @@ class CreditHold(UUIDPrimaryKey, Timestamps, Base):
     usd_used: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     """What the run cost us, for the free plan's monthly cap and for admins."""
     settled_at: Mapped[datetime | None] = mapped_column(AwareDateTime())
+
+
+PRODUCTS = ("pro_monthly", "pro_yearly", "topup")
+
+
+class Payment(UUIDPrimaryKey, Timestamps, Base):
+    """A completed checkout (step C): what was bought, for how much, with which card. Only the card's brand, last
+    four digits and expiry are kept (as real shops do); the full number never leaves the browser. Shown as invoices
+    on Manage billing."""
+
+    __tablename__ = "payments"
+    __table_args__ = (
+        CheckConstraint(_one_of("product", PRODUCTS), name="product_valid"),
+        CheckConstraint("amount_usd > 0", name="amount_positive"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    product: Mapped[str] = mapped_column(String(16))
+    amount_usd: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    card_brand: Mapped[str] = mapped_column(String(16))
+    card_last4: Mapped[str] = mapped_column(String(4))
+    card_expiry: Mapped[str] = mapped_column(String(7))
+    """MM / YY."""

@@ -53,7 +53,7 @@ export function PricingScreen() {
           features={[[true, `${p.pro_monthly_credits} credits every month`], [true, `Evaluate ideas: ${p.prices.evaluate} credits each`],
             [true, `Find me an idea: ${p.prices.discover} credits`], [true, `Research packages: ${p.prices.package} credits each`],
             [true, `Top up any time: ${p.topup_credits} credits for ${usd(p.topup_usd)}`]]}
-          action={current === "pro" ? <Pill tone="green">Your plan</Pill> : <GoPro />} />
+          action={current === "pro" ? <Pill tone="green">Your plan</Pill> : <GoPro product={yearly ? "pro_yearly" : "pro_monthly"} open={Boolean(me.data?.plan.checkout_open)} loggedIn={Boolean(me.data)} />} />
       </div>
 
       <CreditTable plans={p} />
@@ -72,12 +72,14 @@ export function PricingScreen() {
   );
 }
 
-function GoPro() {
+function GoPro({ product, open, loggedIn }: { product: string; open: boolean; loggedIn: boolean }) {
   const [asked, setAsked] = useState(false);
+  if (open) return <ButtonLink href={`/checkout?product=${product}`} kind="accent" className="w-fit">Go Pro →</ButtonLink>;
+  if (!loggedIn) return <ButtonLink href={`/signup?next=${encodeURIComponent("/pricing")}`} kind="accent" className="w-fit">Go Pro →</ButtonLink>;
   return (
     <div className="flex flex-col gap-2">
       <Button kind="accent" className="w-fit" onClick={() => setAsked(true)}>Go Pro →</Button>
-      {asked ? <p role="status" className="body-s text-ink-3">Payments open soon. Until then, Pro is by invitation.</p> : null}
+      {asked ? <p role="status" className="body-s text-ink-3">Payments aren&apos;t open yet.</p> : null}
     </div>
   );
 }

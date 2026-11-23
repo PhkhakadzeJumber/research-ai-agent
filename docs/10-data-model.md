@@ -167,6 +167,10 @@ Logins are **UserSession** rows (step 9d, migration 0019): the user, the SHA-256
 
 **User** gains `email_verified_at` (accounts made before step B were marked verified). **EmailToken**: a link sent by email, `purpose` `verify` (24 h) or `reset` (1 h); only the SHA-256 of its token is stored; `used_at` once opened; a new link of the same kind deletes the older ones.
 
+### 2.1c Payments (step C, migration 0022)
+
+**Payment**: a completed checkout (`product`, `amount_usd`, and only the card's brand, last four digits and expiry); shown as invoices. **User** gains `plan_renews` (Cancel plan turns it off; Pro lasts until `plan_until`).
+
 ### 2.2 Plans and credits (docs/18; built in step P2, migration 0020)
 
 **User** gains `plan` (`free` / `pro`) and `plan_until` (the end of the paid Pro period; Pro counts only before it).

@@ -658,6 +658,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/billing/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Checkout
+         * @description Buys Pro (a month or a year, added to a current Pro period) or a top-up, and returns the new plan.
+         */
+        post: operations["checkout_api_v1_billing_checkout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/manage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Manage
+         * @description The subscription, the card on file and the invoices.
+         */
+        get: operations["get_manage_api_v1_billing_manage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Plan
+         * @description Stops Pro from renewing: it lasts until its paid date, and credits stay until they expire.
+         */
+        post: operations["cancel_plan_api_v1_billing_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Renew Plan
+         * @description Undoes Cancel plan: Pro renews again at its paid date.
+         */
+        post: operations["renew_plan_api_v1_billing_renew_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/invoices/{invoice_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Invoice Text
+         * @description A receipt as a text file.
+         */
+        get: operations["invoice_text_api_v1_billing_invoices__invoice_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plans": {
         parameters: {
             query?: never;
@@ -729,6 +829,10 @@ export interface components {
             /** Free Evaluations Left */
             free_evaluations_left: number | null;
             prices: components["schemas"]["Prices"];
+            /** Plan Renews */
+            plan_renews: boolean;
+            /** Checkout Open */
+            checkout_open: boolean;
             /** History */
             history: components["schemas"]["BillingEntry"][];
         };
@@ -854,6 +958,15 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** Card */
+        Card: {
+            /** Brand */
+            brand: string;
+            /** Last4 */
+            last4: string;
+            /** Expiry */
+            expiry: string;
+        };
         /** ChallengeOut */
         ChallengeOut: {
             /**
@@ -875,6 +988,27 @@ export interface components {
             target_claim_id: string | null;
             /** New Papers */
             new_papers: components["schemas"]["PaperRef"][];
+        };
+        /**
+         * CheckoutRequest
+         * @description What the card form sends: never the card number, only what a receipt shows. Extra fields are refused, so a
+         *     full card number can't be sent here even by mistake.
+         */
+        CheckoutRequest: {
+            /**
+             * Product
+             * @enum {string}
+             */
+            product: "pro_monthly" | "pro_yearly" | "topup";
+            /**
+             * Card Brand
+             * @enum {string}
+             */
+            card_brand: "Visa" | "Mastercard" | "Amex" | "Card";
+            /** Card Last4 */
+            card_last4: string;
+            /** Card Expiry */
+            card_expiry: string;
         };
         /** ClaimOut */
         ClaimOut: {
@@ -1380,6 +1514,22 @@ export interface components {
             /** Updated At */
             updated_at: string;
         };
+        /** Invoice */
+        Invoice: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** At */
+            at: string;
+            /** Description */
+            description: string;
+            /** Amount Usd */
+            amount_usd: number;
+            /** Card */
+            card: string;
+        };
         /** Labelled */
         Labelled: {
             /** Category */
@@ -1461,6 +1611,26 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /**
+         * Manage
+         * @description Manage billing (step C): the subscription, the card on file and the invoices.
+         */
+        Manage: {
+            /**
+             * Plan
+             * @enum {string}
+             */
+            plan: "free" | "pro";
+            /** Period */
+            period: ("monthly" | "yearly") | null;
+            /** Plan Until */
+            plan_until: string | null;
+            /** Plan Renews */
+            plan_renews: boolean;
+            card: components["schemas"]["Card"] | null;
+            /** Invoices */
+            invoices: components["schemas"]["Invoice"][];
         };
         /** Matrix */
         Matrix: {
@@ -1683,6 +1853,10 @@ export interface components {
             /** Free Evaluations Left */
             free_evaluations_left: number | null;
             prices: components["schemas"]["Prices"];
+            /** Plan Renews */
+            plan_renews: boolean;
+            /** Checkout Open */
+            checkout_open: boolean;
         };
         /**
          * Plans
@@ -3859,6 +4033,173 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    checkout_api_v1_billing_checkout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckoutRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanInfo"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_manage_api_v1_billing_manage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Manage"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_plan_api_v1_billing_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Manage"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    renew_plan_api_v1_billing_renew_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Manage"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    invoice_text_api_v1_billing_invoices__invoice_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
