@@ -1,5 +1,19 @@
 # 14: Deployment and Operations
 
+## 0. As deployed (step E, 2026-11-24)
+
+The live site differs from the plan below in two places: the frontend is on **Vercel** (free, made for Next.js) and the database is **Neon** (Postgres 17 + pgvector, free tier) instead of Cloud SQL.
+
+| Part | Where | Settings |
+|---|---|---|
+| Website | Vercel, project `research-ai-agent`, root directory `frontend` | `BACKEND_URL` = the Cloud Run address; `/api/*` is forwarded there, so the login cookie stays first-party. Redeploys on every push to GitHub |
+| API | Cloud Run service `eureka-api`, `europe-west3` (Frankfurt), built from the root Dockerfile (`gcloud run deploy --source .`; `.gcloudignore` keeps `.env` and the website out) | 1 CPU, 1 GiB; **max 1 instance** (runs, the login limiter and live streams live in memory), min 0 (sleeps when unused), CPU always allocated while awake (background runs), request timeout 3600 s (live streams). Migrations run on start |
+| Settings | Secret Manager | `eureka-env` = the `.env` file, mounted at `/secrets/env/.env` (`EUREKA_ENV_FILE`); `eureka-database-url` = Neon's direct (not pooled) URL as `DATABASE_URL` (converted for asyncpg by `asyncpg_url`). Plain env vars override the file: `FRONTEND_ORIGIN`, `PUBLIC_SITE_URL` (the Vercel address), `EUREKA_COOKIE_SECURE=true` |
+| Database | Neon, AWS Frankfurt | Copied from the local database with pg_dump / pg_restore (email tokens left out) |
+| Permissions | The Compute Engine default service account | Secret Manager accessor, Vertex AI user, Cloud Run builder, log writer |
+
+Redeploy the API: `gcloud run deploy eureka-api --source . --region europe-west3` (the other settings are kept). Cost control: max 1 instance that sleeps when idle; only accounts in `EUREKA_DEMO_ACCOUNTS` can buy Pro, and verification emails reach only the Resend account's own address, so strangers can't start free evaluations.
+
 ## 1. Environments
 
 | Environment | Where | Database | LLM | Purpose |

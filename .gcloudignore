@@ -1,0 +1,22 @@
+# What `gcloud run deploy --source .` uploads to Cloud Build (step E): the same as .dockerignore. Never .env (its
+# settings reach Cloud Run as the eureka-env secret), never the website, tests or local tools.
+.gcloudignore
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+.venv
+venv
+frontend
+tests
+eval
+docs
+infra
+.cache
+.pytest_cache
+**/__pycache__
+**/*.pyc
+*.egg-info
+.vscode
+.idea

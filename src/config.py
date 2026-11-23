@@ -35,6 +35,12 @@ class ConfigError(RuntimeError):
     """A required setting is missing or invalid."""
 
 
+
+def load_env_file() -> None:
+    """Loads `.env` into the environment (variables already set win). In the cloud the file is a secret mounted at
+    the path EUREKA_ENV_FILE names (step E: Cloud Run can't mount a file into the app's own folder)."""
+    load_dotenv(os.environ.get("EUREKA_ENV_FILE") or None)
+
 @dataclass(frozen=True)
 class Settings:
     llm_model: str
@@ -86,7 +92,7 @@ def get_settings() -> Settings:
     Variables already set in the real environment win over `.env`
     (that's how the cloud deployment overrides them).
     """
-    load_dotenv()
+    load_env_file()
     return load_settings(os.environ)
 
 
@@ -111,7 +117,7 @@ def load_retrieval_settings(environ: Mapping[str, str]) -> RetrievalSettings:
 @lru_cache(maxsize=1)
 def get_retrieval_settings() -> RetrievalSettings:
     """Returns the retrieval settings, loading `.env` on first use."""
-    load_dotenv()
+    load_env_file()
     return load_retrieval_settings(os.environ)
 
 
@@ -133,10 +139,25 @@ class DatabaseSettings:
         return make_url(self.test_url if test else self.url).render_as_string(hide_password=True)
 
 
+def asyncpg_url(url: URL) -> URL:
+    """A Postgres URL as our async driver (asyncpg) takes it (step E). Hosted databases such as Neon give
+    "postgresql://...?sslmode=require&channel_binding=require": asyncpg needs the +asyncpg driver name and ssl=require
+    instead (it has no channel_binding option)."""
+    if url.drivername in ("postgresql", "postgres", "postgresql+psycopg2", "postgresql+psycopg"):
+        url = url.set(drivername="postgresql+asyncpg")
+    query = dict(url.query)
+    sslmode = query.pop("sslmode", None)
+    query.pop("channel_binding", None)
+    if sslmode and sslmode != "disable" and "ssl" not in query:
+        query["ssl"] = "require"
+    return url.set(query=query)
+
+
 def load_database_settings(environ: Mapping[str, str]) -> DatabaseSettings:
     """Builds DatabaseSettings from environment variables.
 
-    - DATABASE_URL (e.g. Cloud SQL in the cloud) wins if set.
+    - DATABASE_URL (e.g. Neon in the cloud) wins if set; a plain postgresql:// URL with sslmode is converted for
+      asyncpg (asyncpg_url).
     - Otherwise the URL is built from the POSTGRES_* variables that compose.yaml uses,
       so locally you only set POSTGRES_PASSWORD once.
     - TEST_DATABASE_URL wins for tests if set; otherwise it's the main URL with the
@@ -149,7 +170,7 @@ def load_database_settings(environ: Mapping[str, str]) -> DatabaseSettings:
     explicit = value("DATABASE_URL")
     if explicit:
         try:
-            url = make_url(explicit)
+            url = asyncpg_url(make_url(explicit))
         except Exception:  # SQLAlchemy raises ArgumentError for malformed URLs
             raise ConfigError("DATABASE_URL is not a valid database URL.") from None
     else:
@@ -187,7 +208,7 @@ def load_database_settings(environ: Mapping[str, str]) -> DatabaseSettings:
 @lru_cache(maxsize=1)
 def get_database_settings() -> DatabaseSettings:
     """Returns the database settings, loading `.env` on first use."""
-    load_dotenv()
+    load_env_file()
     return load_database_settings(os.environ)
 
 
@@ -228,7 +249,7 @@ def load_embedding_settings(environ: Mapping[str, str]) -> EmbeddingSettings:
 @lru_cache(maxsize=1)
 def get_embedding_settings() -> EmbeddingSettings:
     """Returns the embedding settings, loading `.env` on first use."""
-    load_dotenv()
+    load_env_file()
     return load_embedding_settings(os.environ)
 
 
@@ -338,7 +359,7 @@ def load_api_settings(environ: Mapping[str, str]) -> ApiSettings:
 @lru_cache(maxsize=1)
 def get_api_settings() -> ApiSettings:
     """Returns the API settings, loading `.env` on first use."""
-    load_dotenv()
+    load_env_file()
     return load_api_settings(os.environ)
 
 
@@ -409,7 +430,7 @@ def load_billing_settings(environ: Mapping[str, str]) -> BillingSettings:
 @lru_cache(maxsize=1)
 def get_billing_settings() -> BillingSettings:
     """Returns the billing settings, loading `.env` on first use."""
-    load_dotenv()
+    load_env_file()
     return load_billing_settings(os.environ)
 
 
@@ -445,5 +466,5 @@ def load_email_settings(environ: Mapping[str, str]) -> EmailSettings:
 @lru_cache(maxsize=1)
 def get_email_settings() -> EmailSettings:
     """Returns the email settings, loading `.env` on first use."""
-    load_dotenv()
+    load_env_file()
     return load_email_settings(os.environ)

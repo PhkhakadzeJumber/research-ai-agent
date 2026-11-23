@@ -1,11 +1,15 @@
 """Tests for src/config.py. They use plain dicts, never the real environment or .env."""
 
+import os
+
 import pytest
+from sqlalchemy.engine import make_url
 
 from src.config import (
     ConfigError,
     load_billing_settings,
     load_database_settings,
+    load_env_file,
     load_retrieval_settings,
     load_settings,
 )
@@ -108,3 +112,25 @@ def test_billing_settings_can_be_changed_and_are_checked():
                         ("EUREKA_RUN_CAP_FACTOR", "0.8"), ("EUREKA_FREE_MONTHLY_BUDGET_USD", "-1")]:
         with pytest.raises(ConfigError, match=name):
             load_billing_settings({name: value})
+
+
+# --- the cloud (step E) ----------------------------------------------------------------------------------------
+
+def test_a_neon_style_database_url_is_converted_for_asyncpg():
+    neon = "postgresql://eureka:secret@ep-cool-name-123.eu-central-1.aws.neon.tech/eureka?sslmode=require&channel_binding=require"
+    settings = load_database_settings({"DATABASE_URL": neon})
+    url = make_url(settings.url)
+    assert url.drivername == "postgresql+asyncpg" and dict(url.query) == {"ssl": "require"}
+    assert url.host == "ep-cool-name-123.eu-central-1.aws.neon.tech" and url.password == "secret"
+    local = load_database_settings({"DATABASE_URL": "postgresql+asyncpg://u:p@localhost:5434/eureka"})
+    assert make_url(local.url).query == {}  # an asyncpg URL without sslmode stays as it is
+
+
+def test_env_file_path_comes_from_eureka_env_file(monkeypatch, tmp_path):
+    env = tmp_path / "secret.env"
+    env.write_text("EUREKA_TEST_ONLY_SETTING=from-the-file\n", encoding="utf-8")
+    monkeypatch.setenv("EUREKA_ENV_FILE", str(env))
+    monkeypatch.delenv("EUREKA_TEST_ONLY_SETTING", raising=False)
+    load_env_file()
+    assert os.environ["EUREKA_TEST_ONLY_SETTING"] == "from-the-file"
+    monkeypatch.delenv("EUREKA_TEST_ONLY_SETTING")
