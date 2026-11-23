@@ -51,6 +51,7 @@ python -m scripts.users grant-credits you@example.com 50 [--note "why"]  # extra
 pytest                                       # default run: no network, no paid API calls ("live" tests excluded);
                                              # "db" tests use eureka_test, roll back, and are skipped (with reason) if the DB is down
 pytest -m live                               # calls Claude/real APIs: costs money, ask first
+# CI (.github/workflows/ci.yml): on every push to main and every pull request, GitHub runs pytest (fresh Postgres + pgvector, no .env, any skipped test fails) and the frontend's lint, types, unit tests and build: free, no paid calls
 ruff check . && ruff format --check .        # (planned)
 
 # Frontend (Next.js; the backend must be running: /api/* is forwarded to BACKEND_URL, default http://127.0.0.1:8000)

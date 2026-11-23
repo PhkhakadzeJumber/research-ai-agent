@@ -1,0 +1,76 @@
+# CI: the tests on every push and pull request, so a broken change shows a red ❌ on GitHub before anyone relies
+# on it (Vercel redeploys the website on every push). Free of paid calls: the backend tests use recorded answers
+# and refuse to build a real Claude client (tests/conftest.py); no secrets are needed or used.
+#
+# backend:  pytest against a fresh Postgres + pgvector (the same image as compose.yaml). The database tests would
+#           skip if the database were unreachable, so any skipped test fails the job: green means everything ran.
+# frontend: lint, types, unit tests and the production build. The browser tests (Playwright) need a running site
+#           and stay manual (`npm run e2e`).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      db:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: eureka
+          POSTGRES_PASSWORD: ci-only  # a throwaway database that lives only for this job
+          POSTGRES_DB: eureka
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U eureka" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_PASSWORD: ci-only
+      EUREKA_ENV_FILE: /nonexistent/.env  # there is no .env here; this makes sure none is looked for
+      EUREKA_LLM_MODEL: claude-sonnet-5-5  # config needs a model name; the tests use fake models, never this one
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          pip install -r requirements.txt
+          pip install -e ".[dev]"
+      - name: Test database (as infra/db/init does locally)
+        run: |
+          PGPASSWORD=ci-only psql -h 127.0.0.1 -U eureka -d eureka -c "CREATE EXTENSION IF NOT EXISTS vector" -c "CREATE DATABASE eureka_test"
+          PGPASSWORD=ci-only psql -h 127.0.0.1 -U eureka -d eureka_test -c "CREATE EXTENSION IF NOT EXISTS vector"
+      - name: pytest (no network, no paid calls)
+        run: |
+          python -m pytest -q -p no:cacheprovider -rs | tee pytest.txt
+          if grep -qE "[0-9]+ skipped" pytest.txt; then echo "::error::Some tests were skipped: CI must run them all"; exit 1; fi
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
