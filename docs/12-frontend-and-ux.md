@@ -117,6 +117,10 @@ A side panel in the workspace for questions about the investigation. Answers car
 
 Exports include the coverage report and the "not a guarantee of originality" note.
 
+### 3.10c Legal pages and footer ✅ step D
+
+Figma 20: `/terms`, `/privacy`, `/refunds` (public, one layout with a side menu; the text in `components/legal.tsx` states what the site actually does: private uploads sent to the AI provider only with consent, only the card's brand, last four and expiry kept, the credit and refund rules of doc 18). A footer on every page links Pricing and the three.
+
 ### 3.10b Account emails ✅ step B
 
 Figma 14–16: `/forgot-password`, `/reset-password?token=`, `/verify-email?token=` share the log-in layout (`AuthLayout`). Log in has "Forgot password?"; Sign up requires accepting the Terms and the Privacy Policy. Until the email is verified, a banner under the top nav offers "Resend the link", and a free evaluation explains it waits for the verification.

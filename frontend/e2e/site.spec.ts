@@ -48,6 +48,17 @@ test.describe("not logged in", () => {
     await expect(page.getByRole("heading", { name: "This link didn't work" })).toBeVisible();
   });
 
+  test("the legal pages are public and linked from every page's footer", async ({ page }) => {
+    await page.goto("/pricing");
+    await page.getByRole("contentinfo").getByRole("link", { name: "Terms" }).click();
+    await expect(page.getByRole("heading", { name: "Terms of Service" })).toBeVisible();
+    await page.getByRole("navigation", { name: "Legal" }).getByRole("link", { name: "Privacy Policy" }).click();
+    await expect(page.getByRole("heading", { name: "Privacy Policy" })).toBeVisible();
+    await expect(page.getByText(/the full card number never reaches us/)).toBeVisible();
+    await page.goto("/refunds");
+    await expect(page.getByRole("heading", { name: "Refund Policy" })).toBeVisible();
+  });
+
   test("the pricing page is public, with the server's prices", async ({ page }) => {
     await page.goto("/pricing");
     await expect(page.getByRole("heading", { name: /Good research shouldn.t cost a fortune/ })).toBeVisible();

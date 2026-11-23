@@ -1,12 +1,13 @@
 /**
- * The frame of the public Pricing page (step P4): the usual top nav when logged in, otherwise the logo with Log in
- * and Sign up. Unlike AppShell it never sends anyone to /login.
+ * The frame of the public pages, Pricing (step P4) and the legal pages (step D): the usual top nav when logged in,
+ * otherwise the logo with Log in and Sign up. Unlike AppShell it never sends anyone to /login.
  */
 "use client";
 
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { Footer } from "@/components/footer";
 import { TopNav } from "@/components/top-nav";
 import { ButtonLink, Logo } from "@/components/ui";
 import { useMe } from "@/lib/api/hooks";
@@ -24,7 +25,8 @@ export function PricingShell({ children }: { children: ReactNode }) {
           </div>
         </header>
       )}
-      <main id="main" className="mx-auto w-full max-w-[1440px] px-4 pb-24 pt-10 sm:px-10 lg:pt-16">{children}</main>
+      <main id="main" className="mx-auto w-full max-w-[1440px] px-4 pb-24 pt-10 sm:px-10 lg:px-[120px] lg:pt-16">{children}</main>
+      <Footer />
     </div>
   );
 }
