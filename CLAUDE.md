@@ -46,6 +46,8 @@ python -m scripts.users create you@example.com --name "You"  # an account from t
 python -m scripts.users claim you@example.com  # give command-line runs (no owner) to this account: free
 python -m scripts.users grant-pro you@example.com [--months 12]  # Pro until payments exist (step P5): free
 python -m scripts.users grant-credits you@example.com 50 [--note "why"]  # extra credits; `credits <email>` shows them and each run's cost: free
+python -m scripts.users verify you@example.com      # mark an email verified (Resend's test sender only reaches its own account); `reset-free <email>` gives back this month's free evaluation (demo rehearsals): free
+# the same commands on the live database: set DATABASE_URL for that one command, e.g. from Secret Manager (eureka-database-url); never print it
 
 # Verify your work
 pytest                                       # default run: no network, no paid API calls ("live" tests excluded);

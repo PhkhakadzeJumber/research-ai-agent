@@ -157,3 +157,26 @@ test("checkout says payments aren't open for other accounts", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Invoices" })).toBeVisible();
   await expect(page.getByText("No invoices yet.")).toBeVisible();
 });
+
+test("'How it works' brings its section into view, also from other pages", async ({ page }) => {
+  for (const start of ["/", "/library"]) {
+    await page.goto(start);
+    await page.getByRole("banner").getByRole("link", { name: "How it works" }).click();
+    await expect(page).toHaveURL(/#how-it-works$/);
+    await expect(page.locator("#how-it-works")).toBeInViewport();
+  }
+});
+
+test("the ambition choice stays inside its outline, whichever is chosen", async ({ page }) => {
+  await page.goto("/");
+  const group = page.getByRole("radiogroup", { name: "Ambition" });
+  const outline = (await group.boundingBox())!;
+  for (const choice of ["Beginner", "Intermediate", "Advanced"]) {
+    const option = group.getByRole("radio", { name: choice });
+    if ((await option.getAttribute("aria-checked")) !== "true") await option.click();
+    const pill = (await option.boundingBox())!;
+    expect(pill.x).toBeGreaterThanOrEqual(outline.x);
+    expect(pill.x + pill.width).toBeLessThanOrEqual(outline.x + outline.width + 0.5);
+    expect(pill.y + pill.height).toBeLessThanOrEqual(outline.y + outline.height + 0.5); // one row
+  }
+});

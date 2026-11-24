@@ -13,7 +13,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 
 import { PlanNote } from "@/components/plan-note";
 import { Button, ButtonLink, Card, ErrorNote, Field, Input, MonoLabel, Pill, Segmented, TextArea, cx } from "@/components/ui";
@@ -321,7 +321,7 @@ function LimitsBar({
   plan: Plan | undefined; hasProfile: boolean;
 }) {
   return (
-    <Card className="flex flex-col gap-5 p-6 lg:flex-row lg:items-end lg:gap-8">
+    <Card className="flex flex-col gap-5 p-6 lg:flex-row lg:flex-wrap lg:items-end lg:gap-8">
       <div className="flex flex-col gap-1 lg:w-56">
         <MonoLabel>Your limits</MonoLabel>
         <span className="heading-s">Eureka judges feasibility for you</span>
@@ -370,6 +370,12 @@ function LimitField({ label, children }: { label: string; children: ReactNode })
 }
 
 function HowItWorks() {
+  // arriving from another page via "How it works" (/#how-it-works): the section only exists once the profile has
+  // loaded, after the browser tried to jump to it, so it scrolls itself into view
+  const section = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (window.location.hash === "#how-it-works") section.current?.scrollIntoView({ block: "start" });
+  }, []);
   const steps = [
     ["Search", "OpenAlex and arXiv, many phrasings, newest and most cited."],
     ["Read & verify", "Every quote is checked word for word against the paper."],
@@ -377,7 +383,7 @@ function HowItWorks() {
     ["Verdicts by rules", "Novelty, significance, feasibility: decided by code, not vibes."],
   ];
   return (
-    <section id="how-it-works" className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+    <section ref={section} id="how-it-works" className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
       {steps.map(([title, text], n) => (
         <div key={title} className="flex flex-col gap-1.5">
           <div className="flex items-baseline gap-2">

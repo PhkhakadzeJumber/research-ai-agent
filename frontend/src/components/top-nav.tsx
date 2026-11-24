@@ -15,7 +15,7 @@ import { Logo, cx } from "./ui";
 
 const LINKS = [
   { href: "/investigations", label: "Investigations" },
-  { href: "/", label: "New" },
+  { href: "/", label: "Home" },
   { href: "/library", label: "Library" },
   { href: "/#how-it-works", label: "How it works" },
   { href: "/pricing", label: "Pricing" },

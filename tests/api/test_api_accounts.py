@@ -248,6 +248,31 @@ async def test_the_users_command_manages_plans_and_credits(db_session, capsys):
     assert add_months(datetime(2027, 1, 31, tzinfo=now().tzinfo), 1).day == 28  # the month's last day
 
 
+async def test_the_users_command_verifies_and_gives_back_the_free_evaluation(db_session, capsys):
+    from src.api import billing
+    from src.db.repositories.runs import create_investigation
+
+    database = SimpleNamespace(session=sessions_on(db_session))
+    answers = iter(["a good long password", "a good long password"])
+    await users_command(parse_args(["create", "free@example.com"]), database, ask=lambda prompt: next(answers))
+    user = (await db_session.execute(select(User).where(User.email == "free@example.com"))).scalar_one()
+    user.email_verified_at = None
+    await db_session.flush()
+    assert await users_command(parse_args(["verify", "free@example.com"]), database) == 0
+    assert user.email_verified_at is not None
+
+    investigation = await create_investigation(db_session, mode="evaluate", complexity="beginner",
+                                               input={"idea": "an idea"}, user_id=user.id)
+    await billing.reserve(db_session, user, investigation, "evaluate")
+    assert await billing.free_evaluations_left(db_session, user) == 0
+    assert await users_command(parse_args(["reset-free", "free@example.com"]), database) == 2  # still running
+    await billing.settle(db_session, investigation.id, "done")
+    assert await users_command(parse_args(["reset-free", "free@example.com"]), database) == 0
+    assert "has its free evaluation back" in capsys.readouterr().out
+    assert await billing.free_evaluations_left(db_session, user) == 1
+    assert await db_session.get(Investigation, investigation.id) is not None  # the investigation stays
+
+
 async def test_spent_this_month_counts_only_your_calls_this_month(client, db_session, user):
     assert (await client.get("/api/v1/auth/me")).json()["spent_this_month_usd"] == 0
     investigation_id = await finalist_investigation(db_session)

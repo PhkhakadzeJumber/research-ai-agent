@@ -128,12 +128,12 @@ export function Segmented<T extends string>({
   hard?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex min-w-0 shrink-0 flex-col gap-2">
       <div className="flex items-center gap-2">
         <span className="label-s text-[13px] text-ink">{label}</span>
         {hard ? <span className="label-mono rounded-sm bg-red-soft px-1.5 text-red">Hard limit</span> : null}
       </div>
-      <div role="radiogroup" aria-label={label} className="flex w-fit flex-wrap gap-1 rounded-pill bg-surface-muted p-1">
+      <div role="radiogroup" aria-label={label} className="flex w-fit max-w-full flex-nowrap gap-1 overflow-x-auto rounded-pill bg-surface-muted p-1">
         {options.map((option) => {
           const on = option.value === value;
           return (
@@ -143,7 +143,7 @@ export function Segmented<T extends string>({
               role="radio"
               aria-checked={on}
               onClick={() => onChange(on ? null : option.value)}
-              className={cx("rounded-pill px-3.5 py-1.5 label-s text-[13px] transition", on ? "bg-ink text-paper" : "text-ink-2 hover:text-ink")}
+              className={cx("shrink-0 whitespace-nowrap rounded-pill px-3.5 py-1.5 label-s text-[13px] transition", on ? "bg-ink text-paper" : "text-ink-2 hover:text-ink")}
             >
               {option.label}
             </button>

@@ -11,6 +11,10 @@ Usage (from the repo root, venv active, database running):
     python -m scripts.users grant-credits you@example.com 50 [--note "why"] [--months 12]
                                                                          extra credits, valid N months (default 12)
     python -m scripts.users credits you@example.com                     plan, credits, and what each run cost us
+    python -m scripts.users verify you@example.com                      mark the email verified (when the link can't
+                                                                         arrive, e.g. Resend's test sender)
+    python -m scripts.users reset-free you@example.com                  give back this month's free evaluation (for
+                                                                         rehearsing a demo)
 
 Runs started from the command line have no owner, so no one sees them on the website until they are claimed.
 Free: no Claude calls. Plans and credits: docs/18. Exit code: 0 ok, 2 invalid input or an unavailable database.
@@ -57,6 +61,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     grant.add_argument("--months", type=int, default=12)
     credits = commands.add_parser("credits", help="the account's plan, credits and runs (with their cost to us)")
     credits.add_argument("email")
+    verify = commands.add_parser("verify", help="mark the account's email verified")
+    verify.add_argument("email")
+    reset = commands.add_parser("reset-free", help="give back this month's free evaluation")
+    reset.add_argument("email")
     return parser.parse_args(argv)
 
 
@@ -82,6 +90,24 @@ async def billing_command(args: argparse.Namespace, session) -> int:
         await session.flush()
         await billing.grant_monthly(session, user, at)
         print(f"{user.email} is Pro until {user.plan_until:%d %b %Y}.")
+        return 0
+    if args.command == "verify":
+        user.email_verified_at = user.email_verified_at or at
+        print(f"{user.email} is verified: its free evaluation can start.")
+        return 0
+    if args.command == "reset-free":
+        # the month's free evaluations are counted from free holds of investigations started this month
+        # (src/api/billing.py); forgetting them gives the evaluation back. Their investigations stay.
+        holds = list((await session.execute(
+            select(CreditHold).join(Investigation, Investigation.id == CreditHold.investigation_id)
+            .where(CreditHold.user_id == user.id, CreditHold.free.is_(True),
+                   Investigation.created_at >= billing.month_start(at)))).scalars())
+        if any(h.status == "held" for h in holds):
+            print("Error: a free evaluation is running now: wait until it ends.", file=sys.stderr)
+            return 2
+        for hold in holds:
+            await session.delete(hold)
+        print(f"{user.email} has its free evaluation back for this month ({len(holds)} free run(s) forgotten).")
         return 0
     if args.command == "end-pro":
         user.plan, user.plan_until = "free", None
@@ -122,7 +148,7 @@ def ask_password(ask=getpass.getpass) -> str | None:
 
 async def run(args: argparse.Namespace, database: Database, ask=getpass.getpass) -> int:
     async with database.session() as session:
-        if args.command in ("grant-pro", "end-pro", "grant-credits", "credits"):
+        if args.command in ("grant-pro", "end-pro", "grant-credits", "credits", "verify", "reset-free"):
             code = await billing_command(args, session)
             await session.commit()
             return code
