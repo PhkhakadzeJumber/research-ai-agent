@@ -758,6 +758,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/investigations/{investigation_id}/steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Steps
+         * @description Every step of the mode, in order: its state (done, running, waiting, paused, failed, upcoming), how long it
+         *     took and about how many credits it used.
+         */
+        get: operations["get_steps_api_v1_investigations__investigation_id__steps_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/investigations/{investigation_id}/steps/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Step
+         * @description One step's page: what the step does, what Eureka did in this run, its numbers, its log and its output.
+         */
+        get: operations["get_step_api_v1_investigations__investigation_id__steps__key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plans": {
         parameters: {
             query?: never;
@@ -810,7 +851,7 @@ export interface components {
             /** Baselines */
             baselines: string[];
             /** Findings */
-            findings: components["schemas"]["Finding"][];
+            findings: components["schemas"]["src__api__schemas__papers__Finding"][];
             /** Limitations */
             limitations: components["schemas"]["QuotedPoint"][];
             /** Future Work */
@@ -1378,19 +1419,6 @@ export interface components {
             /** Subtopics */
             subtopics: components["schemas"]["Subtopic"][];
         };
-        /** Finding */
-        Finding: {
-            /** Text */
-            text: string;
-            /** Quote */
-            quote: string;
-            /** Verified */
-            verified: boolean;
-            /** Setting */
-            setting: string | null;
-            /** Direction */
-            direction: string;
-        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1413,6 +1441,36 @@ export interface components {
             vagueness_flags: string[];
             /** Novelty Claims */
             novelty_claims: components["schemas"]["NoveltyClaim"][];
+        };
+        /** IdeaRow */
+        IdeaRow: {
+            /**
+             * Candidate Id
+             * Format: uuid
+             */
+            candidate_id: string;
+            /** Title */
+            title: string;
+            /** Research Question */
+            research_question: string;
+            /** Status */
+            status: string;
+            /** Detail */
+            detail: string | null;
+            /** Decision */
+            decision?: string | null;
+            /** Novelty */
+            novelty?: string | null;
+        };
+        /** IdeasOutput */
+        IdeasOutput: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "full" | "ideas" | "light" | "prescreen";
+            /** Ideas */
+            ideas: components["schemas"]["IdeaRow"][];
         };
         /**
          * InvestigationCredits
@@ -1604,6 +1662,13 @@ export interface components {
             verified_quotes: number;
             /** Investigations */
             investigations: number;
+        };
+        /** LogLine */
+        LogLine: {
+            /** At */
+            at: string;
+            /** Message */
+            message: string;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -1886,6 +1951,27 @@ export interface components {
             /** Package */
             package: number;
         };
+        /** Problem */
+        Problem: {
+            /** Label */
+            label: string;
+            /** Papers */
+            papers: number;
+            /** Quote */
+            quote: string | null;
+            /** Quote Verified */
+            quote_verified: boolean;
+        };
+        /** ProblemsOutput */
+        ProblemsOutput: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "problems";
+            /** Problems */
+            problems: components["schemas"]["Problem"][];
+        };
         /** ProfileOut */
         ProfileOut: {
             /** Name */
@@ -1951,6 +2037,19 @@ export interface components {
             /** At */
             at: string;
         };
+        /** Query */
+        Query: {
+            /** Text */
+            text: string;
+            /** Source */
+            source: string;
+            /** Round */
+            round: number | null;
+            /** Found */
+            found: number;
+            /** New */
+            new: number;
+        };
         /** Question */
         Question: {
             /** Question */
@@ -1996,6 +2095,52 @@ export interface components {
             ahead_because: string | null;
             /** Has Package */
             has_package: boolean;
+        };
+        /** ReadPaper */
+        ReadPaper: {
+            paper: components["schemas"]["PaperRef"];
+            /** Source Level */
+            source_level: string;
+            /** Findings */
+            findings: components["schemas"]["src__api__schemas__steps__Finding"][];
+        };
+        /** ReadingOutput */
+        ReadingOutput: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "reading";
+            /** Read */
+            read: number;
+            /** Full Text */
+            full_text: number;
+            /** Findings */
+            findings: number;
+            /** Quotes */
+            quotes: number;
+            /** Quotes Verified */
+            quotes_verified: number;
+            /** Papers */
+            papers: components["schemas"]["ReadPaper"][];
+        };
+        /**
+         * RefOutput
+         * @description The step's output is shown by an existing endpoint (see the module docstring).
+         */
+        RefOutput: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "ref";
+            /**
+             * View
+             * @enum {string}
+             */
+            view: "clarification" | "matrix" | "challenges" | "feasibility" | "verdict" | "package" | "landscape" | "ranking";
+            /** Candidate Id */
+            candidate_id: string | null;
         };
         /**
          * ResearchLimits
@@ -2078,6 +2223,50 @@ export interface components {
             /** Budget Usd */
             budget_usd?: number | null;
         };
+        /** ScreenedPaper */
+        ScreenedPaper: {
+            paper: components["schemas"]["PaperRef"];
+            /** Score */
+            score: number | null;
+            /** Reason */
+            reason: string | null;
+            /** Read */
+            read: boolean;
+        };
+        /** ScreeningOutput */
+        ScreeningOutput: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "screening";
+            /** Screened */
+            screened: number;
+            /** Relevant */
+            relevant: number;
+            /** Selected */
+            selected: number;
+            /** Scores */
+            scores: {
+                [key: string]: number;
+            };
+            /** Kept */
+            kept: components["schemas"]["ScreenedPaper"][];
+            /** Dropped */
+            dropped: components["schemas"]["ScreenedPaper"][];
+        };
+        /** SearchOutput */
+        SearchOutput: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "search";
+            /** Queries */
+            queries: components["schemas"]["Query"][];
+            /** Papers */
+            papers: number;
+        };
         /** SetAside */
         SetAside: {
             candidate: components["schemas"]["CandidateSummary"];
@@ -2111,6 +2300,13 @@ export interface components {
             /** Saturated */
             saturated: boolean;
         };
+        /** Stat */
+        Stat: {
+            /** Label */
+            label: string;
+            /** Value */
+            value: string;
+        };
         /** Statement */
         Statement: {
             /** Type */
@@ -2135,6 +2331,73 @@ export interface components {
             id: string;
             /** Label */
             label: string;
+        };
+        /** StepPage */
+        StepPage: {
+            step: components["schemas"]["StepSummary"];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "evaluate" | "discover";
+            /** Candidate Id */
+            candidate_id: string | null;
+            /** Does */
+            does: string;
+            /** Did */
+            did: string;
+            /** Stats */
+            stats: components["schemas"]["Stat"][];
+            /** Log */
+            log: components["schemas"]["LogLine"][];
+            /** Output */
+            output: components["schemas"]["SearchOutput"] | components["schemas"]["ScreeningOutput"] | components["schemas"]["ReadingOutput"] | components["schemas"]["ProblemsOutput"] | components["schemas"]["IdeasOutput"] | components["schemas"]["RefOutput"];
+            /** Previous */
+            previous: string | null;
+            /** Next */
+            next: string | null;
+        };
+        /** StepSummary */
+        StepSummary: {
+            /** Key */
+            key: string;
+            /** Number */
+            number: number;
+            /** Label */
+            label: string;
+            /** Name */
+            name: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "done" | "running" | "waiting" | "paused" | "failed" | "upcoming";
+            /** Seconds */
+            seconds: number | null;
+            /** Credits */
+            credits: number | null;
+            /**
+             * Optional
+             * @default false
+             */
+            optional: boolean;
+        };
+        /** Steps */
+        Steps: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "evaluate" | "discover";
+            /**
+             * Run
+             * @enum {string}
+             */
+            run: "running" | "stopping" | "idle";
+            /** Current */
+            current: string | null;
+            /** Steps */
+            steps: components["schemas"]["StepSummary"][];
         };
         /** Subtopic */
         Subtopic: {
@@ -2181,6 +2444,28 @@ export interface components {
             novelty: components["schemas"]["Labelled"] | null;
             feasibility: components["schemas"]["Labelled"] | null;
             significance: components["schemas"]["Labelled"] | null;
+        };
+        /** Finding */
+        src__api__schemas__papers__Finding: {
+            /** Text */
+            text: string;
+            /** Quote */
+            quote: string;
+            /** Verified */
+            verified: boolean;
+            /** Setting */
+            setting: string | null;
+            /** Direction */
+            direction: string;
+        };
+        /** Finding */
+        src__api__schemas__steps__Finding: {
+            /** Text */
+            text: string;
+            /** Quote */
+            quote: string;
+            /** Verified */
+            verified: boolean;
         };
     };
     responses: never;
@@ -4183,6 +4468,90 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_steps_api_v1_investigations__investigation_id__steps_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                investigation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Steps"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_step_api_v1_investigations__investigation_id__steps__key__get: {
+        parameters: {
+            query?: {
+                /** @description Mode 2: a finalist, for its own steps (search … verdict) */
+                candidate?: string | null;
+            };
+            header?: never;
+            path: {
+                investigation_id: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StepPage"];
+                };
             };
             /** @description Not found */
             404: {

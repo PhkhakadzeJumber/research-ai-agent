@@ -2668,6 +2668,142 @@
     }
    }
   },
+  "/api/v1/investigations/{investigation_id}/steps": {
+   "get": {
+    "tags": [
+     "steps"
+    ],
+    "summary": "Get Steps",
+    "description": "Every step of the mode, in order: its state (done, running, waiting, paused, failed, upcoming), how long it\ntook and about how many credits it used.",
+    "operationId": "get_steps_api_v1_investigations__investigation_id__steps_get",
+    "parameters": [
+     {
+      "name": "investigation_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Investigation Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Steps"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/investigations/{investigation_id}/steps/{key}": {
+   "get": {
+    "tags": [
+     "steps"
+    ],
+    "summary": "Get Step",
+    "description": "One step's page: what the step does, what Eureka did in this run, its numbers, its log and its output.",
+    "operationId": "get_step_api_v1_investigations__investigation_id__steps__key__get",
+    "parameters": [
+     {
+      "name": "investigation_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid",
+       "title": "Investigation Id"
+      }
+     },
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Key"
+      }
+     },
+     {
+      "name": "candidate",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string",
+         "format": "uuid"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Mode 2: a finalist, for its own steps (search … verdict)",
+       "title": "Candidate"
+      },
+      "description": "Mode 2: a finalist, for its own steps (search … verdict)"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StepPage"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "Not found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ErrorResponse"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/v1/plans": {
    "get": {
     "tags": [
@@ -2784,7 +2920,7 @@
      },
      "findings": {
       "items": {
-       "$ref": "#/components/schemas/Finding"
+       "$ref": "#/components/schemas/src__api__schemas__papers__Finding"
       },
       "type": "array",
       "title": "Findings"
@@ -4452,47 +4588,6 @@
     ],
     "title": "FieldBriefReading"
    },
-   "Finding": {
-    "properties": {
-     "text": {
-      "type": "string",
-      "title": "Text"
-     },
-     "quote": {
-      "type": "string",
-      "title": "Quote"
-     },
-     "verified": {
-      "type": "boolean",
-      "title": "Verified"
-     },
-     "setting": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Setting"
-     },
-     "direction": {
-      "type": "string",
-      "title": "Direction"
-     }
-    },
-    "additionalProperties": false,
-    "type": "object",
-    "required": [
-     "text",
-     "quote",
-     "verified",
-     "setting",
-     "direction"
-    ],
-    "title": "Finding"
-   },
    "HTTPValidationError": {
     "properties": {
      "detail": {
@@ -4562,6 +4657,98 @@
      "novelty_claims"
     ],
     "title": "IdeaReading"
+   },
+   "IdeaRow": {
+    "properties": {
+     "candidate_id": {
+      "type": "string",
+      "format": "uuid",
+      "title": "Candidate Id"
+     },
+     "title": {
+      "type": "string",
+      "title": "Title"
+     },
+     "research_question": {
+      "type": "string",
+      "title": "Research Question"
+     },
+     "status": {
+      "type": "string",
+      "title": "Status"
+     },
+     "detail": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Detail"
+     },
+     "decision": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Decision"
+     },
+     "novelty": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Novelty"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "candidate_id",
+     "title",
+     "research_question",
+     "status",
+     "detail"
+    ],
+    "title": "IdeaRow"
+   },
+   "IdeasOutput": {
+    "properties": {
+     "kind": {
+      "type": "string",
+      "enum": [
+       "ideas",
+       "prescreen",
+       "light",
+       "full"
+      ],
+      "title": "Kind"
+     },
+     "ideas": {
+      "items": {
+       "$ref": "#/components/schemas/IdeaRow"
+      },
+      "type": "array",
+      "title": "Ideas"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "kind",
+     "ideas"
+    ],
+    "title": "IdeasOutput"
    },
    "InvestigationCredits": {
     "properties": {
@@ -5091,6 +5278,25 @@
      "investigations"
     ],
     "title": "LibraryPaper"
+   },
+   "LogLine": {
+    "properties": {
+     "at": {
+      "type": "string",
+      "title": "At"
+     },
+     "message": {
+      "type": "string",
+      "title": "Message"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "at",
+     "message"
+    ],
+    "title": "LogLine"
    },
    "LoginRequest": {
     "properties": {
@@ -5977,6 +6183,65 @@
     ],
     "title": "Prices"
    },
+   "Problem": {
+    "properties": {
+     "label": {
+      "type": "string",
+      "title": "Label"
+     },
+     "papers": {
+      "type": "integer",
+      "title": "Papers"
+     },
+     "quote": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Quote"
+     },
+     "quote_verified": {
+      "type": "boolean",
+      "title": "Quote Verified"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "label",
+     "papers",
+     "quote",
+     "quote_verified"
+    ],
+    "title": "Problem"
+   },
+   "ProblemsOutput": {
+    "properties": {
+     "kind": {
+      "type": "string",
+      "const": "problems",
+      "title": "Kind",
+      "default": "problems"
+     },
+     "problems": {
+      "items": {
+       "$ref": "#/components/schemas/Problem"
+      },
+      "type": "array",
+      "title": "Problems"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "problems"
+    ],
+    "title": "ProblemsOutput"
+   },
    "ProfileOut": {
     "properties": {
      "name": {
@@ -6204,6 +6469,47 @@
     ],
     "title": "ProgressEventOut"
    },
+   "Query": {
+    "properties": {
+     "text": {
+      "type": "string",
+      "title": "Text"
+     },
+     "source": {
+      "type": "string",
+      "title": "Source"
+     },
+     "round": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Round"
+     },
+     "found": {
+      "type": "integer",
+      "title": "Found"
+     },
+     "new": {
+      "type": "integer",
+      "title": "New"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "text",
+     "source",
+     "round",
+     "found",
+     "new"
+    ],
+    "title": "Query"
+   },
    "Question": {
     "properties": {
      "question": {
@@ -6331,6 +6637,124 @@
      "has_package"
     ],
     "title": "RankedIdea"
+   },
+   "ReadPaper": {
+    "properties": {
+     "paper": {
+      "$ref": "#/components/schemas/PaperRef"
+     },
+     "source_level": {
+      "type": "string",
+      "title": "Source Level"
+     },
+     "findings": {
+      "items": {
+       "$ref": "#/components/schemas/src__api__schemas__steps__Finding"
+      },
+      "type": "array",
+      "title": "Findings"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "paper",
+     "source_level",
+     "findings"
+    ],
+    "title": "ReadPaper"
+   },
+   "ReadingOutput": {
+    "properties": {
+     "kind": {
+      "type": "string",
+      "const": "reading",
+      "title": "Kind",
+      "default": "reading"
+     },
+     "read": {
+      "type": "integer",
+      "title": "Read"
+     },
+     "full_text": {
+      "type": "integer",
+      "title": "Full Text"
+     },
+     "findings": {
+      "type": "integer",
+      "title": "Findings"
+     },
+     "quotes": {
+      "type": "integer",
+      "title": "Quotes"
+     },
+     "quotes_verified": {
+      "type": "integer",
+      "title": "Quotes Verified"
+     },
+     "papers": {
+      "items": {
+       "$ref": "#/components/schemas/ReadPaper"
+      },
+      "type": "array",
+      "title": "Papers"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "read",
+     "full_text",
+     "findings",
+     "quotes",
+     "quotes_verified",
+     "papers"
+    ],
+    "title": "ReadingOutput"
+   },
+   "RefOutput": {
+    "properties": {
+     "kind": {
+      "type": "string",
+      "const": "ref",
+      "title": "Kind",
+      "default": "ref"
+     },
+     "view": {
+      "type": "string",
+      "enum": [
+       "clarification",
+       "matrix",
+       "challenges",
+       "feasibility",
+       "verdict",
+       "package",
+       "landscape",
+       "ranking"
+      ],
+      "title": "View"
+     },
+     "candidate_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "uuid"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Candidate Id"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "view",
+     "candidate_id"
+    ],
+    "title": "RefOutput",
+    "description": "The step's output is shown by an existing endpoint (see the module docstring)."
    },
    "ResearchLimits": {
     "properties": {
@@ -6640,6 +7064,130 @@
     "type": "object",
     "title": "ResumeRequest"
    },
+   "ScreenedPaper": {
+    "properties": {
+     "paper": {
+      "$ref": "#/components/schemas/PaperRef"
+     },
+     "score": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Score"
+     },
+     "reason": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Reason"
+     },
+     "read": {
+      "type": "boolean",
+      "title": "Read"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "paper",
+     "score",
+     "reason",
+     "read"
+    ],
+    "title": "ScreenedPaper"
+   },
+   "ScreeningOutput": {
+    "properties": {
+     "kind": {
+      "type": "string",
+      "const": "screening",
+      "title": "Kind",
+      "default": "screening"
+     },
+     "screened": {
+      "type": "integer",
+      "title": "Screened"
+     },
+     "relevant": {
+      "type": "integer",
+      "title": "Relevant"
+     },
+     "selected": {
+      "type": "integer",
+      "title": "Selected"
+     },
+     "scores": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "type": "object",
+      "title": "Scores"
+     },
+     "kept": {
+      "items": {
+       "$ref": "#/components/schemas/ScreenedPaper"
+      },
+      "type": "array",
+      "title": "Kept"
+     },
+     "dropped": {
+      "items": {
+       "$ref": "#/components/schemas/ScreenedPaper"
+      },
+      "type": "array",
+      "title": "Dropped"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "screened",
+     "relevant",
+     "selected",
+     "scores",
+     "kept",
+     "dropped"
+    ],
+    "title": "ScreeningOutput"
+   },
+   "SearchOutput": {
+    "properties": {
+     "kind": {
+      "type": "string",
+      "const": "search",
+      "title": "Kind",
+      "default": "search"
+     },
+     "queries": {
+      "items": {
+       "$ref": "#/components/schemas/Query"
+      },
+      "type": "array",
+      "title": "Queries"
+     },
+     "papers": {
+      "type": "integer",
+      "title": "Papers"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "queries",
+     "papers"
+    ],
+    "title": "SearchOutput"
+   },
    "SetAside": {
     "properties": {
      "candidate": {
@@ -6742,6 +7290,25 @@
     ],
     "title": "SkepticRound"
    },
+   "Stat": {
+    "properties": {
+     "label": {
+      "type": "string",
+      "title": "Label"
+     },
+     "value": {
+      "type": "string",
+      "title": "Value"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "label",
+     "value"
+    ],
+    "title": "Stat"
+   },
    "Statement": {
     "properties": {
      "type": {
@@ -6803,6 +7370,248 @@
      "label"
     ],
     "title": "StatementSource"
+   },
+   "StepPage": {
+    "properties": {
+     "step": {
+      "$ref": "#/components/schemas/StepSummary"
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "evaluate",
+       "discover"
+      ],
+      "title": "Mode"
+     },
+     "candidate_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "uuid"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Candidate Id"
+     },
+     "does": {
+      "type": "string",
+      "title": "Does"
+     },
+     "did": {
+      "type": "string",
+      "title": "Did"
+     },
+     "stats": {
+      "items": {
+       "$ref": "#/components/schemas/Stat"
+      },
+      "type": "array",
+      "title": "Stats"
+     },
+     "log": {
+      "items": {
+       "$ref": "#/components/schemas/LogLine"
+      },
+      "type": "array",
+      "title": "Log"
+     },
+     "output": {
+      "oneOf": [
+       {
+        "$ref": "#/components/schemas/SearchOutput"
+       },
+       {
+        "$ref": "#/components/schemas/ScreeningOutput"
+       },
+       {
+        "$ref": "#/components/schemas/ReadingOutput"
+       },
+       {
+        "$ref": "#/components/schemas/ProblemsOutput"
+       },
+       {
+        "$ref": "#/components/schemas/IdeasOutput"
+       },
+       {
+        "$ref": "#/components/schemas/RefOutput"
+       }
+      ],
+      "title": "Output",
+      "discriminator": {
+       "propertyName": "kind",
+       "mapping": {
+        "full": "#/components/schemas/IdeasOutput",
+        "ideas": "#/components/schemas/IdeasOutput",
+        "light": "#/components/schemas/IdeasOutput",
+        "prescreen": "#/components/schemas/IdeasOutput",
+        "problems": "#/components/schemas/ProblemsOutput",
+        "reading": "#/components/schemas/ReadingOutput",
+        "ref": "#/components/schemas/RefOutput",
+        "screening": "#/components/schemas/ScreeningOutput",
+        "search": "#/components/schemas/SearchOutput"
+       }
+      }
+     },
+     "previous": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Previous"
+     },
+     "next": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Next"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "step",
+     "mode",
+     "candidate_id",
+     "does",
+     "did",
+     "stats",
+     "log",
+     "output",
+     "previous",
+     "next"
+    ],
+    "title": "StepPage"
+   },
+   "StepSummary": {
+    "properties": {
+     "key": {
+      "type": "string",
+      "title": "Key"
+     },
+     "number": {
+      "type": "integer",
+      "title": "Number"
+     },
+     "label": {
+      "type": "string",
+      "title": "Label"
+     },
+     "name": {
+      "type": "string",
+      "title": "Name"
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "done",
+       "running",
+       "waiting",
+       "paused",
+       "failed",
+       "upcoming"
+      ],
+      "title": "State"
+     },
+     "seconds": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Seconds"
+     },
+     "credits": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Credits"
+     },
+     "optional": {
+      "type": "boolean",
+      "title": "Optional",
+      "default": false
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "key",
+     "number",
+     "label",
+     "name",
+     "state",
+     "seconds",
+     "credits"
+    ],
+    "title": "StepSummary"
+   },
+   "Steps": {
+    "properties": {
+     "mode": {
+      "type": "string",
+      "enum": [
+       "evaluate",
+       "discover"
+      ],
+      "title": "Mode"
+     },
+     "run": {
+      "type": "string",
+      "enum": [
+       "running",
+       "stopping",
+       "idle"
+      ],
+      "title": "Run"
+     },
+     "current": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Current"
+     },
+     "steps": {
+      "items": {
+       "$ref": "#/components/schemas/StepSummary"
+      },
+      "type": "array",
+      "title": "Steps"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "mode",
+     "run",
+     "current",
+     "steps"
+    ],
+    "title": "Steps"
    },
    "Subtopic": {
     "properties": {
@@ -6970,6 +7779,71 @@
      "significance"
     ],
     "title": "VerdictBrief"
+   },
+   "src__api__schemas__papers__Finding": {
+    "properties": {
+     "text": {
+      "type": "string",
+      "title": "Text"
+     },
+     "quote": {
+      "type": "string",
+      "title": "Quote"
+     },
+     "verified": {
+      "type": "boolean",
+      "title": "Verified"
+     },
+     "setting": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Setting"
+     },
+     "direction": {
+      "type": "string",
+      "title": "Direction"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "text",
+     "quote",
+     "verified",
+     "setting",
+     "direction"
+    ],
+    "title": "Finding"
+   },
+   "src__api__schemas__steps__Finding": {
+    "properties": {
+     "text": {
+      "type": "string",
+      "title": "Text"
+     },
+     "quote": {
+      "type": "string",
+      "title": "Quote"
+     },
+     "verified": {
+      "type": "boolean",
+      "title": "Verified"
+     }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+     "text",
+     "quote",
+     "verified"
+    ],
+    "title": "Finding"
    }
   }
  }

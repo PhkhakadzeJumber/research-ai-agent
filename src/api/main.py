@@ -24,6 +24,7 @@ from src.api.errors import REQUEST_ID_HEADER
 from src.api.auth import LoginLimiter, install_origin_check
 from src.api.routes import accounts, actions, candidates, health, investigations, papers, progress
 from src.api.routes import billing as billing_routes
+from src.api.routes import steps as step_routes
 from src.api import billing
 from src.api.runs import Runs
 from src.config import get_api_settings
@@ -61,7 +62,7 @@ def create_app(database: Database | None = None) -> FastAPI:
     app.state.login_limiter = LoginLimiter()
     app.include_router(health.router)
     v1 = APIRouter(prefix=API_PREFIX)
-    for module in (accounts, actions, investigations, progress, candidates, papers, billing_routes):
+    for module in (accounts, actions, investigations, progress, candidates, papers, billing_routes, step_routes):
         v1.include_router(module.router)
     v1.include_router(billing_routes.public)
     app.include_router(v1)

@@ -142,6 +142,15 @@ All routes are under `/api/v1`. They require authentication, except health check
 
 Every other route needs a login (`401 not_logged_in`). Someone else's investigation, idea or export is `404`, exactly like one that doesn't exist. The paper library is shared, but its counts and "used in" only ever show your own investigations. Runs started from the command line have no owner until `python -m scripts.users claim <email>`.
 
+### 3.5b Step pages ✅ (Figma pages 3–4; src/api/steps.py)
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/investigations/{id}/steps` ✅ | The stepper: every step of the mode (Mode 1: your idea, search, screening, reading, novelty, skeptic, value, verdict, package; Mode 2: field, landscape, problems, ideas, prescreen, light, full, ranking, package) with its state (done / running / waiting / paused / failed / upcoming), seconds and about how many credits |
+| GET | `/investigations/{id}/steps/{key}` ✅ | One step's page: `does` (fixed text), `did` (a paragraph written by code from the stored numbers), stats, its own log, its output, previous / next. Mode 2's finalists: `?candidate=<id>` with Mode 1's keys (search … verdict) |
+
+Read-only and free (no AI call). Outputs: `search` (each phrasing per source, found and new), `screening` (scores, kept and dropped with reasons), `reading` (papers with findings and verified quotes), `problems`, `ideas` / `prescreen` / `light` / `full` (idea rows), or `ref` for what an existing endpoint already shows (clarification, matrix, challenges, feasibility, verdict, landscape, ranking, package). Search, Screening and Reading count only the evaluation's first searches (the Skeptic's rounds belong to its step). A step's time is the time it worked (step_started → step_done, so waiting for the user doesn't count); its credits come from the AI calls made while it worked (by agent for runs without those events). Runs from before step 9c have no events: time "not recorded".
+
 ### 3.6 Plans and credits ✅ (step P2; docs/18)
 
 | Method | Route | Purpose |
