@@ -151,6 +151,13 @@ Every other route needs a login (`401 not_logged_in`). Someone else's investigat
 
 Read-only and free (no AI call). Outputs: `search` (each phrasing per source, found and new), `screening` (scores, kept and dropped with reasons), `reading` (papers with findings and verified quotes), `problems`, `ideas` / `prescreen` / `light` / `full` (idea rows), or `ref` for what an existing endpoint already shows (clarification, matrix, challenges, feasibility, verdict, landscape, ranking, package). Search, Screening and Reading count only the evaluation's first searches (the Skeptic's rounds belong to its step). A step's time is the time it worked (step_started → step_done, so waiting for the user doesn't count); its credits come from the AI calls made while it worked (by agent for runs without those events). Runs from before step 9c have no events: time "not recorded".
 
+**Replay (local only, `EUREKA_DEV_REPLAY=true`; set in `compose.yaml`, never in the cloud):** to watch the step pages move without paying for a run.
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/dev/replay` ✅ | `{enabled}`: whether replay is on (the Replay button shows only then) |
+| POST | `/dev/replay/{id}` ✅ | `202 {investigation_id}`: copies your finished run (`src/db/clone.py`), sets the copy back to where its pipeline started (after the clarification) and plays its stored events again (`src/api/replay.py`), each pause at most 3 s, moving the copy's stage and step as the real run did; runs without stored events follow a standard script of stages. No AI call, no credits. `404` when off or not yours, `409 not_finished` for a run that hasn't finished |
+
 ### 3.6 Plans and credits ✅ (step P2; docs/18)
 
 | Method | Route | Purpose |

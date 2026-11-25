@@ -267,6 +267,15 @@ export function useSteps(id: string, live: boolean) {
   });
 }
 
+/** Local only (EUREKA_DEV_REPLAY): whether a finished run can be replayed live, without AI calls. */
+export function useReplayEnabled() {
+  return useQuery({ queryKey: ["dev", "replay"], queryFn: () => api<Schemas["ReplayStatus"]>("/dev/replay"), staleTime: Infinity });
+}
+
+export function useStartReplay(id: string) {
+  return useMutation({ mutationFn: () => api<Schemas["ReplayStarted"]>(`/dev/replay/${id}`, { method: "POST" }) });
+}
+
 /** One step's page (a Mode 2 finalist's own steps: `candidate`); refreshed while it runs. */
 export function useStepPage(id: string, key: string, candidate: string | null, live: boolean) {
   return useQuery({

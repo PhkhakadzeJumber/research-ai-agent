@@ -30,14 +30,20 @@ export function landingStep(steps: Steps): string {
 
 /**
  * Auto-advance: the step on screen was running and has just finished while the run went on to another step: move
- * there (after the 5 s notice, unless the user chose to stay). Nothing to do when the run stopped, waits for the
- * user, or ended (a finished run stays on the page you're reading).
+ * there (after the 5 s notice, unless the user chose to stay). `following`: the page was reached by an automatic
+ * move, so it keeps following the run even if its step finished before the page saw it run (a quick step).
+ * Nothing to do when the run stopped, waits for the user, or ended (a finished run stays on the page you're reading).
  */
-export function advanceTarget(before: Steps | undefined, after: Steps, viewing: string): string | null {
+export function advanceTarget(before: Steps | undefined, after: Steps, viewing: string, following = false): string | null {
   const was = before?.steps.find((s) => s.key === viewing)?.state;
   const now = after.steps.find((s) => s.key === viewing)?.state;
-  if (was !== "running" || now !== "done" || !after.current || after.current === viewing) return null;
-  return after.current;
+  if (now !== "done" || !after.current || after.current === viewing || after.run === "idle") return null;
+  return was === "running" || following ? after.current : null;
+}
+
+/** Where an automatic move goes: the step, marked as followed (the next pages keep following the run). */
+export function followHref(investigationId: string, key: string): string {
+  return `${stepHref(investigationId, key)}?follow=1`;
 }
 
 /** The step's name for the notice: "✓ Search done · moving to Screening in 5 s". */

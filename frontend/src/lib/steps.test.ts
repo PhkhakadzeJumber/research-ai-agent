@@ -33,6 +33,12 @@ describe("moving on by itself", () => {
     expect(advanceTarget(searching, run(["done", "done"], null), "search")).toBeNull(); // the run ended or paused
     expect(advanceTarget(searching, run(["done", "paused"], "search"), "search")).toBeNull();
   });
+  it("keeps following the run after an automatic move, even past a step that was quicker than the page", () => {
+    const reading = run(["done", "done", "done", "running"], "reading");
+    expect(advanceTarget(undefined, reading, "screening")).toBeNull(); // opened by hand: stays
+    expect(advanceTarget(undefined, reading, "screening", true)).toBe("reading"); // moved here automatically: follows
+    expect(advanceTarget(undefined, run(Array(8).fill("done"), null), "screening", true)).toBeNull(); // the run ended
+  });
 });
 
 describe("small texts and links", () => {

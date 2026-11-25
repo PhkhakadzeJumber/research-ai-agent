@@ -17,10 +17,10 @@ import { useEffect, useRef, useState } from "react";
 import { ClarificationView } from "@/components/clarification";
 import { StepOutputView } from "@/components/step-outputs";
 import { Button, ButtonLink, Card, ErrorNote, MonoLabel, Pill, cx } from "@/components/ui";
-import { useIdea, useInvestigation, useResume, useStepPage, useSteps, useStop, type Investigation } from "@/lib/api/hooks";
+import { useIdea, useInvestigation, useReplayEnabled, useResume, useStartReplay, useStepPage, useSteps, useStop, type Investigation } from "@/lib/api/hooks";
 import { statusOf } from "@/lib/format";
 import { creditsText } from "@/lib/plan";
-import { FINALIST_STEPS, advanceTarget, noticeText, stepHref, type StepSummary, type Steps } from "@/lib/steps";
+import { FINALIST_STEPS, advanceTarget, followHref, noticeText, stepHref, type StepSummary, type Steps } from "@/lib/steps";
 
 const ADVANCE_SECONDS = 5;
 
@@ -52,7 +52,8 @@ function StepLayout({ investigation, steps, viewing, candidate, page }: {
   const current = steps.steps.find((s) => s.key === (candidate ? "full" : viewing));
   const waiting = !candidate && (viewing === "idea" || viewing === "field") && investigation.waiting_for === "clarification";
   const [status, tone] = statusOf(investigation);
-  const notice = useAutoAdvance(investigation.id, steps, viewing, Boolean(candidate));
+  const following = useSearchParams().get("follow") === "1";
+  const notice = useAutoAdvance(investigation.id, steps, viewing, Boolean(candidate), following);
 
   return (
     <div className="flex flex-col gap-6">
@@ -208,7 +209,8 @@ function RunControls({ investigation }: { investigation: Investigation }) {
     return <Button kind="secondary" disabled={investigation.run === "stopping" || stop.isPending} onClick={() => stop.mutate()}>{investigation.run === "stopping" ? "Stopping…" : "Stop"}</Button>;
   }
   const finished = ["results_ready", "writing_proposal"].includes(investigation.stage);
-  if (finished || investigation.waiting_for || investigation.status === "failed") return null;
+  if (finished) return <ReplayButton investigationId={investigation.id} />;
+  if (investigation.waiting_for || investigation.status === "failed") return null;
   return (
     <span className="flex flex-col items-end gap-1">
       <Button disabled={resume.isPending} onClick={() => resume.mutate(undefined)}>{resume.isPending ? "Resuming…" : "Resume"}</Button>
@@ -218,28 +220,46 @@ function RunControls({ investigation }: { investigation: Investigation }) {
 }
 
 /** When the step on screen finishes and the run moves on: count 5 s, then open the step that's working now. */
-function useAutoAdvance(investigationId: string, steps: Steps, viewing: string, finalist: boolean) {
+function useAutoAdvance(investigationId: string, steps: Steps, viewing: string, finalist: boolean, following: boolean) {
   const router = useRouter();
   const before = useRef<Steps | undefined>(undefined);
   const [advance, setAdvance] = useState<{ to: string; text: string; left: number } | null>(null);
 
   useEffect(() => {
-    const to = finalist ? null : advanceTarget(before.current, steps, viewing);
+    const to = finalist ? null : advanceTarget(before.current, steps, viewing, following);
     before.current = steps;
     if (!to) return;
-    const start = setTimeout(() => setAdvance({ to, text: noticeText(steps, viewing, to, ADVANCE_SECONDS), left: ADVANCE_SECONDS }), 0);
+    const start = setTimeout(() => setAdvance((a) => a ?? { to, text: noticeText(steps, viewing, to, ADVANCE_SECONDS), left: ADVANCE_SECONDS }), 0);
     return () => clearTimeout(start);
-  }, [steps, viewing, finalist]);
+  }, [steps, viewing, finalist, following]);
 
   useEffect(() => {
     if (!advance) return;
     if (advance.left <= 0) {
-      router.push(stepHref(investigationId, advance.to));
+      router.push(followHref(investigationId, advance.to));
       return;
     }
     const tick = setTimeout(() => setAdvance((a) => (a ? { ...a, left: a.left - 1, text: a.text.replace(/in \d+ s$/, `in ${a.left - 1} s`) } : a)), 1000);
     return () => clearTimeout(tick);
   }, [advance, investigationId, router]);
 
-  return advance ? { text: advance.text, stay: () => setAdvance(null) } : null;
+  // staying ends the following: this page no longer moves by itself
+  return advance ? { text: advance.text, stay: () => { setAdvance(null); router.replace(stepHref(investigationId, viewing)); } } : null;
+}
+
+/** Local only: play this finished run again, live, as a copy (no AI call, nothing charged; src/api/replay.py). */
+function ReplayButton({ investigationId }: { investigationId: string }) {
+  const enabled = useReplayEnabled();
+  const start = useStartReplay(investigationId);
+  const router = useRouter();
+  if (!enabled.data?.enabled) return null;
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <Button kind="secondary" disabled={start.isPending}
+        onClick={() => start.mutate(undefined, { onSuccess: (r) => router.push(`/investigations/${r.investigation_id}`) })}>
+        {start.isPending ? "Starting…" : "Replay this run"}
+      </Button>
+      <ErrorNote error={start.error} />
+    </span>
+  );
 }

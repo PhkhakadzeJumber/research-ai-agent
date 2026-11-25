@@ -799,6 +799,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dev/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Replay Status */
+        get: operations["replay_status_api_v1_dev_replay_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dev/replay/{investigation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay
+         * @description Copies the finished run and plays it again, live: no AI call, nothing charged.
+         */
+        post: operations["replay_api_v1_dev_replay__investigation_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plans": {
         parameters: {
             query?: never;
@@ -2141,6 +2178,19 @@ export interface components {
             view: "clarification" | "matrix" | "challenges" | "feasibility" | "verdict" | "package" | "landscape" | "ranking";
             /** Candidate Id */
             candidate_id: string | null;
+        };
+        /** ReplayStarted */
+        ReplayStarted: {
+            /**
+             * Investigation Id
+             * Format: uuid
+             */
+            investigation_id: string;
+        };
+        /** ReplayStatus */
+        ReplayStatus: {
+            /** Enabled */
+            enabled: boolean;
         };
         /**
          * ResearchLimits
@@ -4551,6 +4601,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StepPage"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replay_status_api_v1_dev_replay_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplayStatus"];
+                };
+            };
+        };
+    };
+    replay_api_v1_dev_replay__investigation_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                investigation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplayStarted"];
                 };
             };
             /** @description Not found */

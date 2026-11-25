@@ -44,6 +44,8 @@ services:
       # inside Docker the database is the `db` service on its own port (these override .env's local values)
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
+      # local only: replay a finished run live, without AI calls (src/api/replay.py); never set in the cloud
+      EUREKA_DEV_REPLAY: "true"
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

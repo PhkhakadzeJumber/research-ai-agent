@@ -123,7 +123,8 @@ Exports include the coverage report and the "not a guarantee of originality" not
 
 - **Header:** title, status, credits, Stop / Resume. **Stepper:** every step of the mode; finished and current steps open; the one on screen is underlined.
 - **Main:** "What this step does" (fixed), "What Eureka did" (a paragraph written by code from the run's numbers), and the step's output (`components/step-outputs.tsx`): the searches (one row per phrasing, found / new per source), screening scores with kept and dropped papers and reasons, papers read with verified quotes, open problems, idea lists; the novelty table, Skeptic log, feasibility and verdicts are the idea page's own components. **Side:** the step's numbers (state, time, credits) and its own log. **Bottom:** Previous / Next.
-- **Live:** while a run works the page refreshes every 3 s; when the step on screen finishes and the run moves on, a notice ("✓ Search done · moving to Screening in 5 s · Stay here") opens the next step unless the user stays (`lib/steps.ts` `advanceTarget`).
+- **Live:** while a run works the page refreshes every 3 s; when the step on screen finishes and the run moves on, a notice ("✓ Search done · moving to Screening in 5 s · Stay here") opens the next step unless the user stays (`lib/steps.ts` `advanceTarget`). A page reached by such a move (`?follow=1`) keeps following the run, even past a step quicker than the 3 s refresh; "Stay here" ends the following.
+- **Replay (local only):** on a finished run, when the API has replay on (doc 11 §3.5b), a Replay button starts a copy of the run playing live without AI calls, to see the stepper, logs and notices move.
 - **Mode 2 step 7:** each finalist's own steps at `?candidate=<id>` (Search … Verdict), with their own small stepper.
 - The clarification is step 1 (Your idea / Your field), shown inside the step page while it waits.
 
