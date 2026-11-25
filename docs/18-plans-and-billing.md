@@ -47,6 +47,8 @@ Why these choices:
   (a crash, a provider outage), everything is refunded. Resuming a paused run reserves the remaining price again.
 - **Per-run safety cap.** A run's AI budget is 1.5× its price in dollars (an evaluation: $1.50), so an unusual run can
   overrun its price a little (we absorb it) but never by much. This replaces the dollar budget users set today.
+  The factor is `EUREKA_RUN_CAP_FACTOR`; the live site runs with **2.5** (an evaluation: $2.50), so a run on the launch
+  mix isn't paused by the cap while its prices are still estimates.
 - **Not enough credits.** The start button says so and offers a top-up or the yearly plan. Nothing starts half-funded.
 
 ## 3. Protecting the free plan

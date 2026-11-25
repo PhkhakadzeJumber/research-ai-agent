@@ -16,7 +16,7 @@ What makes Eureka more than "an LLM with a research theme":
 - **Honest uncertainty.** Verdicts are categories decided by written rules, and every verdict comes with a coverage report (what was searched, what wasn't). Eureka never claims an idea is guaranteed to be original.
 - **Personalized feasibility.** Complexity level and user constraints shape both idea generation and evaluation.
 
-> **Status:** design phase. These documents are the plan, written to read, discuss and refine before building. Eureka is a one-person project. No implementation code exists yet.
+> **Status:** built, tested and deployed (live at https://research-ai-agent-blush.vercel.app). Both modes run end to end on the website and from the command line. The documents below began as the design written before building; each one now records what was built ("as built" notes and boxes) and marks what is still a plan. Eureka is a one-person project.
 
 ---
 

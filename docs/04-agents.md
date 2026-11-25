@@ -1,5 +1,12 @@
 # 04: Agents
 
+> **As built (2026-11-25).** All the agents below exist in `src/ai/agents/` (the Value & Feasibility Evaluator as two:
+> `quick_feasibility` and `value_feasibility`). Models: the specs say Opus for every role, which is what the system was
+> built and measured on; since 2026-11-22 the launch mix is **Haiku 5.5** for the Paper Reader, relevance screening and
+> opportunity mining and **Sonnet 5.5** for every other role, set per role in `.env` (doc 08 §2, doc 18 §5). Tools that
+> depend on sources not built yet (Semantic Scholar recommendations and snowballing, signal sources) are not available
+> to the agents.
+
 This document specifies every LLM component (A1–A7) and the code components they depend on. Each spec covers:
 
 - **Purpose**

@@ -1,5 +1,10 @@
 # 13: Evaluation and Testing
 
+> **As built (2026-11-25).** The **testing** half is built: about 1,100 backend tests (recorded fixtures, a fake model,
+> a real test database), frontend unit tests, Playwright browser tests on desktop and phone sizes, and CI on every push
+> (doc 14 §7). The **evaluation** half (the hand-labelled case set, the baseline comparisons and their metrics) is still a
+> plan: there is no `eval/` folder yet. Quality so far was checked on live runs, recorded in the build notes of each step.
+
 We must *show* that Eureka is more useful than simpler approaches, and report honestly where it isn't. This document covers the **evaluation** (does it work better?) and the **testing** (does it work correctly?).
 
 ## 1. Systems compared

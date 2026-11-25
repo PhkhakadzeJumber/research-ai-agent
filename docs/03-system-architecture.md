@@ -1,5 +1,12 @@
 # 03: System Architecture
 
+> **As built (2026-11-25).** The architecture below is what was built: one pipeline with two entry points, LLMs for
+> judgment and code for everything that must be reliable, the layers `api → ai → retrieval/db → config/llm`. Not built
+> yet from this design: the search sources other than **arXiv and OpenAlex** (Semantic Scholar, Crossref, PubMed), the
+> **Signal service** (GitHub, Hugging Face, Hacker News, RSS), citation snowballing, the full-text fetcher and chunking.
+> Embeddings exist (Vertex AI + pgvector) but only the command-line search uses them (doc 06, as built). Deployed on
+> Cloud Run + Vercel + Neon (doc 14 §0).
+
 ## 1. Architectural principles
 
 1. **One pipeline, two entry points.** Mode 1 and Mode 2 differ only in how candidates are created. Evaluation is shared.

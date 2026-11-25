@@ -1,5 +1,16 @@
 # 06: Retrieval and RAG
 
+> **As built (2026-11-25): retrieval per investigation, over abstracts.** Each run searches **arXiv and OpenAlex** live
+> (many phrasings per idea, the API cache in §5), merges duplicates (§2, as built), and the small screening model scores
+> **every** found paper from its title and abstract (§2, screening as built). The Paper Reader reads the chosen papers'
+> abstracts; every quote is checked word for word by code. **Not built yet:** Semantic Scholar (and with it snowballing
+> and recommendations), Crossref, the signal sources, and **full text**: fetching open-access PDFs, chunking and passage
+> retrieval (the `chunks` table exists and the Reader uses chunks when a paper has them; only a user's uploaded document
+> is split into sections today). **Embeddings** (Vertex AI `gemini-embedding-001` + pgvector, §2.4) are built and tested
+> but used only by `scripts.search --rank`: the rank-then-screen plan of §2.2 was replaced by screening every paper once
+> that cost about 5 cents on the small model, because ranking first could drop the very paper that disproves an idea.
+> They are kept for full-text passage retrieval, the next step.
+
 RAG in Eureka has one job: **retrieve the evidence that a specific claim depends on**. That means the papers and passages that support or contradict it, not general background. This document covers both evidence retrieval (academic sources) and signal retrieval (discovery sources).
 
 ## 1. Academic sources (evidence, tiers 1–2)

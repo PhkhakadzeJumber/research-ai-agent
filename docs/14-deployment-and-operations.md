@@ -2,7 +2,10 @@
 
 ## 0. As deployed (step E, 2026-11-24)
 
-The live site differs from the plan below in two places: the frontend is on **Vercel** (free, made for Next.js) and the database is **Neon** (Postgres 17 + pgvector, free tier) instead of Cloud SQL.
+The live site differs from the plan below in two places: the frontend is on **Vercel** (free, made for Next.js) and the database is **Neon** (Postgres 17 + pgvector, free tier) instead of Cloud SQL. Also as deployed: Cloud Run runs the backend only, with min 0 / max 1 instances (runs execute
+inside the API process, so one instance keeps them in one place until a job queue exists); a run's cost cap is 2.5× its
+price (`EUREKA_RUN_CAP_FACTOR=2.5`, default 1.5, doc 18 §2); the sources are arXiv and OpenAlex (no Semantic Scholar or
+GitHub keys); Vertex AI embeddings are not used by the runs (doc 06, as built).
 
 | Part | Where | Settings |
 |---|---|---|
@@ -20,7 +23,7 @@ Redeploy the API: `gcloud run deploy eureka-api --source . --region europe-west3
 |---|---|---|---|---|
 | **Local** | Developer machines | PostgreSQL + pgvector in Docker | Anthropic API (dev key, low cost cap) | Development |
 | **Test (CI)** | GitHub Actions | Ephemeral Postgres service container | **Recorded responses** (no live calls) | Unit, contract and integration tests |
-| **Demo / production** | Google Cloud | Cloud SQL (PostgreSQL + pgvector) | Anthropic API (prod key) or Claude on Vertex AI | Course demo and real use |
+| **Demo / production** | Cloud Run (backend) + Vercel (frontend) | Neon (PostgreSQL 17 + pgvector); the plan was Cloud SQL | Anthropic API (prod key) | Course demo and real use |
 
 ## 2. Google Cloud architecture
 
@@ -46,7 +49,7 @@ Cloud SQL   Secret Manager  Vertex AI            Anthropic API     External APIs
 | Service | Use | Why |
 |---|---|---|
 | **Cloud Run** | Backend and frontend containers | Serverless, scales to zero outside demos; matches the course's deploy experience |
-| **Cloud SQL for PostgreSQL** | Main database with pgvector | Managed Postgres; pgvector supported |
+| **Cloud SQL for PostgreSQL** (as deployed: **Neon** instead) | Main database with pgvector | Managed Postgres; pgvector supported. Neon was chosen at deployment: a free tier, same Postgres 17 + pgvector, Frankfurt |
 | **Secret Manager** | Anthropic, Semantic Scholar, GitHub keys | Secrets never live in code or images; mounted as environment variables |
 | **Vertex AI** | Text embeddings (and optionally Claude through Vertex) | A meaningful Vertex AI use without Gemini |
 | **Cloud Logging / Monitoring** | Structured logs, dashboards, alerts | Built in |
@@ -103,7 +106,7 @@ Also set an **Anthropic Console spend limit** for the workspace as a hard backst
 - An Anthropic workspace spend limit (Console).
 - Caching (API cache, paper-analysis cache, prompt caching).
 - Effort per role; an optional cheaper model for high-volume roles (doc 08).
-- Cloud Run scales to zero outside demo periods; Cloud SQL uses the smallest tier that works.
+- Cloud Run scales to zero outside demo periods; the database (Neon) is on its free tier.
 
 ## 7. Continuous integration
 
