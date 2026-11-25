@@ -20,8 +20,8 @@ export function BillingScreen() {
   if (billing.error) return <ErrorNote error={billing.error} />;
   const b = billing.data;
   return (
-    <div className="grid items-start gap-6 lg:grid-cols-[420px_1fr]">
-      <div className="flex flex-col gap-6">
+    <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[420px_minmax(0,1fr)]">
+      <div className="flex min-w-0 flex-col gap-6">
         <PlanCard billing={b} />
         {b.plan === "pro" ? <CreditsCard billing={b} /> : null}
       </div>
@@ -104,7 +104,7 @@ function CreditsCard({ billing: b }: { billing: Billing }) {
 
 function History({ billing: b }: { billing: Billing }) {
   return (
-    <Card className="flex flex-col gap-1 p-7">
+    <Card className="flex min-w-0 flex-col gap-1 p-5 sm:p-7">
       <h2 className="heading-m pb-3">Credit history</h2>
       {b.history.length === 0 ? <p className="body-s text-ink-3">Nothing yet.</p> : null}
       <ul className="flex flex-col">
