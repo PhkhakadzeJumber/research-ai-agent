@@ -172,9 +172,9 @@ export function Stepper({ steps, viewing, investigationId }: { steps: StepSummar
         const [mark, ring] = MARK[s.state];
         const open = s.state !== "upcoming" || s.optional;
         const body = (
-          <span className={cx("flex items-center gap-1.5 rounded-pill px-2 py-1.5", s.state === "running" && "bg-accent-soft", s.key === viewing && "underline decoration-2 underline-offset-[6px]")}>
+          <span className={cx("flex items-center gap-1.5 rounded-pill px-2 py-1.5", s.state === "running" && "bg-accent-soft")}>
             <span className={cx("grid size-[24px] place-items-center rounded-full border text-[12px]", ring)}>{mark || s.number}</span>
-            <span className={cx("label-s", s.state === "upcoming" ? "text-ink-3" : "text-ink", s.key === viewing && "font-semibold")}>{s.label}</span>
+            <span className={cx("label-s", s.state === "upcoming" ? "text-ink-3" : "text-ink", s.key === viewing && "font-semibold underline decoration-accent decoration-[1.5px] underline-offset-[5px]")}>{s.label}</span>
           </span>
         );
         return (
