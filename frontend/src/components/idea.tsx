@@ -4,7 +4,8 @@
  * The four verdicts (each with the rule that decided it), then tabs: Overview, Prior work (how the closest papers
  * overlap each part of the idea), Evidence (claims and their verified quotes), Skeptic log, Feasibility, Coverage.
  * Papers link to the library; their titles come from the database. Verdicts of an evaluation that hasn't concluded
- * are marked preliminary. Used on /ideas/[id] and as the result of a Mode 1 investigation.
+ * are marked preliminary. Used on /ideas/[id]; its parts (verdicts, prior work, Skeptic log, feasibility) are also
+ * the Novelty, Skeptic, Value & feasibility and Verdict step pages.
  */
 "use client";
 
@@ -90,21 +91,7 @@ export function IdeaDetail({ ideaId, investigation }: { ideaId: string; investig
         {data.change_note ? <p className="body-s text-ink-2"><span className="font-medium">Refined:</span> {data.change_note}</p> : null}
       </header>
 
-      {data.verdicts.length ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {data.verdicts.map((v) => (
-            <Card key={v.dimension} className="flex flex-col gap-2 p-5">
-              <div className="flex justify-between">
-                <MonoLabel>{DIMENSION_LABELS[v.dimension] ?? v.dimension}</MonoLabel>
-                <span className="font-mono text-[11px] text-ink-3" title={v.rules_version}>rule {v.rule}</span>
-              </div>
-              <span aria-hidden className={cx("h-[3px] w-8", { green: "bg-green", amber: "bg-amber", red: "bg-red", indigo: "bg-indigo" }[verdictTone(v.category) as string] ?? "bg-ink-3")} />
-              <span className="font-serif text-[28px] leading-tight">{v.label}</span>
-              <span className="body-s line-clamp-4 text-ink-3" title={v.trace[0] ? traceText(v.trace[0]) : undefined}>{v.trace[0] ? traceText(v.trace[0]) : ""}</span>
-            </Card>
-          ))}
-        </div>
-      ) : <Card><p className="body-m text-ink-2">No verdicts yet: the evaluation hasn&apos;t reached them.</p></Card>}
+      <VerdictCards idea={data} />
 
       <nav role="tablist" className="flex gap-6 overflow-x-auto border-b border-line">
         {TABS.map((t) => (
@@ -133,6 +120,26 @@ export function IdeaDetail({ ideaId, investigation }: { ideaId: string; investig
   );
 }
 
+/** The four verdicts, each with the rule that decided it (also the Verdict step's page). */
+export function VerdictCards({ idea }: { idea: CandidateDetail }) {
+  if (!idea.verdicts.length) return <Card><p className="body-m text-ink-2">No verdicts yet: the evaluation hasn&apos;t reached them.</p></Card>;
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {idea.verdicts.map((v) => (
+        <Card key={v.dimension} className="flex flex-col gap-2 p-5">
+          <div className="flex justify-between">
+            <MonoLabel>{DIMENSION_LABELS[v.dimension] ?? v.dimension}</MonoLabel>
+            <span className="font-mono text-[11px] text-ink-3" title={v.rules_version}>rule {v.rule}</span>
+          </div>
+          <span aria-hidden className={cx("h-[3px] w-8", { green: "bg-green", amber: "bg-amber", red: "bg-red", indigo: "bg-indigo" }[verdictTone(v.category) as string] ?? "bg-ink-3")} />
+          <span className="font-serif text-[28px] leading-tight">{v.label}</span>
+          <span className="body-s line-clamp-4 text-ink-3" title={v.trace[0] ? traceText(v.trace[0]) : undefined}>{v.trace[0] ? traceText(v.trace[0]) : ""}</span>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <Card className="flex flex-col gap-4 p-6">
@@ -152,7 +159,7 @@ export function PaperLink({ paper }: { paper: PaperRef }) {
   );
 }
 
-function Overview({ idea }: { idea: CandidateDetail }) {
+export function Overview({ idea }: { idea: CandidateDetail }) {
   const recommendation = idea.verdicts.find((v) => v.dimension === "recommendation");
   return (
     <>
@@ -200,7 +207,7 @@ function ClosestWorks({ idea }: { idea: CandidateDetail }) {
   );
 }
 
-function PriorWork({ idea }: { idea: CandidateDetail }) {
+export function PriorWork({ idea }: { idea: CandidateDetail }) {
   const matrix = useIdeaPart<Matrix>(idea.id, "matrix", true);
   if (matrix.isPending) return <p className="body-s text-ink-3">Loading…</p>;
   if (matrix.error) return <ErrorNote error={matrix.error} />;
@@ -282,7 +289,7 @@ function Evidence({ ideaId }: { ideaId: string }) {
   );
 }
 
-function Skeptic({ log }: { log: SkepticLog | undefined }) {
+export function Skeptic({ log }: { log: SkepticLog | undefined }) {
   if (!log) return <p className="body-s text-ink-3">Loading…</p>;
   if (!log.rounds.length) return <Card><p className="body-m text-ink-2">No Skeptic rounds in this evaluation.</p></Card>;
   return (
@@ -307,7 +314,7 @@ function Skeptic({ log }: { log: SkepticLog | undefined }) {
   );
 }
 
-function Feasibility({ idea }: { idea: CandidateDetail }) {
+export function Feasibility({ idea }: { idea: CandidateDetail }) {
   const f = idea.feasibility;
   if (!f) return <Card><p className="body-m text-ink-2">Feasibility wasn&apos;t assessed in this evaluation.</p></Card>;
   const lists: [string, string[]][] = [["Skill gaps", f.skill_gaps], ["Risks", f.risks], ["Ethics", f.ethics], ["Simplifications", f.simplifications], ["Who benefits", f.beneficiaries]];

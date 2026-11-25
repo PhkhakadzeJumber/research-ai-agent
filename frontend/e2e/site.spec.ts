@@ -180,3 +180,26 @@ test("the ambition choice stays inside its outline, whichever is chosen", async 
     expect(pill.y + pill.height).toBeLessThanOrEqual(outline.y + outline.height + 0.5); // one row
   }
 });
+
+// a run shown one step per page (Figma pages 3 and 4), on the account that holds finished runs (global-setup.ts)
+test.describe("step pages", () => {
+  test.use({ storageState: "e2e/.auth-runs.json" });
+
+  test("a run opens on its last step, and every finished step opens its own page", async ({ page }) => {
+  await page.goto("/investigations");
+  const rows = page.locator('a[href^="/investigations/"]');
+  await expect(rows.or(page.getByText("Nothing here yet")).first()).toBeVisible(); // the list has loaded
+  const first = rows.filter({ hasText: /Results ready/ }).first();
+  test.skip((await first.count()) === 0, "e2e-runs@eureka.test has no finished run: copy one with scripts.clone_run");
+  await first.click();
+  await expect(page).toHaveURL(/\/step\/(verdict|ranking)$/);
+  const steps = page.getByRole("navigation", { name: "Run steps" });
+  await expect(steps).toBeVisible();
+  await steps.getByRole("link").nth(1).click(); // step 2: Search or Landscape
+  await expect(page).toHaveURL(/\/step\/(search|landscape)$/);
+  await expect(page.getByText(/what this step does/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What Eureka did" })).toBeVisible();
+  await page.getByRole("navigation", { name: "Steps" }).getByRole("link").last().click(); // Next
+  await expect(page).toHaveURL(/\/step\/(screening|problems)$/);
+});
+});

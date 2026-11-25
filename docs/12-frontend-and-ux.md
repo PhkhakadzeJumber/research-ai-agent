@@ -117,6 +117,16 @@ A side panel in the workspace for questions about the investigation. Answers car
 
 Exports include the coverage report and the "not a guarantee of originality" note.
 
+### 3.4b A run, one step per page ✅ (Figma pages 3–4; replaces the one-page progress view of §3.4)
+
+`/investigations/{id}` opens the step working or waiting for the user, else the last finished one (Verdict in Mode 1, Ranking in Mode 2). Each step is `/investigations/{id}/step/{key}` (`components/steps.tsx`, data from §3.5b of doc 11):
+
+- **Header:** title, status, credits, Stop / Resume. **Stepper:** every step of the mode; finished and current steps open; the one on screen is underlined.
+- **Main:** "What this step does" (fixed), "What Eureka did" (a paragraph written by code from the run's numbers), and the step's output (`components/step-outputs.tsx`): the searches (one row per phrasing, found / new per source), screening scores with kept and dropped papers and reasons, papers read with verified quotes, open problems, idea lists; the novelty table, Skeptic log, feasibility and verdicts are the idea page's own components. **Side:** the step's numbers (state, time, credits) and its own log. **Bottom:** Previous / Next.
+- **Live:** while a run works the page refreshes every 3 s; when the step on screen finishes and the run moves on, a notice ("✓ Search done · moving to Screening in 5 s · Stay here") opens the next step unless the user stays (`lib/steps.ts` `advanceTarget`).
+- **Mode 2 step 7:** each finalist's own steps at `?candidate=<id>` (Search … Verdict), with their own small stepper.
+- The clarification is step 1 (Your idea / Your field), shown inside the step page while it waits.
+
 ### 3.10c Legal pages and footer ✅ step D
 
 Figma 20: `/terms`, `/privacy`, `/refunds` (public, one layout with a side menu; the text in `components/legal.tsx` states what the site actually does: private uploads sent to the AI provider only with consent, only the card's brand, last four and expiry kept, the credit and refund rules of doc 18). A footer on every page links Pricing and the three.

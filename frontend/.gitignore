@@ -43,5 +43,6 @@ next-env.d.ts
 
 # browser tests (Playwright)
 /e2e/.auth.json
+/e2e/.auth-runs.json
 /test-results/
 /playwright-report/

@@ -256,6 +256,26 @@ export function useLandscape(id: string, enabled: boolean) {
   return useQuery({ queryKey: ["investigation", id, "landscape"], queryFn: () => api<Landscape>(`/investigations/${id}/landscape`), enabled });
 }
 
+// --- the step pages (Figma pages 3 and 4) ------------------------------------------------------------------------
+
+/** The stepper; refreshed every 3 s while a run works, so a step finishing shows (and auto-advance can follow). */
+export function useSteps(id: string, live: boolean) {
+  return useQuery({
+    queryKey: ["investigation", id, "steps"],
+    queryFn: () => api<Schemas["Steps"]>(`/investigations/${id}/steps`),
+    refetchInterval: live ? 3_000 : false,
+  });
+}
+
+/** One step's page (a Mode 2 finalist's own steps: `candidate`); refreshed while it runs. */
+export function useStepPage(id: string, key: string, candidate: string | null, live: boolean) {
+  return useQuery({
+    queryKey: ["investigation", id, "step", key, candidate],
+    queryFn: () => api<Schemas["StepPage"]>(`/investigations/${id}/steps/${key}${candidate ? `?candidate=${candidate}` : ""}`),
+    refetchInterval: live ? 3_000 : false,
+  });
+}
+
 export function useInvestigations(status: string | null) {
   return useQuery({
     queryKey: ["investigations", status],
@@ -270,7 +290,7 @@ export const ideaKeys = {
 };
 
 export function useIdea(id: string) {
-  return useQuery({ queryKey: ideaKeys.detail(id), queryFn: () => api<CandidateDetail>(`/candidates/${id}`) });
+  return useQuery({ queryKey: ideaKeys.detail(id), queryFn: () => api<CandidateDetail>(`/candidates/${id}`), enabled: Boolean(id) });
 }
 
 export function useIdeaPart<T>(id: string, part: "matrix" | "claims" | "challenges", enabled: boolean) {

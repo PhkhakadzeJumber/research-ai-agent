@@ -3,9 +3,8 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { changedFacets } from "@/components/clarification";
-import { headline } from "@/components/progress";
 import { checkFile, parseSeeds, typedConstraints } from "@/components/start";
-import type { Progress, ProgressEvent } from "@/lib/api/hooks";
+import type { ProgressEvent } from "@/lib/api/hooks";
 import { mergeEvents, useLiveEvents } from "@/lib/live";
 
 const event = (seq: number, kind = "step_done", message = `event ${seq}`): ProgressEvent => ({
@@ -41,16 +40,6 @@ describe("the clarification", () => {
     const facets = [{ position: 0, text: "problem" }, { position: 1, text: "method" }];
     expect(changedFacets(facets, { 0: "problem", 1: " RAG with BM25 " })).toEqual({ "1": "RAG with BM25" });
     expect(changedFacets(facets, { 1: "   " })).toEqual({});
-  });
-});
-
-describe("the progress headline", () => {
-  const rail = (key: string, status: string) =>
-    ({ rail: [{ key: "searching", label: "Searching", status: "done" }, { key, label: "Skeptic rounds", status }] }) as unknown as Progress;
-  it("follows the stage, a pause or a failure", () => {
-    expect(headline(rail("skeptic", "active"))).toEqual(["The ", "Skeptic is on it."]);
-    expect(headline(rail("skeptic", "paused"))).toEqual(["Paused at ", "skeptic rounds."]);
-    expect(headline(rail("skeptic", "failed"))).toEqual(["This run ", "stopped."]);
   });
 });
 

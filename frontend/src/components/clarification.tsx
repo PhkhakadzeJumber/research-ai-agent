@@ -56,9 +56,6 @@ function ClarificationForm({ investigation, reading }: { investigation: Investig
   return (
     <div className="flex flex-col gap-8">
       <header className="flex flex-col gap-2.5">
-        <MonoLabel>
-          Investigations / {discover ? "Find me an idea" : "Evaluate my idea"} / <span className="text-ink">Step 1 of 3 · Confirm</span>
-        </MonoLabel>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="flex flex-col gap-2.5">
             <h1 className="display-l">
